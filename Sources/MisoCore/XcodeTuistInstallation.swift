@@ -147,7 +147,7 @@ public enum XcodeTuistInstallation {
         ).path)
       guard ["/" + tool + "/tuist", executable + "/tuist"].contains(probes["executable"] ?? ""),
         miseTarget.hasPrefix("/opt/homebrew/Cellar/mise/"), miseTarget.hasSuffix("/bin/mise"),
-        shimTarget == miseTarget,
+        ["/opt/homebrew/bin/mise", miseTarget].contains(shimTarget),
         try FileMetadata.inspect(guest.data.path(String(miseTarget.dropFirst()))).st_mode & S_IFMT
           == S_IFREG
       else { throw MisoError.invalid("Mise cannot resolve the pinned Tuist executable") }
