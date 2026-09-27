@@ -5,7 +5,25 @@ import MisoCore
 struct Base: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     abstract: "Prepare target-compatible Base inputs without starting a VM.",
-    subcommands: [Defaults.self, Resolve.self, Archive.self, Static.self])
+    subcommands: [Defaults.self, Resolve.self, Archive.self, Static.self, Bootstrap.self])
+
+  struct Bootstrap: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract:
+        "Install archived Homebrew inputs and verify restricted target execution on a clone.")
+    @Option var source: String
+    @Option var archive: String
+    @Option var output: String
+    @Option var username = "admin"
+    func run() throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        BaseBootstrap.run(
+          source: fileURL(source), archive: fileURL(archive), output: fileURL(output),
+          username: username, cancellation: cancellation.token))
+    }
+  }
 
   struct Static: ParsableCommand {
     static let configuration = CommandConfiguration(

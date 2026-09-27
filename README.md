@@ -9,13 +9,14 @@ compression and encrypted archives use macOS libraries directly; HTTPS uses
 URLSession. System image attachment and APFS administration currently use
 `hdiutil`, `diskutil` and Apple's APFS checker at fixed system paths. Restore APFS
 tools come from the verified IPSW and require valid Apple signatures. CLT staging
-uses Apple's `pkgutil`, `lsbom`, `ditto` and `makewhatis`; package scripts are never
-executed. This is not a fully static binary.
+uses Apple's `pkgutil`, `lsbom`, `ditto` and `makewhatis`; CLT package scripts are not
+executed. Base provisioning uses the target's package-manager runtime, not a host
+Homebrew installation. This is not a fully static binary.
 
 This is an in-progress native migration. The commands below work without starting
 a virtual machine. The experimental `restore` command connects the native vanilla
 stages, with single-command offline acceptance on macOS 26.6.2. Base currently
-exposes input preparation and its static layer, not a complete build. Upgrade
+exposes input preparation, its static layer and experimental bootstrap, not a complete build. Upgrade
 execution is not yet exposed. A recognized profile is not a claim of
 native end-to-end validation. Write stages fail closed on unvalidated host ABIs.
 
@@ -73,6 +74,13 @@ bundle, writes the static user/service payloads, and verifies them after read-on
 reattachment. Its output remains explicitly incomplete Base, without runtime
 acceptance. All construction must use a local APFS workspace; slow external
 volumes are suitable for input archives, not working images.
+
+`base bootstrap --source bundle --archive archived-inputs --output new-stage`
+installs the archive's `homebrew-sources` resource on a clone. It requires root and
+includes bounded guest execution controls and detached payload verification.
+The temporary execution view is not part of the exported bundle. This experimental
+stage is not yet image-accepted and does not install the complete Base package set.
+Use only trusted package inputs; a chroot is not a virtual-machine security boundary.
 
 Configuration defaults use `admin/admin`, disable FileVault, and request SSH/VNC.
 They are intended for isolated test systems; change credentials before exposing a

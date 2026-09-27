@@ -130,7 +130,7 @@ static void check_mount(const char *root, const char *suffix, bool readonly, con
     }
     struct statfs info;
     if (statfs(path, &info)) fail("inspect mount");
-    if (strcmp(info.f_mntonname, path) || strcmp(info.f_fstypename, type) ||
+    if (strcmp(info.f_mntonname, path) || (type && strcmp(info.f_fstypename, type)) ||
         !(info.f_flags & MNT_NOSUID) || ((info.f_flags & MNT_RDONLY) != 0) != readonly) {
         errno = EPERM;
         fail("mount access mismatch");
@@ -157,6 +157,7 @@ _Noreturn void miso_guest_exec(const char *root, uint32_t uid, uint32_t gid,
     }
     check_mount(root, "/System/Volumes/Data", false, "apfs");
     check_mount(root, "/System/Volumes/Preboot", true, "apfs");
+    check_mount(root, "/System/Volumes/Preboot/Cryptexes/OS", true, NULL);
     check_mount(root, "/dev", false, "devfs");
     struct rlimit cores = {0, 0};
     if (setrlimit(RLIMIT_CORE, &cores)) fail("disable core dumps");
