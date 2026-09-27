@@ -119,8 +119,8 @@ public enum BaseBootstrap {
           "Users/\(username)/Library/Caches/Homebrew",
           "Users/\(username)/Library/Caches/Homebrew/Logs",
         ] {
-          let path = try data.path(relative, createParents: true)
-          if !(try data.contains(relative)) { try SafeFile.makeDirectory(path) }
+          try data.makeDirectories(relative, uid: account.uid, gid: account.gid)
+          let path = try data.path(relative)
           guard chown(path.path, account.uid, account.gid) == 0 else {
             throw MisoError.system("Set Homebrew directory ownership", errno)
           }

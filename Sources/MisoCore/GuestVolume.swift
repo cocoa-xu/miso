@@ -86,9 +86,10 @@ struct GuestVolume {
       if lstat(current.path, &info) != 0 {
         guard errno == ENOENT else { throw MisoError.system("Inspect guest path", errno) }
         if last { return current }
-        guard createParents, mkdir(current.path, 0o755) == 0 else {
+        guard createParents else {
           throw MisoError.invalid("Missing guest parent directory")
         }
+        try SafeFile.makeDirectory(current, mode: 0o755)
         info = try FileMetadata.inspect(current)
       }
       guard info.st_dev == device, (last && allowLeafLink) || info.st_mode & S_IFMT != S_IFLNK,

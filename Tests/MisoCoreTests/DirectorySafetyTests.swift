@@ -47,6 +47,24 @@ import Testing
   #expect(try SafeFile.read(physical.appendingPathComponent("file"), limit: 8) == Data([1]))
 }
 
+@Test func guestParentsHaveExplicitModesAndUserCachesKeepTheirOwner() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let volume = try GuestVolume(temporary.url)
+  _ = try volume.path("Library/Application Support/miso/receipt", createParents: true)
+  for relative in ["Library", "Library/Application Support", "Library/Application Support/miso"] {
+    #expect(try FileMetadata.inspect(volume.path(relative)).st_mode & 0o7777 == 0o755)
+  }
+  try SafeFile.makeDirectory(temporary.url.appendingPathComponent("user"), mode: 0o700)
+  try volume.makeDirectories("user/Library/Caches/Homebrew", uid: getuid(), gid: getgid())
+  #expect(try FileMetadata.inspect(volume.path("user")).st_mode & 0o7777 == 0o700)
+  for relative in ["user/Library", "user/Library/Caches", "user/Library/Caches/Homebrew"] {
+    let info = try FileMetadata.inspect(volume.path(relative))
+    #expect(info.st_uid == getuid() && info.st_gid == getgid())
+    #expect(info.st_mode & 0o7777 == 0o755)
+  }
+}
+
 @Test func descriptorTraversalAcceptsAPFSFirmlinkDirectoriesWithoutRewritingPaths() throws {
   let path = URL(fileURLWithPath: "/System/Volumes/Data/Users")
   guard FileManager.default.fileExists(atPath: path.path) else { return }
