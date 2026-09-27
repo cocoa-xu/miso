@@ -115,11 +115,10 @@ public enum SafeFile {
   }
 
   public static func makeDirectory(_ url: URL) throws {
-    guard
-      url.deletingLastPathComponent().resolvingSymlinksInPath().path
-        == url.deletingLastPathComponent().standardizedFileURL.path
-    else {
-      throw MisoError.invalid("Output parent must not contain symbolic links")
+    let parent = url.deletingLastPathComponent()
+    let resolved = parent.resolvingSymlinksInPath().path
+    guard resolved == parent.standardizedFileURL.path else {
+      throw MisoError.invalid("Output parent is not canonical: \(parent.path) -> \(resolved)")
     }
     guard mkdir(url.path, 0o700) == 0 else {
       throw MisoError.system("Create output directory", errno)
