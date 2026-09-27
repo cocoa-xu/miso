@@ -3,6 +3,37 @@ import Testing
 
 @testable import MisoCore
 
+@Test func sealedSystemReattachmentRequiresStableIdentities() throws {
+  let container = UUID()
+  let volume = UUID()
+  func topology(_ device: String, id: UUID = UUID(), volumeID: UUID) -> APFSTopology.Container {
+    .init(
+      device: device, identifier: id, stores: [.init(device: "disk10s2")],
+      volumes: [
+        .init(
+          device: device + "s1", identifier: volumeID, roles: ["System"], name: "System",
+          mountPoint: nil)
+      ])
+  }
+  let reattached = topology("disk12", id: container, volumeID: volume)
+  let selected = try SystemConstruction.systemVolume(
+    in: [reattached], container: container, volume: volume)
+  #expect(selected.device == "disk12s1")
+  for invalid in [
+    [], [reattached, reattached], [topology("disk12", volumeID: volume)],
+    [topology("disk12", id: container, volumeID: UUID())],
+    [
+      APFSTopology.Container(
+        device: "disk12", identifier: container, stores: reattached.stores,
+        volumes: reattached.volumes + reattached.volumes)
+    ],
+  ] {
+    #expect(throws: (any Error).self) {
+      try SystemConstruction.systemVolume(in: invalid, container: container, volume: volume)
+    }
+  }
+}
+
 @Test func systemReceiptRequiresExactSealAndRootSnapshot() throws {
   let volume = UUID()
   let container = UUID()

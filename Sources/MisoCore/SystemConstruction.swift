@@ -81,7 +81,7 @@ public enum SystemConstruction {
       try SafeFile.writeNew(
         JSON.encode(layout), to: journal.output.appendingPathComponent("initial-layout.json"))
       let session = try DiskImageSession(image: disk, readOnly: false, journal: journal)
-      let identity = try session.withAttachment { session in
+      let sealed = try session.withAttachment { session in
         let containers = try session.containers()
         guard containers.count == 1, let container = containers.first, container.volumes.count == 1
         else {
@@ -114,10 +114,20 @@ public enum SystemConstruction {
           "check-system-apfs",
           NativeCommand.restoreTool(
             fsck, sha256: fsckRecord.sha256, arguments: ["-n", "/dev/r" + container.device]))
-        try session.verifyOwnership()
-        try journal.run(
-          "mount-system-readonly",
-          NativeCommand(.disks, arguments: ["mount", "readOnly", system.device]))
+        let updated = try systemVolume(in: session.containers(), container: container.identifier)
+        guard updated.device == system.device else {
+          throw MisoError.invalid("System device changed during sealing")
+        }
+        try journal.setMetadata("systemUUIDBeforeSeal", value: system.identifier)
+        return (container: container.identifier, volume: updated.identifier)
+      }
+      try journal.setMetadata("stage", value: "audit-sealed-system")
+      let audit = try DiskImageSession(image: disk, readOnly: true, journal: journal)
+      let identity = try audit.withAttachment { session in
+        let system = try systemVolume(
+          in: session.containers(), container: sealed.container, volume: sealed.volume)
+        _ = try ImageMounts.mount(
+          system, session: session, journal: journal, name: "sealed-system", readOnly: true)
         let info = try journal.plist(
           VolumeInfo.self, name: "inspect-system",
           command: NativeCommand(.disks, arguments: ["info", "-plist", system.device]))
@@ -125,19 +135,11 @@ public enum SystemConstruction {
           Snapshots.self, name: "inspect-snapshots",
           command: NativeCommand(
             .disks, arguments: ["apfs", "listSnapshots", system.device, "-plist"]))
-        let after = try session.containers()
-        guard after.count == 1, let current = after.first,
-          current.identifier == container.identifier,
-          current.volumes.count == 1
-        else { throw MisoError.invalid("System container changed during sealing") }
-        let updated = try current.volume(role: "System")
-        guard updated.device == system.device else {
-          throw MisoError.invalid("System device changed during sealing")
-        }
-        try journal.setMetadata("systemUUIDBeforeSeal", value: system.identifier)
+        _ = try systemVolume(
+          in: session.containers(), container: sealed.container, volume: sealed.volume)
         return try verify(
-          info: info, snapshots: snapshots, container: container.identifier,
-          volume: updated.identifier, expectedName: inputs.receipt.snapshotName)
+          info: info, snapshots: snapshots, container: sealed.container,
+          volume: sealed.volume, expectedName: inputs.receipt.snapshotName)
       }
       try journal.setMetadata("stage", value: "hash-sealed-disk")
       let result = Receipt(
@@ -148,6 +150,19 @@ public enum SystemConstruction {
         JSON.encode(result), to: journal.output.appendingPathComponent("system.json"))
       return result
     }
+  }
+
+  static func systemVolume(
+    in containers: [APFSTopology.Container], container: UUID, volume: UUID? = nil
+  ) throws -> APFSTopology.Volume {
+    guard containers.count == 1, let current = containers.first,
+      current.identifier == container, current.volumes.count == 1
+    else { throw MisoError.invalid("System container identity or volume count changed") }
+    let system = try current.volume(role: "System")
+    guard volume == nil || system.identifier == volume else {
+      throw MisoError.invalid("System volume identity changed")
+    }
+    return system
   }
 
   static func verify(
