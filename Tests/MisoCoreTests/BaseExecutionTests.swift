@@ -57,6 +57,10 @@ import Testing
   try BaseFileTree.copy(
     source, to: output, entries: entries, uid: getuid(), gid: getgid(), cancellation: nil)
   #expect(try BaseInputArchive.inventory(output) == entries)
+  try BaseFileTree.requireOwnership(output, entries: entries, uid: getuid(), gid: getgid())
+  #expect(throws: (any Error).self) {
+    try BaseFileTree.requireOwnership(output, entries: entries, uid: UInt32.max, gid: getgid())
+  }
   try SafeFile.replace(Data("changed".utf8), at: source.appendingPathComponent("file"))
   #expect(throws: (any Error).self) {
     try BaseFileTree.copy(

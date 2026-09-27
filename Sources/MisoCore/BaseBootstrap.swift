@@ -150,7 +150,8 @@ public enum BaseBootstrap {
           throw MisoError.invalid("Unexpected Homebrew version output")
         }
         let inventory = try BaseInputArchive.inventory(prefix, cancellation: journal.cancellation)
-        try requireOwnership(prefix, entries: inventory, account: account)
+        try BaseFileTree.requireOwnership(
+          prefix, entries: inventory, uid: account.uid, gid: account.gid)
         return inventory
       }
       try SafeFile.writeNew(
@@ -171,7 +172,9 @@ public enum BaseBootstrap {
         else {
           throw MisoError.invalid("Detached Homebrew payload verification failed")
         }
-        try requireOwnership(data.path("opt/homebrew"), entries: payload, account: account)
+        try BaseFileTree.requireOwnership(
+          data.path("opt/homebrew"), entries: payload,
+          uid: account.uid, gid: account.gid)
       }
       guard try SafeFile.sha256(archiveURL) == archiveSHA256,
         try BaseInputArchive.inventory(inputs, cancellation: journal.cancellation) == inventory
@@ -183,17 +186,6 @@ public enum BaseBootstrap {
         portableRubyVersion: portableRubyVersion, inputEntries: inventory.count,
         payloadEntries: payload.count, detachedPayloadVerified: true,
         executionControlsVerified: true, packagesInstalled: false)
-    }
-  }
-  private static func requireOwnership(
-    _ root: URL, entries: [BaseInputArchive.Entry], account: BaseImageStage.Account
-  ) throws {
-    for entry in entries {
-      let path = entry.path == "." ? root : root.appendingPathComponent(entry.path)
-      let info = try FileMetadata.inspect(path)
-      guard info.st_uid == account.uid, info.st_gid == account.gid else {
-        throw MisoError.invalid("Homebrew payload ownership mismatch: \(entry.path)")
-      }
     }
   }
 }

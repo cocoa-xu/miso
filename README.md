@@ -79,8 +79,16 @@ volumes are suitable for input archives, not working images.
 installs the archive's `homebrew-sources` resource on a clone. It requires root and
 includes bounded guest execution controls and detached payload verification.
 The temporary execution view is not part of the exported bundle. This experimental
-stage is not yet image-accepted and does not install the complete Base package set.
+stage does not install the complete Base package set or prove VM bootability.
 Use only trusted package inputs; a chroot is not a virtual-machine security boundary.
+
+`base bottles verify --resolution resolved --bottles bottle-directory` validates
+resolved formula sources and local `<name>.tar.gz` / `<name>.tar.index.json` inputs
+without administrator privileges. Add `--formula name` to select a dependency closure.
+`base bottles install` accepts the same inputs plus `--source bundle --output new-stage`
+and requires root. It installs local bottles with target Homebrew, denies network
+access, audits exact versions and verifies the detached payload. Post-install hooks
+are deferred; this remains an incomplete Base stage without runtime acceptance.
 
 Configuration defaults use `admin/admin`, disable FileVault, and request SSH/VNC.
 They are intended for isolated test systems; change credentials before exposing a

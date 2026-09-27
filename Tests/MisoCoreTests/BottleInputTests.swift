@@ -1,0 +1,148 @@
+import Darwin
+import Foundation
+import Testing
+
+@testable import MisoCore
+
+private func bottleFormula(revision: Int = 0, rebuild: Int = 0) -> HomebrewResolution.Formula {
+  HomebrewResolution.Formula(
+    name: "example", version: "1.2.3", revision: revision,
+    dependencies: [], systemDependencies: [],
+    bottle: .init(
+      tag: "arm64_tahoe",
+      url: URL(string: "https://ghcr.io/bottle")!, sha256: String(repeating: "a", count: 64),
+      cellar: ":any", rebuild: rebuild),
+    sourceURL: URL(string: "https://example.org/Formula/e/example.rb")!,
+    sourceSHA256: String(repeating: "b", count: 64),
+    metadataSHA256: String(repeating: "c", count: 64),
+    tapCommit: String(repeating: "d", count: 40), kegOnly: false, hasPostInstall: false)
+}
+
+private func bottleIndex(annotations changes: [String: String] = [:], duplicate: Bool = false)
+  throws -> Data
+{
+  let annotations = [
+    "org.opencontainers.image.ref.name": "1.2.3_2.arm64_tahoe.1",
+    "sh.brew.bottle.digest": String(repeating: "a", count: 64),
+    "sh.brew.bottle.size": "128", "sh.brew.tab": "{\"runtime_dependencies\":[]}",
+  ].merging(changes) { _, new in new }
+  return try JSONSerialization.data(withJSONObject: [
+    "schemaVersion": 2,
+    "manifests": duplicate
+      ? [["annotations": annotations], ["annotations": annotations]]
+      : [["annotations": annotations]],
+  ])
+}
+
+@Test func bottleOCIIdentityBindsVersionRevisionRebuildDigestAndSize() throws {
+  let formula = bottleFormula(revision: 2, rebuild: 1)
+  let tab = try HomebrewBottleInputs.parseIndex(bottleIndex(), formula: formula, bytes: 128)
+  #expect(tab == .object(["runtime_dependencies": .array([])]))
+  for changes in [
+    ["sh.brew.bottle.digest": String(repeating: "e", count: 64)],
+    ["sh.brew.bottle.size": "129"],
+    ["org.opencontainers.image.ref.name": "1.2.3_2.arm64_tahoe"],
+    ["org.opencontainers.image.ref.name": "1.2.3.arm64_tahoe.1"],
+    ["org.opencontainers.image.ref.name": "1.2.3_2.arm64_sequoia.1"],
+    ["sh.brew.tab": "[]"],
+  ] {
+    #expect(throws: (any Error).self) {
+      try HomebrewBottleInputs.parseIndex(
+        bottleIndex(annotations: changes), formula: formula, bytes: 128)
+    }
+  }
+  #expect(throws: (any Error).self) {
+    try HomebrewBottleInputs.parseIndex(bottleIndex(duplicate: true), formula: formula, bytes: 128)
+  }
+}
+
+@Test func bottleSidecarOmitsRebuildButArchiveRetainsIt() throws {
+  let payload = HomebrewBottleInputs.Payload(
+    formula: bottleFormula(revision: 2, rebuild: 1),
+    archive: .init(path: "example.tar.gz", bytes: 128, sha256: String(repeating: "a", count: 64)),
+    index: .init(
+      path: "example.tar.index.json", bytes: 100, sha256: String(repeating: "b", count: 64)),
+    tab: .object(["runtime_dependencies": .array([])]))
+  #expect(payload.filename == "example--1.2.3_2.arm64_tahoe.bottle.1.tar.gz")
+  #expect(payload.sidecarName == "example--1.2.3_2.arm64_tahoe.bottle.json")
+  #expect(
+    payload.sidecar
+      == .object([
+        "example": .object([
+          "bottle": .object([
+            "tags": .object(["arm64_tahoe": .object(["tab": payload.tab])])
+          ])
+        ])
+      ]))
+}
+
+@Test func bottleRuntimeDependenciesMustBeResolvedAndSelected() throws {
+  let formula = bottleFormula(revision: 2)
+  let dependency: JSONValue = .object([
+    "full_name": .string("example"),
+    "version": .string("1.2.3"), "revision": .integer(2),
+  ])
+  let tab: JSONValue = .object(["runtime_dependencies": .array([dependency])])
+  try HomebrewBottleInputs.validateDependencies(
+    tab, formulae: ["example": formula], selected: ["example"])
+  #expect(throws: (any Error).self) {
+    try HomebrewBottleInputs.validateDependencies(tab, formulae: ["example": formula], selected: [])
+  }
+  try HomebrewBottleInputs.validateDependencies(
+    tab, formulae: ["example": bottleFormula()], selected: ["example"])
+  #expect(throws: (any Error).self) {
+    try HomebrewBottleInputs.validateDependencies(.object([:]), formulae: [:], selected: [])
+  }
+}
+
+@Test func bottleInstalledInventoryRejectsMultipleVersionsAndDuplicates() throws {
+  #expect(try BaseBottles.installedVersions("").isEmpty)
+  #expect(
+    try BaseBottles.installedVersions("example 1.2.3_2\nnode@24 24.1.0\n")
+      == ["example": "1.2.3_2", "node@24": "24.1.0"])
+  for invalid in ["example", "example 1.0 2.0", "example 1.0\nexample 1.0", "../x 1.0"] {
+    #expect(throws: (any Error).self) { try BaseBottles.installedVersions(invalid) }
+  }
+}
+
+@Test func bottleSymlinksResolveWithinTheInstallationPrefix() throws {
+  let interpreter = TarPayload.Entry(
+    path: "awscli/2.0/libexec/bin/python3",
+    kind: UInt16(S_IFLNK), mode: 0o755, bytes: 0,
+    link: "../../../../../opt/python@3.14/bin/python3.14")
+  let alias = TarPayload.Entry(
+    path: "awscli/2.0/libexec/bin/python",
+    kind: UInt16(S_IFLNK), mode: 0o755, bytes: 0, link: "python3")
+  #expect(throws: (any Error).self) { try TarPayload.validate([alias, interpreter]) }
+  try TarPayload.validate([alias, interpreter], pathPrefix: "Cellar")
+  let escape = TarPayload.Entry(
+    path: interpreter.path, kind: interpreter.kind,
+    mode: interpreter.mode, bytes: 0, link: "../../../../../../outside")
+  #expect(throws: (any Error).self) {
+    try TarPayload.validate([alias, escape], pathPrefix: "Cellar")
+  }
+  #expect(throws: (any Error).self) {
+    try TarPayload.validate([alias, interpreter], pathPrefix: "../outside")
+  }
+}
+
+@Test func tarHardlinksRequireOwnedRegularTargets() throws {
+  let file = TarPayload.Entry(
+    path: "gcc/1/bin/compiler", kind: UInt16(S_IFREG),
+    mode: 0o555, bytes: 12, link: nil)
+  let alias = TarPayload.Entry(
+    path: "gcc/1/bin/cc", kind: UInt16(S_IFREG),
+    mode: 0o555, bytes: 0, link: nil, hardlink: file.path)
+  try TarPayload.validate([file, alias])
+  try TarPayload.validate([file, alias], pathPrefix: "Cellar")
+  for target in ["../outside", "missing", alias.path] {
+    let bad = TarPayload.Entry(
+      path: alias.path, kind: alias.kind, mode: alias.mode,
+      bytes: 0, link: nil, hardlink: target)
+    #expect(throws: (any Error).self) { try TarPayload.validate([file, bad]) }
+  }
+  let symlink = TarPayload.Entry(
+    path: file.path, kind: UInt16(S_IFLNK), mode: file.mode,
+    bytes: 0, link: "other")
+  #expect(throws: (any Error).self) { try TarPayload.validate([symlink, alias]) }
+}

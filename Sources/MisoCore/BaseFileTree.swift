@@ -2,6 +2,20 @@ import Darwin
 import Foundation
 
 enum BaseFileTree {
+  static func requireOwnership(
+    _ root: URL, entries: [BaseInputArchive.Entry], uid: uid_t, gid: gid_t
+  ) throws {
+    for entry in entries {
+      let path =
+        entry.path == "."
+        ? root : root.appendingPathComponent(try SafeFile.relativePath(entry.path))
+      let info = try FileMetadata.inspect(path)
+      guard info.st_uid == uid, info.st_gid == gid else {
+        throw MisoError.invalid("Payload ownership mismatch: \(entry.path)")
+      }
+    }
+  }
+
   static func copy(
     _ source: URL, to destination: URL, entries: [BaseInputArchive.Entry], uid: uid_t, gid: gid_t,
     cancellation: CancellationToken?
