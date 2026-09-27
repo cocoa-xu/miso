@@ -35,11 +35,26 @@ enum HTTPFile {
     ) {}
   }
 
-  static func validate(_ url: URL, maximumBytes: UInt64) throws {
+  static func validate(_ url: URL, maximumBytes: UInt64, appleAsset: Bool = false) throws {
+    if appleAsset {
+      guard AppleAssetCatalog.isArchiveURL(url) else {
+        throw MisoError.invalid("Invalid Apple asset archive URL")
+      }
+    }
     guard url.scheme == "https", url.host != nil, url.user == nil, url.password == nil,
       url.fragment == nil, url.query == nil, url.port == nil || url.port == 443,
-      (1...(512 << 20)).contains(maximumBytes)
+      (1...(appleAsset ? 32 << 30 : 512 << 20)).contains(maximumBytes)
     else { throw MisoError.invalid("Invalid HTTPS payload request") }
+  }
+
+  static func appleAsset(
+    _ url: URL, to output: URL, maximumBytes: UInt64,
+    cancellation: CancellationToken? = nil
+  ) async throws {
+    try await fetch(
+      url, to: output, maximumBytes: maximumBytes, body: nil, contentType: nil,
+      cancellation: cancellation, redirects: .reject, gitProtocolV2: false,
+      authorization: nil, configuration: .ephemeral, appleAsset: true)
   }
 
   static func get(
@@ -98,15 +113,15 @@ enum HTTPFile {
     _ url: URL, to output: URL, maximumBytes: UInt64, body: Data?, contentType: String?,
     cancellation: CancellationToken?, redirects: HTTPData.RedirectPolicy,
     gitProtocolV2: Bool, authorization: String?,
-    configuration: URLSessionConfiguration
+    configuration: URLSessionConfiguration, appleAsset: Bool = false
   ) async throws {
-    try validate(url, maximumBytes: maximumBytes)
+    try validate(url, maximumBytes: maximumBytes, appleAsset: appleAsset)
     try cancellation?.check()
     configuration.httpCookieStorage = nil
     configuration.urlCredentialStorage = nil
     configuration.urlCache = nil
     configuration.timeoutIntervalForRequest = 30
-    configuration.timeoutIntervalForResource = 300
+    configuration.timeoutIntervalForResource = appleAsset ? 3600 : 300
     let delegate = Delegate(url: url, maximumBytes: Int64(maximumBytes), redirects: redirects)
     let session = URLSession(configuration: configuration)
     defer { session.invalidateAndCancel() }
