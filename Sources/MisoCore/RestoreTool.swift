@@ -29,6 +29,7 @@ struct RestoreTool {
     guard original.sha256 == sha256 else { throw MisoError.invalid("Restore tool digest mismatch") }
     try AppleCode.validate(source)
     let name = "local-" + source.lastPathComponent
+    let label = name.replacingOccurrences(of: "_", with: "-")
     let executable = journal.output.appendingPathComponent(name)
     try Artifacts.copy(
       source, to: executable, maximumBytes: 128 << 20, cancellation: journal.cancellation)
@@ -40,10 +41,10 @@ struct RestoreTool {
       throw MisoError.system("Set local restore tool permissions", errno)
     }
     try journal.run(
-      "remove-signature-" + name,
+      "remove-signature-" + label,
       NativeCommand(.codesign, arguments: ["--remove-signature", executable.path]))
     try journal.run(
-      "sign-" + name,
+      "sign-" + label,
       NativeCommand(.codesign, arguments: ["--sign", "-", "--timestamp=none", executable.path]))
     try AppleCode.validateLocalTool(executable)
     guard try SafeFile.sha256(source) == sha256 else {

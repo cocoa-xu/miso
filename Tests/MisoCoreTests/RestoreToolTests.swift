@@ -6,7 +6,8 @@ import Testing
 @Test func restoreToolPreservesAuthenticatedSourceAndRejectsChangedExecutable() throws {
   let directory = try TemporaryDirectory()
   defer { directory.remove() }
-  let source = URL(fileURLWithPath: "/usr/bin/true")
+  let source = directory.url.appendingPathComponent("apfs_sealvolume")
+  try Artifacts.copy(URL(fileURLWithPath: "/usr/bin/true"), to: source, maximumBytes: 1 << 20)
   let digest = try SafeFile.sha256(source)
   let journal = try ExecutionJournal(
     output: directory.url.appendingPathComponent("operation"), operation: "test-restore-tool")
