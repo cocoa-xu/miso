@@ -85,6 +85,11 @@ the target developer directory. Its manifest preserves Base completion and recor
 Xcode stages separately, with Xcode completion and runtime verification still false.
 These commands do not start a VM or install Xcode on the host.
 
+Build-time SDK probes and native gem compilation select the image's original
+Command Line Tools through a process-local `DEVELOPER_DIR`. The delivered developer
+selection continues to point at the configured Xcode. Its executable toolchain is
+validated in the disposable guest.
+
 `xcode complete --source <xcode-bundle> --output <stage>` requires every configured
 Xcode layer, rechecks the selected application, SDKs, license and package receipts,
 and installs the four original developer disk payloads from the signed package.

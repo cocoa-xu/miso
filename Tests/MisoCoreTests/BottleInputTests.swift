@@ -204,6 +204,11 @@ private func bottleIndex(annotations changes: [String: String] = [:], duplicate:
     probes.first { $0.name == "awscli" }?.arguments
       == ["/opt/homebrew/opt/awscli/bin/aws", "--version"])
   #expect(probes.contains { $0.name == "node@22-npm" })
+  #expect(
+    probes.first { $0.name == "sdk" }?.arguments == [
+      "/usr/bin/env", "DEVELOPER_DIR=/Library/Developer/CommandLineTools",
+      "/usr/bin/xcrun", "--show-sdk-path",
+    ])
   #expect(throws: (any Error).self) {
     try HomebrewLifecycle.probes([bottleFormula(name: "node", version: "1.0\";exit(0)")])
   }

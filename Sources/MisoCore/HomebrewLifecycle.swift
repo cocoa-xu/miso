@@ -89,7 +89,12 @@ enum HomebrewLifecycle {
       Probe(
         name: "clang",
         arguments: ["/Library/Developer/CommandLineTools/usr/bin/clang", "--version"]),
-      Probe(name: "sdk", arguments: ["/usr/bin/xcrun", "--show-sdk-path"]),
+      Probe(
+        name: "sdk",
+        arguments: [
+          "/usr/bin/env", "DEVELOPER_DIR=/Library/Developer/CommandLineTools",
+          "/usr/bin/xcrun", "--show-sdk-path",
+        ]),
     ]
     return probes
   }
