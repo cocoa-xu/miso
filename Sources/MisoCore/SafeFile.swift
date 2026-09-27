@@ -3,6 +3,25 @@ import Darwin
 import Foundation
 
 public enum SafeFile {
+  static func relativeLink(_ link: String, at path: String) throws -> String {
+    _ = try relativePath(path)
+    guard !link.isEmpty, !link.hasPrefix("/"), !link.contains("\\"), !link.contains("\0") else {
+      throw MisoError.invalid("Unsafe relative symbolic link")
+    }
+    var parts = path.split(separator: "/").dropLast().map(String.init)
+    for part in link.split(separator: "/") {
+      if part == "." { continue }
+      if part == ".." {
+        guard !parts.isEmpty else { throw MisoError.invalid("Symbolic link escapes its root") }
+        parts.removeLast()
+      } else {
+        parts.append(String(part))
+      }
+    }
+    guard !parts.isEmpty else { throw MisoError.invalid("Symbolic link targets its root") }
+    return try relativePath(parts.joined(separator: "/"))
+  }
+
   public static func relativePath(_ path: String) throws -> String {
     guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\\"), !path.contains("\0"),
       !path.split(separator: "/", omittingEmptySubsequences: false).contains(where: {
