@@ -10,7 +10,7 @@ public final class IPSWArchive {
   private let source: URL
   private let sourceHandle: FileHandle
   private let sourceIdentity: stat
-  public let verifiedArchiveSHA256: String?
+  public private(set) var verifiedArchiveSHA256: String?
 
   public init(_ url: URL, expectedSHA256: String? = nil) throws {
     source = url
@@ -48,6 +48,20 @@ public final class IPSWArchive {
   }
 
   deinit { try? sourceHandle.close() }
+
+  public func verifySHA256(_ expected: String, cancellation: CancellationToken? = nil) throws {
+    try SafeFile.validateSHA256(expected)
+    try requireUnchangedSource()
+    guard try SafeFile.sha256(sourceHandle, cancellation: cancellation) == expected else {
+      throw MisoError.invalid("IPSW SHA-256 mismatch")
+    }
+    try requireUnchangedSource()
+    verifiedArchiveSHA256 = expected
+  }
+
+  public func memberSize(_ path: String) throws -> UInt64 {
+    try regularEntry(path).uncompressedSize
+  }
 
   private func requireUnchangedSource() throws {
     var current = stat()
@@ -103,7 +117,10 @@ public final class IPSWArchive {
     public let payloadAuthenticated = false
   }
 
-  public func extract(_ member: String, to output: URL, expectedSHA256: String? = nil) throws
+  public func extract(
+    _ member: String, to output: URL, expectedSHA256: String? = nil,
+    cancellation: CancellationToken? = nil
+  ) throws
     -> Extraction
   {
     guard expectedSHA256 != nil || verifiedArchiveSHA256 != nil else {
@@ -117,6 +134,7 @@ public final class IPSWArchive {
     var hash = SHA256()
     let checksum = try archive.extract(entry, bufferSize: 8 << 20) { chunk in
       try autoreleasepool {
+        try cancellation?.check()
         guard UInt64(chunk.count) <= entry.uncompressedSize - written else {
           throw MisoError.invalid("IPSW member exceeds declared size")
         }

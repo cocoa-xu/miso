@@ -24,6 +24,11 @@ public struct NativeCommand: Sendable {
   public enum SystemTool: String, CaseIterable, Sendable {
     case diskImages = "/usr/bin/hdiutil"
     case disks = "/usr/sbin/diskutil"
+    case checkSeal = "/System/Library/Filesystems/apfs.fs/Contents/Resources/apfs_checkseal"
+    case packages = "/usr/sbin/pkgutil"
+    case bom = "/usr/bin/lsbom"
+    case copy = "/usr/bin/ditto"
+    case manualIndex = "/usr/libexec/makewhatis"
   }
 
   public let executable: URL
@@ -32,6 +37,16 @@ public struct NativeCommand: Sendable {
   public let timeout: TimeInterval
   public let input: URL?
   public let redactedArguments: Set<Int>
+  private(set) var appleToolSHA256: String?
+
+  static func restoreTool(
+    _ url: URL, sha256: String, arguments: [String], timeout: TimeInterval = 3600
+  ) throws -> Self {
+    try SafeFile.validateSHA256(sha256)
+    var command = try Self(url.path, arguments: arguments, timeout: timeout)
+    command.appleToolSHA256 = sha256
+    return command
+  }
 
   public init(_ tool: SystemTool, arguments: [String] = [], timeout: TimeInterval = 300) throws {
     try self.init(tool.rawValue, arguments: arguments, timeout: timeout)
@@ -83,6 +98,12 @@ public enum NativeProcess {
     _ command: NativeCommand, stdout: FileHandle, stderr: FileHandle,
     cancellation: CancellationToken? = nil
   ) throws -> ProcessReceipt {
+    if let expected = command.appleToolSHA256 {
+      guard command.executable.path == command.executable.resolvingSymlinksInPath().path,
+        try SafeFile.sha256(command.executable) == expected
+      else { throw MisoError.invalid("Restore executable changed") }
+      try AppleCode.validate(command.executable)
+    }
     let input: FileHandle
     if let url = command.input {
       input = try SafeFile.openRegular(url)

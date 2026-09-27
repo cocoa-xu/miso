@@ -20,6 +20,15 @@ public struct RestoreInspection: Encodable, Sendable {
 
   public static func inspect(_ url: URL, verifyDigest: Bool = false) throws -> Self {
     let archive = try IPSWArchive(url)
+    var report = try inspect(archive)
+    if verifyDigest {
+      try archive.verifySHA256(report.profile.ipswSHA256)
+      report.ipswSHA256 = report.profile.ipswSHA256
+    }
+    return report
+  }
+
+  static func inspect(_ archive: IPSWArchive) throws -> Self {
     let manifest = try archive.read("BuildManifest.plist")
     let restore = try archive.read("Restore.plist")
     var report = try select(manifest: plist(manifest), restore: plist(restore))
@@ -27,13 +36,7 @@ public struct RestoreInspection: Encodable, Sendable {
     report.metadataSHA256 = [
       "BuildManifest.plist": SafeFile.sha256(manifest), "Restore.plist": SafeFile.sha256(restore),
     ]
-    if verifyDigest {
-      let hash = try SafeFile.sha256(url)
-      guard hash == report.profile.ipswSHA256 else {
-        throw MisoError.invalid("IPSW SHA-256 differs from the target profile")
-      }
-      report.ipswSHA256 = hash
-    }
+    report.ipswSHA256 = archive.verifiedArchiveSHA256
     return report
   }
 
@@ -120,6 +123,12 @@ public struct RestoreInspection: Encodable, Sendable {
       guard let component = components[name]?["Info"] as? [String: Any],
         let path = component["Path"] as? String
       else {
+        throw MisoError.invalid("Missing component path: \(name)")
+      }
+      paths[name] = try SafeFile.relativePath(path)
+    }
+    for (name, value) in components {
+      guard let info = value["Info"] as? [String: Any], let path = info["Path"] as? String else {
         throw MisoError.invalid("Missing component path: \(name)")
       }
       paths[name] = try SafeFile.relativePath(path)

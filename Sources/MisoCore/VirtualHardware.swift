@@ -16,6 +16,15 @@ public enum VirtualHardware {
 
   public static func createIdentity(ipsw: URL, output: URL) async throws -> IdentityReceipt {
     let inspected = try RestoreInspection.inspect(ipsw, verifyDigest: true)
+    return try await createIdentity(ipsw: ipsw, output: output, inspected: inspected)
+  }
+
+  static func createIdentity(ipsw: URL, output: URL, inspected: RestoreInspection) async throws
+    -> IdentityReceipt
+  {
+    guard inspected.ipswSHA256 == inspected.profile.ipswSHA256 else {
+      throw MisoError.invalid("Unverified identity source")
+    }
     let restore = try await VZMacOSRestoreImage.image(from: ipsw)
     let version = restore.operatingSystemVersion
     let actualVersion = try MacOSVersion(

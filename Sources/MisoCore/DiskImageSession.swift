@@ -20,6 +20,7 @@ public struct DiskImageAttachment: Codable, Sendable {
     let wholes = entities.filter {
       $0.device.range(of: #"\A/dev/disk[0-9]+\z"#, options: .regularExpression) != nil
         && (!requireGPT || $0.contentHint == "GUID_partition_scheme")
+        && $0.contentHint?.uppercased() != "EF57347C-0000-11AA-AA11-00306543ECAC"
     }
     guard wholes.count == 1, let whole = wholes.first else {
       throw MisoError.invalid("Expected one owned whole-disk attachment")
@@ -47,12 +48,29 @@ public struct APFSTopology: Codable, Sendable {
     public let roles: [String]
     public let name: String?
     public let mountPoint: String?
+    public let encrypted: Bool?
+    public let capacityInUse: UInt64?
+
+    public init(
+      device: String, identifier: UUID, roles: [String], name: String?, mountPoint: String?,
+      encrypted: Bool? = nil, capacityInUse: UInt64? = nil
+    ) {
+      self.device = device
+      self.identifier = identifier
+      self.roles = roles
+      self.name = name
+      self.mountPoint = mountPoint
+      self.encrypted = encrypted
+      self.capacityInUse = capacityInUse
+    }
     enum CodingKeys: String, CodingKey {
       case device = "DeviceIdentifier"
       case identifier = "APFSVolumeUUID"
       case roles = "Roles"
       case name = "Name"
       case mountPoint = "MountPoint"
+      case encrypted = "Encryption"
+      case capacityInUse = "CapacityInUse"
     }
   }
 
@@ -129,6 +147,10 @@ public final class DiskImageSession {
   private var attachmentAttempted = false
 
   public init(image: URL, readOnly: Bool, journal: ExecutionJournal) throws {
+    guard journal.record.status == .running else {
+      throw MisoError.invalid("Image sessions require an active operation")
+    }
+    try journal.cancellation.check()
     guard image.isFileURL, image.path == image.standardizedFileURL.path,
       image.path == image.resolvingSymlinksInPath().path
     else {
@@ -142,18 +164,36 @@ public final class DiskImageSession {
     self.image = image
     self.readOnly = readOnly
     self.journal = journal
-    handle = try SafeFile.openRegular(image)
+    handle = try SafeFile.openRegular(image, writable: !readOnly)
     var info = stat()
     guard fstat(handle.fileDescriptor, &info) == 0 else {
       throw MisoError.system("Inspect image identity", errno)
     }
     originalIdentity = (info.st_dev, info.st_ino)
-    guard flock(handle.fileDescriptor, (readOnly ? LOCK_SH : LOCK_EX) | LOCK_NB) == 0 else {
+    if readOnly && flock(handle.fileDescriptor, LOCK_SH | LOCK_NB) != 0 {
       throw MisoError.system("Lock image", errno)
     }
   }
 
   deinit { try? handle.close() }
+
+  func requireDetached() throws {
+    guard !attachmentAttempted, whole == nil, try matchingImages().isEmpty else {
+      throw MisoError.invalid("Image must be detached")
+    }
+  }
+
+  func withDetachedFile<T>(_ body: (FileHandle) throws -> T) throws -> T {
+    guard !readOnly, journal.record.status == .running else {
+      throw MisoError.invalid("Cannot modify an inactive or read-only image")
+    }
+    try journal.cancellation.check()
+    try requireDetached()
+    let result = try body(handle)
+    try handle.synchronize()
+    try checkFileIdentity()
+    return result
+  }
 
   public func withAttachment<T>(
     requireGPT: Bool = true, mountPoint: URL? = nil, _ body: (DiskImageSession) throws -> T

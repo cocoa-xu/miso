@@ -53,6 +53,8 @@ public enum JSON {
   public static func read<T: Decodable>(_ type: T.Type, from url: URL, limit: Int = 64 << 20) throws
     -> T
   {
-    try JSONDecoder().decode(type, from: SafeFile.read(url, limit: limit))
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return try decoder.decode(type, from: SafeFile.read(url, limit: limit))
   }
 }

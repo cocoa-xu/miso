@@ -67,3 +67,15 @@ func topologyRejectsForeignAndMixedStores(_ disks: (Int, Int)) throws {
     ]).wholeDevice(requireGPT: true)
   }
 }
+
+@Test func rawImageSelectionExcludesSynthesizedAPFSContainer() throws {
+  let attachment = DiskImageAttachment(entities: [
+    .init(device: "/dev/disk42", contentHint: nil, mountPoint: nil),
+    .init(
+      device: "/dev/disk57", contentHint: "EF57347C-0000-11AA-AA11-00306543ECAC", mountPoint: nil),
+    .init(
+      device: "/dev/disk57s1", contentHint: "41504653-0000-11AA-AA11-00306543ECAC", mountPoint: nil),
+  ])
+  #expect(try attachment.wholeDevice(requireGPT: false) == "/dev/disk42")
+  #expect(throws: (any Error).self) { try attachment.wholeDevice(requireGPT: true) }
+}

@@ -15,7 +15,11 @@ public enum SafeFile {
   }
 
   public static func openRegular(_ url: URL) throws -> FileHandle {
-    let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    try openRegular(url, writable: false)
+  }
+
+  static func openRegular(_ url: URL, writable: Bool) throws -> FileHandle {
+    let fd = open(url.path, (writable ? O_RDWR : O_RDONLY) | O_NOFOLLOW | O_CLOEXEC)
     guard fd >= 0 else { throw MisoError.system("Open \(url.lastPathComponent)", errno) }
     let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
     var info = stat()
@@ -111,13 +115,15 @@ public enum SafeFile {
     return try sha256(handle)
   }
 
-  static func sha256(_ handle: FileHandle) throws -> String {
+  static func sha256(_ handle: FileHandle, cancellation: CancellationToken? = nil) throws -> String
+  {
     let expectedSize = try size(handle)
     try handle.seek(toOffset: 0)
     var digest = SHA256()
     var consumed: UInt64 = 0
     while consumed < expectedSize {
       try autoreleasepool {
+        try cancellation?.check()
         let chunk = try handle.readExactly(Int(min(8 << 20, expectedSize - consumed)))
         digest.update(data: chunk)
         consumed += UInt64(chunk.count)
