@@ -4,7 +4,29 @@ import MisoCore
 
 struct Disk: ParsableCommand {
   static let configuration = CommandConfiguration(
-    abstract: "Create partitioned raw System seeds.", subcommands: [Layout.self, Seed.self])
+    abstract: "Inspect image ownership and create partitioned raw System seeds.",
+    subcommands: [Layout.self, Seed.self, Inspect.self])
+
+  struct Inspect: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract:
+        "Attach a GPT image read-only without mounting its volumes, inspect owned APFS containers, then detach."
+    )
+    @Argument var image: String
+    @Option(help: "New directory for the operation journal.") var output: String
+
+    func run() throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      let journal = try ExecutionJournal(
+        output: fileURL(output), operation: "inspect-disk", cancellation: cancellation.token)
+      let result = try journal.perform {
+        let session = try DiskImageSession(image: fileURL(image), readOnly: true, journal: journal)
+        return try session.withAttachment { try $0.containers() }
+      }
+      try printJSON(result)
+    }
+  }
 
   struct Layout: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -32,9 +54,9 @@ struct Disk: ParsableCommand {
   }
 }
 
-struct Decode: ParsableCommand {
+struct Decode: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
-    abstract: "Decode bounded component payloads.", subcommands: [DecodePBZE.self])
+    abstract: "Decode bounded component payloads.", subcommands: [DecodePBZE.self, DecodeAEA.self])
 
   struct DecodePBZE: ParsableCommand {
     static let configuration = CommandConfiguration(
