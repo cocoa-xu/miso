@@ -54,7 +54,8 @@ final class GuestExecution {
         if FileManager.default.fileExists(atPath: candidate.path) { images.append(candidate) }
       }
       guard images.count == 1 else { throw MisoError.invalid("Missing or ambiguous OS Cryptex") }
-      let cryptex = try DiskImageSession(image: images[0], readOnly: true, journal: journal)
+      let cryptex = try DiskImageSession(
+        image: images[0], readOnly: true, journal: journal, forceReadOnlyDetach: true)
       let cryptexMount = try preboot.path("Cryptexes/OS")
       return try cryptex.withAttachment(
         requireGPT: false, mountPoint: cryptexMount, existingEmptyMountPoint: true

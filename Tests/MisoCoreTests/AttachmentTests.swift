@@ -44,6 +44,17 @@ func topologyRejectsForeignAndMixedStores(_ disks: (Int, Int)) throws {
   }
   let readOnly = try DiskImageSession(image: outside, readOnly: true, journal: journal)
   #expect(readOnly.readOnly)
+  #expect(throws: (any Error).self) {
+    try DiskImageSession(
+      image: outside, readOnly: true, journal: journal, forceReadOnlyDetach: true)
+  }
+  let owned = journal.output.appendingPathComponent("owned.img")
+  try SafeFile.writeNew(Data([0]), to: owned)
+  #expect(throws: (any Error).self) {
+    try DiskImageSession(image: owned, readOnly: false, journal: journal, forceReadOnlyDetach: true)
+  }
+  _ = try DiskImageSession(
+    image: owned, readOnly: true, journal: journal, forceReadOnlyDetach: true)
   let escaped = URL(fileURLWithPath: journal.output.path + "/../outside.img")
   #expect(throws: (any Error).self) {
     try DiskImageSession(image: escaped, readOnly: false, journal: journal)

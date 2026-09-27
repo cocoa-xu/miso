@@ -147,8 +147,11 @@ public final class DiskImageSession {
   private let originalIdentity: (dev_t, ino_t)
   private var whole: String?
   private var attachmentAttempted = false
+  private let forceReadOnlyDetach: Bool
 
-  public init(image: URL, readOnly: Bool, journal: ExecutionJournal) throws {
+  public init(
+    image: URL, readOnly: Bool, journal: ExecutionJournal, forceReadOnlyDetach: Bool = false
+  ) throws {
     guard journal.record.status == .running else {
       throw MisoError.invalid("Image sessions require an active operation")
     }
@@ -163,6 +166,11 @@ public final class DiskImageSession {
         throw MisoError.invalid("Writable images must belong to this operation's output")
       }
     }
+    guard !forceReadOnlyDetach || (readOnly && image.path.hasPrefix(journal.output.path + "/"))
+    else {
+      throw MisoError.invalid("Forced detach requires an owned read-only image")
+    }
+    self.forceReadOnlyDetach = forceReadOnlyDetach
     self.image = image
     self.readOnly = readOnly
     self.journal = journal
@@ -329,7 +337,19 @@ public final class DiskImageSession {
     }
     try journal.run(
       "detach-image", NativeCommand(.diskImages, arguments: ["detach", device], timeout: 120),
-      cleanup: true)
+      cleanup: true, expectedExitCodes: forceReadOnlyDetach ? [0, 16] : [0])
+    if journal.record.commands.last?.result?.exitCode == 16 {
+      let current = try matchingImages(cleanup: true)
+      guard forceReadOnlyDetach, readOnly, current.count == 1, current[0].writable == false,
+        current[0].entities.contains(where: { $0.device == device })
+      else {
+        throw MisoError.invalid("Read-only attachment identity changed before forced detach")
+      }
+      try journal.run(
+        "detach-owned-readonly-image",
+        NativeCommand(.diskImages, arguments: ["detach", "-force", device], timeout: 120),
+        cleanup: true)
+    }
     guard try matchingImages(cleanup: true).isEmpty else {
       throw MisoError.invalid("Image remains attached after detach")
     }
