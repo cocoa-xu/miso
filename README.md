@@ -244,8 +244,10 @@ installs the archive's `homebrew-sources` resource on a clone. It requires root 
 includes bounded guest execution controls and detached payload verification.
 On the validated 26A428 host, the 26A434 target also uses a temporary copied
 execution view because launching its original System executables is rejected.
-Each copied executable is authenticated against its Apple signature before its
+Each copied executable's code pages are authenticated against its Apple signature before its
 signature is replaced locally without entitlements; both hashes are recorded.
+Resource envelopes are covered by the authenticated System image instead of the
+obsolete omission rules embedded in some individual System tools.
 The image's original executables and the host security settings remain unchanged.
 The temporary execution view is not part of the exported bundle. This experimental
 stage does not install the complete Base package set or prove VM bootability.

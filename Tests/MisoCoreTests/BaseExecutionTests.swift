@@ -191,3 +191,16 @@ import Testing
   #expect(symlink("../../../outside", prefix.appendingPathComponent("escape").path) == 0)
   #expect(throws: (any Error).self) { try BaseFileTree.inventory(volume, path: "opt/homebrew") }
 }
+
+@Test func executionToolAuthenticationHandlesSealedSystemResourceRules() throws {
+  let executable = URL(fileURLWithPath: "/usr/libexec/ApplicationFirewall/socketfilterfw")
+  #expect(try BaseExecutionView.isExecutable(executable))
+  try AppleCode.validate(executable, scope: .executable)
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  #expect(throws: MisoError.self) { try AppleCode.validate(temporary.url, scope: .executable) }
+  let file = temporary.url.appendingPathComponent("unsigned")
+  try SafeFile.writeNew(Data("untrusted".utf8), to: file)
+  #expect(throws: MisoError.self) { try AppleCode.validate(file, scope: .executable) }
+  #expect(throws: MisoError.self) { try AppleCode.validateLocalTool(file, scope: .executable) }
+}

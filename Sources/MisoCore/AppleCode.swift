@@ -1,11 +1,25 @@
+import Darwin
 import Foundation
 import Security
 
 enum AppleCode {
-  static func validateLocalTool(_ url: URL) throws {
+  enum Scope { case full, executable }
+
+  private static func flags(_ url: URL, scope: Scope) throws -> SecCSFlags {
+    var value = kSecCSStrictValidate | kSecCSCheckAllArchitectures
+    if scope == .executable {
+      guard try FileMetadata.inspect(url).st_mode & S_IFMT == S_IFREG else {
+        throw MisoError.invalid("Expected a regular executable for code-page validation")
+      }
+      value |= kSecCSDoNotValidateResources
+    }
+    return SecCSFlags(rawValue: value)
+  }
+
+  static func validateLocalTool(_ url: URL, scope: Scope = .full) throws {
     var code: SecStaticCode?
     var information: CFDictionary?
-    let flags = SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures)
+    let flags = try flags(url, scope: scope)
     guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let code,
       SecStaticCodeCheckValidity(code, flags, nil) == errSecSuccess,
       SecCodeCopySigningInformation(
@@ -17,14 +31,14 @@ enum AppleCode {
     else { throw MisoError.invalid("Expected a valid local tool signature without entitlements") }
   }
 
-  static func validate(_ url: URL) throws {
+  static func validate(_ url: URL, scope: Scope = .full) throws {
     var code: SecStaticCode?
     var requirement: SecRequirement?
     guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let code,
       SecRequirementCreateWithString("anchor apple" as CFString, [], &requirement) == errSecSuccess,
       let requirement
     else { throw MisoError.invalid("Cannot inspect Apple code signature") }
-    let flags = SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures)
+    let flags = try flags(url, scope: scope)
     let status = SecStaticCodeCheckValidity(code, flags, requirement)
     guard status == errSecSuccess else {
       throw MisoError.invalid("Apple code signature rejected (\(status))")

@@ -140,7 +140,11 @@ enum BaseExecutionView {
             try isExecutable(destination)
           {
             let digest = try SafeFile.sha256(source)
-            try AppleCode.validate(source)
+            do {
+              try AppleCode.validate(source, scope: .executable)
+            } catch {
+              throw MisoError.invalid("Execution tool signature rejected at \(relative): \(error)")
+            }
             guard try SafeFile.sha256(destination) == digest else {
               throw MisoError.invalid("Execution copy hash mismatch")
             }
@@ -186,7 +190,7 @@ enum BaseExecutionView {
               + group.map { root.appendingPathComponent($0.0).path }, timeout: 180))
       }
       let executableRecords = try originals.map {
-        try AppleCode.validateLocalTool(root.appendingPathComponent($0.0))
+        try AppleCode.validateLocalTool(root.appendingPathComponent($0.0), scope: .executable)
         return Executable(
           path: $0.0, originalSHA256: $0.1,
           executionSHA256: try SafeFile.sha256(root.appendingPathComponent($0.0)))
