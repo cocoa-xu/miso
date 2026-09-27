@@ -4,6 +4,19 @@ import Testing
 
 @testable import MisoCore
 
+@Test func executionFirmlinksAreExplicitAndBounded() throws {
+  #expect(
+    try BaseExecutionView.firmlinks("# mappings\n/Library\tLibrary\n/usr/local usr/local\n") == [
+      "Library": "Library", "usr/local": "usr/local",
+    ])
+  for text in [
+    "", "/Library Library\n/Library Library", "/dev dev", "/System/Volumes/Data Data",
+    "/../outside outside", "/Library ../Library", "Library Library", "/Library Library extra",
+  ] {
+    #expect(throws: (any Error).self) { try BaseExecutionView.firmlinks(text) }
+  }
+}
+
 @Test func executionHeaderIdentifiesOnlyArmExecutables() throws {
   let temporary = try TemporaryDirectory()
   defer { temporary.remove() }

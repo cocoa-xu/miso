@@ -30,6 +30,14 @@ enum BaseExecutionView {
       else {
         throw MisoError.invalid("Execution System version differs from target")
       }
+      guard
+        let firmlinkText = String(
+          data: try SafeFile.read(system.path("usr/share/firmlinks"), limit: 64 << 10),
+          encoding: .utf8)
+      else {
+        throw MisoError.invalid("Invalid firmlink table")
+      }
+      let bindings = try firmlinks(firmlinkText)
       var originals: [(String, String)] = []
       let resign = target.build == "25G83"
       if try MacOSVersion(target.version).major == 26 && !resign {
@@ -38,10 +46,23 @@ enum BaseExecutionView {
       func copy(_ source: URL, _ relative: String, device: dev_t) throws {
         try journal.cancellation.check()
         let info = try FileMetadata.inspect(source)
-        guard info.st_dev == device else {
-          throw MisoError.invalid("Execution copy crosses a mount")
-        }
         let destination = root.appendingPathComponent(relative)
+        if device == system.device, bindings[relative] != nil {
+          guard info.st_mode & S_IFMT == S_IFDIR,
+            [system.device, data.device].contains(info.st_dev)
+          else {
+            throw MisoError.invalid("Unexpected System firmlink source: \(relative)")
+          }
+          try SafeFile.makeDirectory(destination)
+          guard chmod(destination.path, 0o755) == 0 else {
+            throw MisoError.system("Set firmlink stub mode", errno)
+          }
+          return
+        }
+        guard info.st_dev == device else {
+          throw MisoError.invalid(
+            "Execution copy crosses a mount: \(relative) (\(info.st_dev), expected \(device))")
+        }
         switch info.st_mode & S_IFMT {
         case S_IFDIR:
           try SafeFile.makeDirectory(destination)
@@ -92,28 +113,18 @@ enum BaseExecutionView {
       }
       let view = try GuestVolume(root)
       for path in ["dev", "System/Volumes", "System/Volumes/Data", "System/Volumes/Preboot"] {
-        try SafeFile.makeDirectory(view.path(path))
+        let directory = try view.path(path)
+        try SafeFile.makeDirectory(directory)
+        guard chmod(directory.path, 0o755) == 0 else {
+          throw MisoError.system("Set execution mount directory mode", errno)
+        }
       }
-      let firmlinks = try String(
-        data: SafeFile.read(system.path("usr/share/firmlinks"), limit: 64 << 10), encoding: .utf8)
-      guard let firmlinks else { throw MisoError.invalid("Invalid firmlink table") }
       try buildLibraryOverlay(data: data, root: root, copy: copy)
-      var linked = Set<String>()
-      for line in firmlinks.split(separator: "\n") {
-        if line.trimmingCharacters(in: .whitespaces).hasPrefix("#") { continue }
-        let parts = line.split(whereSeparator: { $0 == "\t" || $0 == " " }).map(String.init)
-        guard parts.count == 2, parts[0].hasPrefix("/") else {
-          throw MisoError.invalid("Invalid firmlink entry")
-        }
-        let path = try SafeFile.relativePath(String(parts[0].dropFirst()))
-        let target = try SafeFile.relativePath(parts[1])
-        guard linked.insert(path).inserted else {
-          throw MisoError.invalid("Duplicate firmlink entry")
-        }
+      for (path, target) in bindings.sorted(by: { $0.key < $1.key }) {
         if path == "Library" { continue }
         try linkData(path, target: target, root: view)
       }
-      if !linked.contains("opt") { try linkData("opt", target: "opt", root: view) }
+      if bindings["opt"] == nil { try linkData("opt", target: "opt", root: view) }
       for offset in stride(from: 0, to: originals.count, by: 48) {
         let group = originals[offset..<min(offset + 48, originals.count)]
         try journal.run(
@@ -138,6 +149,28 @@ enum BaseExecutionView {
       try journal.setMetadata("outputSystemModified", value: false)
       return root
     }
+  }
+
+  static func firmlinks(_ text: String) throws -> [String: String] {
+    var bindings: [String: String] = [:]
+    for line in text.split(separator: "\n") {
+      let line = line.trimmingCharacters(in: .whitespaces)
+      if line.isEmpty || line.hasPrefix("#") { continue }
+      let parts = line.split(whereSeparator: { $0 == "\t" || $0 == " " }).map(String.init)
+      guard parts.count == 2, parts[0].hasPrefix("/") else {
+        throw MisoError.invalid("Invalid firmlink entry")
+      }
+      let source = try SafeFile.relativePath(String(parts[0].dropFirst()))
+      let destination = try SafeFile.relativePath(parts[1])
+      guard bindings.updateValue(destination, forKey: source) == nil,
+        source != "dev", !source.hasPrefix("dev/"), source != "System/Volumes",
+        !source.hasPrefix("System/Volumes/")
+      else {
+        throw MisoError.invalid("Duplicate or reserved firmlink entry")
+      }
+    }
+    guard !bindings.isEmpty else { throw MisoError.invalid("Empty firmlink table") }
+    return bindings
   }
 
   private static func linkData(_ path: String, target: String, root: GuestVolume) throws {
@@ -175,6 +208,9 @@ enum BaseExecutionView {
           }
         } else {
           try SafeFile.makeDirectory(destination)
+        }
+        guard chmod(destination.path, 0o755) == 0 else {
+          throw MisoError.system("Set Library overlay mode", errno)
         }
         for name in try FileManager.default.contentsOfDirectory(atPath: source.path).sorted() {
           try visit(path + "/" + name)
