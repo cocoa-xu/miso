@@ -44,6 +44,11 @@ the four reviewed first-launch packages and records their payload inventories,
 relocation policies and unexecuted scripts. CoreTypes is restricted to its writable
 firmlink subtree; MobileDevice payloads relocate under `/Library/Apple`. Package
 links are checked lexically without resolving paths through the host filesystem.
+`xcode install-packages --source <xcode-bundle> --prepared <prepared-xcode>
+--output <stage>` installs those payloads and BOM receipts into a new image clone,
+validates receipt lookup with `pkgutil`, and records the license and rvictl PATH.
+It still leaves first-launch completion false pending certificate and device-image
+effects and independent runtime checks.
 
 ```sh
 miso xcode defaults > xcode.json

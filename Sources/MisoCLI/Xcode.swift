@@ -7,8 +7,26 @@ struct Xcode: AsyncParsableCommand {
     abstract: "Prepare exact-version Xcode inputs without starting a VM.",
     subcommands: [
       Defaults.self, PrepareArchive.self, PrepareMetal.self, PreparePackages.self,
-      InstallApplication.self,
+      InstallApplication.self, InstallPackages.self,
     ])
+
+  struct InstallPackages: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "install-packages",
+      abstract: "Install reviewed Xcode package payloads and receipts offline.")
+    @Option var source: String
+    @Option var prepared: String
+    @Option var output: String
+
+    func run() throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        XcodePackageInstallation.install(
+          source: fileURL(source), preparedArchive: fileURL(prepared),
+          output: fileURL(output), cancellation: cancellation.token))
+    }
+  }
 
   struct PreparePackages: ParsableCommand {
     static let configuration = CommandConfiguration(
