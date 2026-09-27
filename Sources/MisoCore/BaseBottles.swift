@@ -78,7 +78,7 @@ public enum BaseBottles {
               "Installed formula source differs from resolution: \(formula.name)")
           }
           try guest.run(
-            "bottle-\(formula.name)",
+            "install-bottle",
             arguments: GuestExecution.brewArguments(
               ["install", "--skip-post-install", "/" + relative + "/" + payload.filename],
               username: username), capability: .brew, timeout: 600)

@@ -86,3 +86,15 @@ import Testing
       expectedExitCodes: [0, 1])
   }
 }
+
+@Test func journalAllocatesUniquePathsForRepeatedPackageOperations() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let journal = try ExecutionJournal(
+    output: temporary.url.appendingPathComponent("journal"),
+    operation: "base-bottles")
+  let first = try journal.run("install-bottle", NativeCommand("/usr/bin/true"))
+  let second = try journal.run("install-bottle", NativeCommand("/usr/bin/true"))
+  #expect(first != second)
+  #expect(journal.record.commands.map(\.name) == ["install-bottle", "install-bottle"])
+}
