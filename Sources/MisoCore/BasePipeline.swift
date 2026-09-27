@@ -62,7 +62,8 @@ public enum BasePipeline {
             for: step, inputs: inputVolume, nodeFormula: plans.packages.nodeFormula)
           + ["--source", current.path, "--output", stage.path]
         let log = try journal.run(
-          name, NativeCommand(executable.path, arguments: arguments, timeout: step.stage.timeout))
+          step.stage.operation,
+          NativeCommand(executable.path, arguments: arguments, timeout: step.stage.timeout))
         try validateStage(stage, operation: step.stage.operation, target: recipe.target)
         for record in step.files.values {
           _ = try Artifacts.resolve(record, under: inputs, cancellation: journal.cancellation)
@@ -95,7 +96,7 @@ public enum BasePipeline {
       let finalStage = output.appendingPathComponent("11-cleanup")
       try journal.setMetadata("stage", value: "11-cleanup")
       try journal.run(
-        "11-cleanup",
+        "base-cleanup",
         NativeCommand(
           executable.path,
           arguments: [

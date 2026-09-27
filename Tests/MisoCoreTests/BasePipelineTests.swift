@@ -104,3 +104,14 @@ private func buildRecipe() -> BaseBuildRecipe {
     try BaseStageWorkspace.requireUnmounted(URL(fileURLWithPath: "/"))
   }
 }
+
+@Test func baseBuildCommandNamesSatisfyTheJournalContract() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let journal = try ExecutionJournal(
+    output: temporary.url.appendingPathComponent("run"), operation: "test-base-command-names")
+  for name in BaseBuildRecipe.Stage.allCases.map(\.operation) + ["base-cleanup"] {
+    try journal.run(name, NativeCommand("/bin/echo", arguments: ["accepted"]))
+  }
+  #expect(journal.record.commands.count == 11)
+}
