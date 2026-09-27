@@ -14,7 +14,8 @@ let package = Package(
   ],
   targets: [
     .systemLibrary(name: "CMiso"),
-    .target(name: "MisoCore", dependencies: ["CMiso", "ZIPFoundation"]),
+    .target(name: "MisoSystem"),
+    .target(name: "MisoCore", dependencies: ["CMiso", "MisoSystem", "ZIPFoundation"]),
     .executableTarget(
       name: "MisoCLI",
       dependencies: [

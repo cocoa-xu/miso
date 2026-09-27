@@ -69,6 +69,28 @@ public enum SafeFile {
     try handle.synchronize()
   }
 
+  static func replace(_ data: Data, at url: URL) throws {
+    var existing = stat()
+    if lstat(url.path, &existing) == 0 {
+      guard existing.st_mode & S_IFMT == S_IFREG else {
+        throw MisoError.invalid("Refusing to replace a non-regular file")
+      }
+    } else if errno != ENOENT {
+      throw MisoError.system("Inspect atomic output", errno)
+    }
+    let temporary = url.deletingLastPathComponent().appendingPathComponent(
+      ".\(UUID().uuidString).tmp")
+    try writeNew(data, to: temporary)
+    defer { _ = unlink(temporary.path) }
+    guard rename(temporary.path, url.path) == 0 else {
+      throw MisoError.system("Publish atomic output", errno)
+    }
+    let parent = open(url.deletingLastPathComponent().path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+    guard parent >= 0 else { throw MisoError.system("Open output directory", errno) }
+    defer { close(parent) }
+    guard fsync(parent) == 0 else { throw MisoError.system("Synchronize output directory", errno) }
+  }
+
   public static func makeDirectory(_ url: URL) throws {
     guard
       url.deletingLastPathComponent().resolvingSymlinksInPath().path

@@ -1,6 +1,6 @@
 import Foundation
 
-public struct HostInfo: Encodable, Sendable {
+public struct HostInfo: Codable, Sendable {
   public let productVersion: String
   public let productBuild: String
   public let architecture: String
