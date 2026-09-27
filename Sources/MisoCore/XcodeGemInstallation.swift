@@ -37,9 +37,18 @@ public enum XcodeGemInstallation {
           guest.data.directory(configuration.applicationPath).url,
           target: target, configuration: configuration)
         let bin = "/" + rbenv + "/versions/" + plan.rubyVersion + "/bin"
+        let sdk = try guest.run(
+          "gem-sdk-path",
+          arguments: [
+            "/usr/bin/env", "DEVELOPER_DIR=/Library/Developer/CommandLineTools",
+            "/usr/bin/xcrun", "--show-sdk-path",
+          ])
+        guard sdk.hasPrefix("/Library/Developer/CommandLineTools/SDKs/"),
+          sdk.range(of: #"\A/[A-Za-z0-9/._-]+\.sdk\z"#, options: .regularExpression) != nil
+        else { throw MisoError.invalid("Gem compiler SDK is unavailable") }
         let environment = [
           "/usr/bin/env", "PATH=\(bin):/opt/homebrew/bin:/usr/bin:/bin",
-          "DEVELOPER_DIR=/Library/Developer/CommandLineTools",
+          "DEVELOPER_DIR=/Library/Developer/CommandLineTools", "SDKROOT=" + sdk,
           "RBENV_ROOT=/" + rbenv, "LANG=en_US.UTF-8",
           "FASTLANE_SKIP_UPDATE_CHECK=1", "FASTLANE_OPT_OUT_USAGE=1", "FASTLANE_HIDE_CHANGELOG=1",
         ]
