@@ -193,8 +193,37 @@ struct Base: AsyncParsableCommand {
 
   struct Taps: ParsableCommand {
     static let configuration = CommandConfiguration(
-      abstract: "Validate or install resolved local Homebrew tap inputs.",
-      subcommands: [Verify.self, Install.self])
+      abstract: "Resolve, validate or install Homebrew tap inputs.",
+      subcommands: [Resolve.self, Verify.self, Install.self])
+
+    struct Resolve: AsyncParsableCommand {
+      @Option var targetVersion: String
+      @Option var targetBuild: String
+      @Option var config: String?
+      @Option var sources: String?
+      @Option var cache: String?
+      @Option var output: String
+
+      func run() async throws {
+        let settings =
+          try config.map { try JSON.read(BaseConfiguration.self, from: fileURL($0)) }
+          ?? BaseConfiguration()
+        try settings.validate()
+        let mirrors =
+          try sources.map { try JSON.read(BaseSourceConfiguration.self, from: fileURL($0)) }
+          ?? BaseSourceConfiguration()
+        let requests = settings.thirdParty.filter {
+          ["tart-guest-agent", "buildkite-agent@3", "otel-cli"].contains($0.name)
+        }
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          await BaseTapResolution.run(
+            requests: requests, target: .init(version: targetVersion, build: targetBuild),
+            sources: mirrors,
+            output: fileURL(output), cache: cache.map(fileURL), cancellation: cancellation.token))
+      }
+    }
 
     struct Inputs: ParsableArguments {
       @Option var plan: String
@@ -410,19 +439,45 @@ struct Base: AsyncParsableCommand {
 
   struct Bootstrap: ParsableCommand {
     static let configuration = CommandConfiguration(
-      abstract:
-        "Install archived Homebrew inputs and verify restricted target execution on a clone.")
-    @Option var source: String
-    @Option var archive: String
-    @Option var output: String
-    @Option var username = "admin"
-    func run() throws {
-      let cancellation = try CancellationScope()
-      defer { withExtendedLifetime(cancellation) {} }
-      try printJSON(
-        BaseBootstrap.run(
-          source: fileURL(source), archive: fileURL(archive), output: fileURL(output),
-          username: username, cancellation: cancellation.token))
+      abstract: "Resolve or install verified Homebrew bootstrap inputs.",
+      subcommands: [Resolve.self, Install.self], defaultSubcommand: Install.self)
+
+    struct Resolve: AsyncParsableCommand {
+      @Option var targetVersion: String
+      @Option var targetBuild: String
+      @Option var homebrewVersion: String?
+      @Option var sources: String?
+      @Option var cache: String?
+      @Option var output: String
+
+      func run() async throws {
+        let settings =
+          try sources.map { try JSON.read(BaseSourceConfiguration.self, from: fileURL($0)) }
+          ?? BaseSourceConfiguration()
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          await BaseBootstrapResolution.run(
+            target: MacOSRelease(version: targetVersion, build: targetBuild),
+            version: homebrewVersion,
+            sources: settings, output: fileURL(output), cache: cache.map(fileURL),
+            cancellation: cancellation.token))
+      }
+    }
+
+    struct Install: ParsableCommand {
+      @Option var source: String
+      @Option var archive: String
+      @Option var output: String
+      @Option var username = "admin"
+      func run() throws {
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          BaseBootstrap.run(
+            source: fileURL(source), archive: fileURL(archive), output: fileURL(output),
+            username: username, cancellation: cancellation.token))
+      }
     }
   }
 

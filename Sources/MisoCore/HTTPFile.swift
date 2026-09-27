@@ -51,7 +51,7 @@ enum HTTPFile {
     try await fetch(
       url, to: output, maximumBytes: maximumBytes, body: nil, contentType: nil,
       cancellation: cancellation, redirects: redirects, gitProtocolV2: false,
-      configuration: configuration)
+      authorization: nil, configuration: configuration)
   }
 
   static func post(
@@ -67,13 +67,25 @@ enum HTTPFile {
     try await fetch(
       url, to: output, maximumBytes: maximumBytes, body: body, contentType: contentType,
       cancellation: cancellation, redirects: .reject, gitProtocolV2: gitProtocolV2,
-      configuration: configuration)
+      authorization: nil, configuration: configuration)
+  }
+
+  static func homebrewBlob(
+    _ sha256: String, to output: URL, cancellation: CancellationToken? = nil,
+    configuration: URLSessionConfiguration = .ephemeral
+  ) async throws {
+    try SafeFile.validateSHA256(sha256)
+    try await fetch(
+      URL(string: "https://ghcr.io/v2/homebrew/core/portable-ruby/blobs/sha256:\(sha256)")!,
+      to: output, maximumBytes: 64 << 20, body: nil, contentType: nil,
+      cancellation: cancellation, redirects: .homebrewBlob, gitProtocolV2: false,
+      authorization: "Bearer QQ==", configuration: configuration)
   }
 
   private static func fetch(
     _ url: URL, to output: URL, maximumBytes: UInt64, body: Data?, contentType: String?,
     cancellation: CancellationToken?, redirects: HTTPData.RedirectPolicy,
-    gitProtocolV2: Bool,
+    gitProtocolV2: Bool, authorization: String?,
     configuration: URLSessionConfiguration
   ) async throws {
     try validate(url, maximumBytes: maximumBytes)
@@ -90,6 +102,7 @@ enum HTTPFile {
     request.httpMethod = body == nil ? "GET" : "POST"
     if gitProtocolV2 { request.setValue("version=2", forHTTPHeaderField: "Git-Protocol") }
     request.httpBody = body
+    if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
     if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
     request.setValue("miso", forHTTPHeaderField: "User-Agent")

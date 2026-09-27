@@ -239,6 +239,21 @@ private func advertisement(_ selection: GitRemote.Selection) throws -> Data {
     output: temporary.url.appendingPathComponent("replay"), cache: cache,
     configuration: configuration)
   #expect(replay == receipt)
+  let pinned = GitRemote.Selection(
+    reference: "refs/tags/1.0.0", objectID: selection.objectID, commitID: selection.commitID)
+  let pinnedReceipt = GitSnapshot.Receipt(
+    schemaVersion: 1, repository: receipt.repository, selection: pinned,
+    capabilities: receipt.capabilities, advertisement: receipt.advertisement,
+    response: receipt.response)
+  try SafeFile.replace(
+    JSON.encode(pinnedReceipt), at: cache.appendingPathComponent("snapshot.json"))
+  let pinnedReplay = try await GitSnapshot.run(
+    repository: "fixture/repo", reference: pinned.reference,
+    expectedCommit: pinned.commitID, pinned: pinned,
+    output: temporary.url.appendingPathComponent("pinned"), cache: cache,
+    configuration: configuration)
+  #expect(pinnedReplay == pinnedReceipt)
+  try SafeFile.replace(JSON.encode(receipt), at: cache.appendingPathComponent("snapshot.json"))
   await #expect(throws: MisoError.self) {
     try await GitSnapshot.run(
       repository: "fixture/repo", expectedCommit: String(repeating: "a", count: 40),

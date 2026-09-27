@@ -91,7 +91,7 @@ struct GitRemote {
   }
 
   static func referenceRequest(_ prefix: String) throws -> Data {
-    try validateReference(prefix)
+    try validateReference(prefix.hasSuffix("/") ? String(prefix.dropLast()) : prefix)
     return try packet("command=ls-refs\n") + Data("0001".utf8)
       + packet("peel\n") + packet("symrefs\n") + packet("ref-prefix \(prefix)\n")
       + Data("0000".utf8)
@@ -101,6 +101,13 @@ struct GitRemote {
     guard try select(selection.reference) == selection else {
       throw MisoError.invalid("Git selection differs from advertisement")
     }
+    return try Self.fetchRequest(selection)
+  }
+
+  static func fetchRequest(_ selection: Selection) throws -> Data {
+    try validateReference(selection.reference)
+    _ = try objectID(selection.objectID)
+    _ = try objectID(selection.commitID)
     return try Self.packet("command=fetch\n") + Data("0001".utf8)
       + Self.packet("want \(selection.objectID)\n") + Self.packet("deepen 1\n")
       + Self.packet("no-progress\n") + Self.packet("ofs-delta\n") + Self.packet("done\n")

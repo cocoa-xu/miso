@@ -2,7 +2,7 @@ import Foundation
 
 enum HTTPData {
   enum RedirectPolicy: Sendable {
-    case reject, appleKeys, githubRelease
+    case reject, appleKeys, githubRelease, homebrewBlob
 
     func permits(from source: URL, to destination: URL) -> Bool {
       switch self {
@@ -17,6 +17,21 @@ enum HTTPData {
           && destination.fragment == nil && destination.port == nil
           && destination.absoluteString.utf8.count <= 16_384
           && destination.path.hasPrefix("/github-production-release-asset/")
+      case .homebrewBlob:
+        let prefix = "/v2/homebrew/core/portable-ruby/blobs/sha256:"
+        guard source.scheme == "https", source.host == "ghcr.io", source.user == nil,
+          source.password == nil, source.port == nil, source.query == nil, source.fragment == nil,
+          source.path.hasPrefix(prefix)
+        else { return false }
+        let hash = String(source.path.dropFirst(prefix.count))
+        guard (try? SafeFile.validateSHA256(hash)) != nil else { return false }
+        return destination.scheme == "https"
+          && destination.host == "pkg-containers.githubusercontent.com"
+          && destination.user == nil && destination.password == nil && destination.port == nil
+          && destination.fragment == nil && destination.absoluteString.utf8.count <= 16_384
+          && destination.path.range(
+            of: "\\A/ghcrblobs[0-9]{1,4}/blobs/sha256:" + hash + "\\z", options: .regularExpression)
+            != nil
       }
     }
   }
@@ -49,7 +64,9 @@ enum HTTPData {
         completionHandler(nil)
         return
       }
-      completionHandler(request)
+      var forwarded = request
+      if source.host != url.host { forwarded.setValue(nil, forHTTPHeaderField: "Authorization") }
+      completionHandler(forwarded)
     }
   }
 

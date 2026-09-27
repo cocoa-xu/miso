@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "repositories": {
+    "Homebrew/brew": "cocoa-xu/brew",
+    "Homebrew/homebrew-core": "cocoa-xu/homebrew-core",
+    "openai/homebrew-tools": "cocoa-xu/homebrew-tools",
+    "buildkite/homebrew-buildkite": "cocoa-xu/homebrew-buildkite",
+    "equinix-labs/homebrew-otel-cli": "cocoa-xu/homebrew-otel-cli"
+  }
+}

@@ -12,12 +12,19 @@ enum GitSnapshot {
 
   static func run(
     repository: String, reference: String? = nil, expectedCommit: String? = nil,
+    pinned: GitRemote.Selection? = nil,
     output: URL, cache: URL? = nil,
     cancellation: CancellationToken? = nil,
     configuration: URLSessionConfiguration = .ephemeral
   ) async throws -> Receipt {
     let origin = try GitRemote.repositoryURL(repository)
     if let expectedCommit { _ = try GitRemote.objectID(expectedCommit) }
+    if let pinned {
+      guard pinned.reference == (reference ?? "HEAD") else {
+        throw MisoError.invalid("Pinned Git reference differs from request")
+      }
+      _ = try GitRemote.fetchRequest(pinned)
+    }
     let cached = try cache.map { try GuestVolume($0) }
     let previous = try cached.map { try JSON.read(Receipt.self, from: $0.path("snapshot.json")) }
     if let previous {
@@ -52,13 +59,13 @@ enum GitSnapshot {
       let path = output.appendingPathComponent("advertisement.bin")
       try await HTTPFile.post(
         origin.appendingPathComponent("git-upload-pack"),
-        body: GitRemote.referenceRequest(reference ?? "HEAD"),
+        body: GitRemote.referenceRequest(pinned == nil ? (reference ?? "HEAD") : "HEAD"),
         contentType: "application/x-git-upload-pack-request", to: path, maximumBytes: 8 << 20,
         cancellation: cancellation, gitProtocolV2: true, configuration: configuration)
       advertisement = try SafeFile.read(path, limit: 8 << 20)
     }
     let remote = try GitRemote(capabilities: capabilities, references: advertisement)
-    let selection = try remote.select(reference)
+    let selection = try pinned ?? remote.select(reference)
     if let expectedCommit, expectedCommit != selection.commitID {
       throw MisoError.invalid("Git reference differs from required upstream commit")
     }
@@ -75,7 +82,7 @@ enum GitSnapshot {
         to: response, maximumBytes: previous.response.bytes, cancellation: cancellation)
     } else {
       try await HTTPFile.post(
-        origin.appendingPathComponent("git-upload-pack"), body: remote.request(selection),
+        origin.appendingPathComponent("git-upload-pack"), body: GitRemote.fetchRequest(selection),
         contentType: "application/x-git-upload-pack-request", to: response,
         maximumBytes: (128 << 20) + 65_536, cancellation: cancellation,
         gitProtocolV2: true, configuration: configuration

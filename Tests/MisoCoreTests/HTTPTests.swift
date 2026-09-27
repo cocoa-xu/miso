@@ -11,6 +11,18 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
   override func startLoading() {
     let url = request.url!
     let path = url.lastPathComponent
+    if path == "protocol" || url.host == "ghcr.io" {
+      let value =
+        path == "protocol"
+        ? request.value(forHTTPHeaderField: "Git-Protocol")
+        : request.value(forHTTPHeaderField: "Authorization")
+      let response = HTTPURLResponse(
+        url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: Data((value ?? "missing").utf8))
+      client?.urlProtocolDidFinishLoading(self)
+      return
+    }
     if path == "post" {
       var body = request.httpBody ?? Data()
       if let stream = request.httpBodyStream {
@@ -72,6 +84,36 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
     URL(string: "https://fixture.test/accept")!, maximumBytes: 64,
     accept: accept, configuration: stubConfiguration())
   #expect(String(data: data, encoding: .utf8) == accept)
+}
+
+@Test func nativeGitProtocolHeaderIsExplicit() async throws {
+  let url = URL(string: "https://fixture.test/protocol")!
+  #expect(
+    try await HTTPData.get(url, maximumBytes: 64, configuration: stubConfiguration())
+      == Data("missing".utf8))
+  #expect(
+    try await HTTPData.get(
+      url, maximumBytes: 64, gitProtocolV2: true, configuration: stubConfiguration())
+      == Data("version=2".utf8))
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let path = temporary.url.appendingPathComponent("post")
+  try await HTTPFile.post(
+    url, body: Data([1]), contentType: "application/x-git-upload-pack-request",
+    to: path, maximumBytes: 64, gitProtocolV2: true, configuration: stubConfiguration())
+  #expect(try SafeFile.read(path, limit: 64) == Data("version=2".utf8))
+}
+
+@Test func portableRubyUsesOnlyAnonymousRegistryAuthorization() async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let path = temporary.url.appendingPathComponent("ruby")
+  try await HTTPFile.homebrewBlob(
+    String(repeating: "a", count: 64), to: path, configuration: stubConfiguration())
+  #expect(try SafeFile.read(path, limit: 64) == Data("Bearer QQ==".utf8))
+  await #expect(throws: MisoError.self) {
+    try await HTTPFile.homebrewBlob("../other", to: path, configuration: stubConfiguration())
+  }
 }
 
 @Test func boundedNativePayloadDownload() async throws {
@@ -211,6 +253,26 @@ private func stubConfiguration() -> URLSessionConfiguration {
     "https://fcs-keys-pub-prod.cdn-apple.com/fcs-keys/key=?query",
   ] {
     #expect(!HTTPData.RedirectPolicy.appleKeys.permits(from: source, to: URL(string: value)!))
+  }
+}
+
+@Test func homebrewBlobRedirectPreservesDigestIdentity() {
+  let hash = String(repeating: "a", count: 64)
+  let source = URL(string: "https://ghcr.io/v2/homebrew/core/portable-ruby/blobs/sha256:\(hash)")!
+  let path = "/ghcrblobs19/blobs/sha256:" + hash
+  let valid = URL(
+    string: "https://pkg-containers.githubusercontent.com" + path + "?signature=fixture")!
+  #expect(HTTPData.RedirectPolicy.homebrewBlob.permits(from: source, to: valid))
+  for value in [
+    "http://pkg-containers.githubusercontent.com" + path,
+    "https://pkg-containers.githubusercontent.com.evil.test" + path,
+    "https://pkg-containers.githubusercontent.com/ghcrblobs19/blobs/sha256:"
+      + String(repeating: "b", count: 64),
+    "https://user@pkg-containers.githubusercontent.com" + path,
+    "https://pkg-containers.githubusercontent.com:444" + path,
+    "https://pkg-containers.githubusercontent.com/other/" + hash,
+  ] {
+    #expect(!HTTPData.RedirectPolicy.homebrewBlob.permits(from: source, to: URL(string: value)!))
   }
 }
 

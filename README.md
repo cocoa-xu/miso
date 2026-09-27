@@ -77,9 +77,31 @@ with `base packages install --plan resolved-packages/plan.json --inputs resolved
 and the usual `--source` and `--output` options; installation checks actual target
 runtime versions before invoking package managers.
 
-Homebrew bootstrap and tap-backed release selection still require supplied
-plans. `additionalRubyVersions`
-is an explicit compatibility list and can be changed or emptied.
+Resolve Homebrew bootstrap sources and portable Ruby with:
+
+```sh
+miso base bootstrap resolve --target-version 15.6.1 --target-build 24G90 \
+  --sources examples/homebrew-mirrors.json --output bootstrap-inputs
+```
+
+Omit `--sources` to use upstream repositories. `--homebrew-version` selects an exact stable
+tag; otherwise candidates are checked newest first against both Homebrew's macOS
+minimum and its portable Ruby executable. Compatibility probes and payloads are
+preserved for replay; searches are bounded to 256 tags and eight distinct Ruby payloads.
+Source mappings change transport repositories, not upstream identities or versions.
+Forks need not advertise every tag: pinned objects are verified before checkout.
+Use `--cache bootstrap-inputs` with a new output directory for network-free replay.
+The resulting directory is accepted by `base bootstrap --archive`; input resolution
+does not prove installation or runtime compatibility.
+
+`base taps resolve` accepts the same target, source mapping, cache and output options,
+plus `--config` for package requests. It preserves formula history and checks the
+selected arm64 executable's minimum macOS version. Unknown formula layouts fail
+closed. The resulting `plan.json` and directory are accepted by `base taps install
+--plan ... --inputs ...`. Older targets may use the original `cirruslabs/cli` tap;
+its source repository can also be mapped with `cirruslabs/homebrew-cli`.
+
+`additionalRubyVersions` is an explicit compatibility list and can be changed or emptied.
 Versioned formula names such as `node@24` constrain the release line; use `node`
 to select the newest compatible upstream line instead.
 
