@@ -122,6 +122,16 @@ import Testing
   #expect(throws: (any Error).self) {
     try journal.run("unexpected-success", NativeCommand("/usr/bin/true"), expectedExitCodes: [1])
   }
+  try journal.run(
+    "exec-denied", NativeCommand("/bin/sh", arguments: ["-c", "exit 126"]),
+    expectedExitCodes: [1, 126])
+  for status in [0, 125, 127] {
+    #expect(throws: (any Error).self) {
+      try journal.run(
+        "not-privilege-denial", NativeCommand("/bin/sh", arguments: ["-c", "exit \(status)"]),
+        expectedExitCodes: [1, 126])
+    }
+  }
   #expect(throws: (any Error).self) {
     try journal.run(
       "not-an-exit", NativeCommand("/bin/sleep", arguments: ["30"], timeout: 0.05),

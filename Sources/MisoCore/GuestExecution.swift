@@ -209,9 +209,12 @@ final class GuestExecution {
     guard unlink(try data.path(marker).path) == 0 else {
       throw MisoError.system("Remove guest control marker", errno)
     }
-    try run(
-      "guest-privilege-denial", arguments: ["/usr/bin/sudo", "-n", "/usr/bin/id", "-u"],
-      expectedExitCodes: [1])
+    guard
+      try run(
+        "guest-privilege-denial", arguments: ["/usr/bin/sudo", "-n", "/usr/bin/id", "-u"],
+        expectedExitCodes: [1, 126]
+      ).isEmpty
+    else { throw MisoError.invalid("Privilege denial unexpectedly produced output") }
     try run(
       "guest-bootstrap-denial", arguments: ["/bin/launchctl", "print", "system"],
       expectedExitCodes: [1, 113, 141])

@@ -185,5 +185,9 @@ _Noreturn void miso_guest_exec(const char *root, uint32_t uid, uint32_t gid,
     char *environment[] = {"PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
                            "LANG=C", "LC_ALL=C", "TMPDIR=/private/tmp", home, user, login, NULL};
     execve(arguments[0], arguments, environment);
+    if (errno == EPERM || errno == EACCES) {
+        dprintf(STDERR_FILENO, "Guest execution: execve denied (%s)\n", strerror(errno));
+        _exit(126);
+    }
     fail("execve");
 }
