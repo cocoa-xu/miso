@@ -315,7 +315,9 @@ enum BaseExecutionView {
         guard chmod(destination.path, 0o755) == 0 else {
           throw MisoError.system("Set Library overlay mode", errno)
         }
-        for name in try FileManager.default.contentsOfDirectory(atPath: source.path).sorted() {
+        var children = Set(try FileManager.default.contentsOfDirectory(atPath: source.path))
+        if path == "Library/Developer" { children.insert("MISO") }
+        for name in children.sorted() {
           try visit(path + "/" + name)
         }
       } else {
