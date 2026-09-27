@@ -61,3 +61,33 @@ import Testing
   }
   #expect(!FileManager.default.fileExists(atPath: output.path))
 }
+
+@Test func metalFinalizationMakesOnlyTheOwnedRegistrationTraversable() throws {
+  let directory = try TemporaryDirectory()
+  defer { directory.remove() }
+  let data = try GuestVolume(directory.url)
+  let configuration = XcodeConfiguration()
+  let payload = "Library/Developer/MISO/Metal/27A266a/Metal.xctoolchain/usr"
+  let registration = "Library/Developer/Toolchains/MISO-Metal-27A266a.xctoolchain"
+  try data.makeDirectories(payload, uid: geteuid(), gid: getegid())
+  try data.mergePlist(
+    registration + "/Info.plist",
+    values: [
+      "CFBundleIdentifier": try XcodeMetalInstallation.identifier(configuration),
+      "CompatibilityVersion": 2,
+    ], uid: geteuid(), gid: getegid())
+  let link = try data.path(registration + "/usr")
+  #expect(chmod(try data.path(payload).path, 0o700) == 0)
+  #expect(symlink("/" + payload, link.path) == 0)
+  #expect(lchmod(link.path, 0o700) == 0)
+  try XcodeMetalInstallation.finalizeRegistration(configuration: configuration, data: data)
+  #expect(try FileMetadata.inspect(link).st_mode & 0o777 == 0o755)
+  #expect(try FileMetadata.inspect(data.path(payload)).st_mode & 0o777 == 0o700)
+  #expect(unlink(link.path) == 0)
+  #expect(symlink("/unrelated", link.path) == 0)
+  #expect(lchmod(link.path, 0o700) == 0)
+  #expect(throws: MisoError.self) {
+    try XcodeMetalInstallation.finalizeRegistration(configuration: configuration, data: data)
+  }
+  #expect(try FileMetadata.inspect(link).st_mode & 0o777 == 0o700)
+}

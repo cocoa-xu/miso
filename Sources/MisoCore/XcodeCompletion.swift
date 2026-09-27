@@ -56,6 +56,7 @@ public enum XcodeCompletion {
             "verify-final-xcode",
             NativeCommand(
               .codesign, arguments: ["--verify", "--deep", "--strict", app.path], timeout: 900))
+          try XcodeMetalInstallation.finalizeRegistration(configuration: configuration, data: data)
           try validateSelection(data, configuration: configuration)
           let disks = try installDeveloperDisks(
             data, application: app, configuration: configuration, journal: stage)

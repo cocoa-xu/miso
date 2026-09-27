@@ -128,7 +128,8 @@ public enum XcodeMetalInstallation {
     try data.mergePlist(
       path + "/Info.plist",
       values: ["CFBundleIdentifier": identifier, "CompatibilityVersion": 2])
-    guard symlink("/" + payload + "/usr", try data.path(path + "/usr").path) == 0 else {
+    let link = try data.path(path + "/usr")
+    guard symlink("/" + payload + "/usr", link.path) == 0, lchmod(link.path, 0o755) == 0 else {
       throw MisoError.system("Register Metal toolchain payload", errno)
     }
     let home = "Users/" + account.username
@@ -167,6 +168,25 @@ public enum XcodeMetalInstallation {
         fromPropertyList: properties, format: .binary, options: 0),
       uid: account.uid, gid: account.gid)
     return path
+  }
+
+  static func finalizeRegistration(configuration: XcodeConfiguration, data: GuestVolume) throws {
+    guard configuration.components.contains(.metalToolchain) else { return }
+    let identifier = try identifier(configuration)
+    let payload = "Library/Developer/MISO/Metal/\(configuration.build)/Metal.xctoolchain/usr"
+    let registration = "Library/Developer/Toolchains/MISO-Metal-\(configuration.build).xctoolchain"
+    _ = try data.directory(payload)
+    let properties = try data.plist(registration + "/Info.plist")
+    let link = try data.path(registration + "/usr", allowLeafLink: true)
+    let info = try FileMetadata.inspect(link)
+    guard properties["CFBundleIdentifier"] as? String == identifier,
+      properties["CompatibilityVersion"] as? Int == 2,
+      info.st_mode & S_IFMT == S_IFLNK, info.st_uid == geteuid(), info.st_nlink == 1,
+      try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == "/" + payload
+    else { throw MisoError.invalid("Metal registration differs from its configured payload") }
+    guard lchmod(link.path, 0o755) == 0 else {
+      throw MisoError.system("Set Metal registration permissions", errno)
+    }
   }
 
   static func shellProfile(_ existing: Data, identifier: String) throws -> Data {
