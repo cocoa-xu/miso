@@ -2,5 +2,6 @@ module CMiso [system] {
     header "shim.h"
     link "z"
     link "archive.2"
+    link "sqlite3"
     export *
 }

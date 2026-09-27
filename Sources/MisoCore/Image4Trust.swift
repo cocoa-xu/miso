@@ -5,6 +5,8 @@ import Foundation
 enum Image4Trust {
   enum Decoder: String {
     case firmware = "kImg4DecodeSecureBootRsa4kSha384DDI"
+    case globalFirmware = "kImg4DecodeSecureBootRsa4kSha384X86"
+    case globalCryptex = "kImg4DecodeSecureBootRsa4kSha384DDIGlobal"
     case recoveryPolicy = "kImg4DecodeLocalPolicyRsa4kSha384"
     case virtualPolicy = "kImg4DecodeLocalPolicyEc384Sha384Hacktivate"
   }

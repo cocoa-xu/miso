@@ -98,6 +98,21 @@ struct GuestVolume {
     return current
   }
 
+  func makeDirectories(_ relative: String, uid: uid_t = 0, gid: gid_t = 0) throws {
+    var current = ""
+    for part in try SafeFile.relativePath(relative).split(separator: "/") {
+      current += (current.isEmpty ? "" : "/") + part
+      if !(try contains(current)) {
+        let url = try path(current)
+        try SafeFile.makeDirectory(url)
+        guard chown(url.path, uid, gid) == 0, chmod(url.path, 0o755) == 0 else {
+          throw MisoError.system("Set guest directory metadata", errno)
+        }
+      }
+      _ = try directory(current)
+    }
+  }
+
   func write(_ relative: String, data: Data, uid: uid_t = 0, gid: gid_t = 0, mode: mode_t = 0o644)
     throws
   {

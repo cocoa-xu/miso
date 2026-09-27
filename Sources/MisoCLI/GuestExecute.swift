@@ -2,6 +2,15 @@ import ArgumentParser
 import Foundation
 import MisoSystem
 
+struct SecurityProbe: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "_security-probe", shouldDisplay: false)
+  func run() throws {
+    let result = miso_security_probe()
+    guard result == 0 else { throw ExitCode(result) }
+  }
+}
+
 struct GuestExecute: ParsableCommand {
   static let configuration = CommandConfiguration(commandName: "_guest-exec", shouldDisplay: false)
   @Option var root: String

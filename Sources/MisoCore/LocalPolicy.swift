@@ -3,6 +3,7 @@ import Foundation
 import Security
 
 enum LocalPolicy {
+  enum Mode { case standard, base }
   struct Signed {
     let image: Data
     let ticket: Data
@@ -61,17 +62,41 @@ enum LocalPolicy {
   }
 
   static func sign(
-    properties: [String: Data], payload: Data, key: P384.Signing.PrivateKey, chain: Data
+    properties: [String: Data], payload: Data, key: P384.Signing.PrivateKey, chain: Data,
+    mode: Mode = .standard
   ) throws -> Signed {
+    try validate(properties, mode: mode)
+    return try signValidated(properties: properties, payload: payload, key: key, chain: chain)
+  }
+
+  static func validate(_ properties: [String: Data], mode: Mode) throws {
     let required: Set<String> = [
       "BORD", "CHIP", "CPRO", "CSEC", "ECID", "SDOM", "CEPO", "lobo", "lpnh", "rpnh", "nsih",
       "vuid", "love", "kuid",
     ]
     let keys = Set(properties.keys)
-    guard keys == required.union(["hrlp", "spih", "stng"]) || keys == required.union(["rolp"])
-    else {
-      throw MisoError.invalid("Unexpected local policy shape")
+    let system = required.union(["hrlp", "spih", "stng"])
+    switch mode {
+    case .standard:
+      guard keys == system || keys == required.union(["rolp"]) else {
+        throw MisoError.invalid("Unexpected local policy shape")
+      }
+    case .base:
+      guard keys == system.union(["sip0", "sip2", "sip3", "smb0", "smb1"]),
+        properties["sip0"] == DER.integer(127),
+        ["sip2", "sip3", "smb0", "smb1"].allSatisfy({
+          properties[$0] == DER.encode(1, Data([0xFF]))
+        })
+      else {
+        throw MisoError.invalid("Unexpected Base policy shape")
+      }
     }
+  }
+
+  private static func signValidated(
+    properties: [String: Data], payload: Data,
+    key: P384.Signing.PrivateKey, chain: Data
+  ) throws -> Signed {
     let fields = try Image4.payloadFields(payload)
     guard fields[1].content == Data("lpol".utf8) else {
       throw MisoError.invalid("Expected local policy payload")
