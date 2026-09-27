@@ -1,14 +1,14 @@
 import CryptoKit
 import Foundation
 
-public struct DiskLayout: Encodable, Sendable {
+public struct DiskLayout: Codable, Sendable {
   public static let sectorSize: UInt64 = 512
   public static let alignment: UInt64 = 1 << 20
   public static let iscType = UUID(uuidString: "69646961-6700-11AA-AA11-00306543ECAC")!
   public static let apfsType = UUID(uuidString: "7C3457EF-0000-11AA-AA11-00306543ECAC")!
   public static let recoveryType = UUID(uuidString: "52637672-7900-11AA-AA11-00306543ECAC")!
 
-  public struct Partition: Encodable, Sendable {
+  public struct Partition: Codable, Sendable {
     public let name: String
     public let type: UUID
     public let identifier: UUID
@@ -105,7 +105,10 @@ public struct DiskLayout: Encodable, Sendable {
       entries: entries, backup: header(current: sectors - 1, backup: 1, entriesLBA: sectors - 33))
   }
 
-  public static func create(source: URL, output: URL, diskBytes: UInt64, expectedSHA256: String)
+  public static func create(
+    source: URL, output: URL, diskBytes: UInt64, expectedSHA256: String,
+    cancellation: CancellationToken? = nil
+  )
     throws -> Self
   {
     try SafeFile.validateSHA256(expectedSHA256)
@@ -135,6 +138,7 @@ public struct DiskLayout: Encodable, Sendable {
     var copied: UInt64 = 0
     while copied < size {
       try autoreleasepool {
+        try cancellation?.check()
         let chunk = try input.readExactly(Int(min(8 << 20, size - copied)))
         try destination.write(contentsOf: chunk)
         digest.update(data: chunk)
