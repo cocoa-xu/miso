@@ -99,10 +99,11 @@ public enum HomebrewResolution {
       } else if let item = dependency as? [String: Any], item.count == 1, let key = item.keys.first
       {
         let scopes = (item[key] as? [String]) ?? (item[key] as? String).map { [$0] } ?? []
-        guard !scopes.isEmpty, Set(scopes).isSubset(of: ["build", "test", "run"]) else {
+        guard !scopes.isEmpty, Set(scopes).isSubset(of: ["build", "test", "run", "no_linkage"])
+        else {
           throw MisoError.unsupported("macOS dependency scope")
         }
-        if !scopes.contains("run") { continue }
+        if !scopes.contains("run"), scopes.contains("build") || scopes.contains("test") { continue }
         dependencyName = key
       } else {
         throw MisoError.invalid("Invalid macOS dependency")

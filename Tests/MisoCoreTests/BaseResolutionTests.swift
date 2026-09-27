@@ -308,3 +308,25 @@ private func formulaMetadata(
     try HomebrewBottleInputs.resolve(output, names: [], cancellation: nil)
   }
 }
+
+@Test func formulaNoLinkageDependenciesRetainTheirRuntimeScope() throws {
+  let value = try formulaMetadata(
+    changes: [
+      "uses_from_macos": [
+        ["cups": "no_linkage"], ["new-library": ["no_linkage"]],
+        ["compiler": ["build", "no_linkage"]], ["checker": ["test", "no_linkage"]],
+      ] as [Any],
+      "uses_from_macos_bounds": [[:], ["since": "tahoe"], [:], [:]],
+    ])
+  let formula = try HomebrewResolution.parse(
+    value, name: "example", target: RestoreProfile.supported[0].release)
+  #expect(formula.systemDependencies == ["cups"])
+  #expect(formula.dependencies == ["new-library"])
+  #expect(throws: MisoError.self) {
+    try HomebrewResolution.parse(
+      formulaMetadata(changes: [
+        "uses_from_macos": [["cups": ["no_linkage", "unknown"]]],
+        "uses_from_macos_bounds": [[:]],
+      ]), name: "example", target: RestoreProfile.supported[0].release)
+  }
+}
