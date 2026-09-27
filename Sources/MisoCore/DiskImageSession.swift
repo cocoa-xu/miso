@@ -156,11 +156,10 @@ public final class DiskImageSession {
       throw MisoError.invalid("Image sessions require an active operation")
     }
     try journal.cancellation.check()
-    guard image.isFileURL, image.path == image.standardizedFileURL.path,
-      image.path == image.resolvingSymlinksInPath().path
-    else {
+    guard image.isFileURL, image.path == image.standardized.path else {
       throw MisoError.invalid("Image path must be canonical")
     }
+    try SafeFile.requireNoSymlinks(image)
     if !readOnly {
       guard image.path.hasPrefix(journal.output.path + "/") else {
         throw MisoError.invalid("Writable images must belong to this operation's output")
@@ -253,7 +252,7 @@ public final class DiskImageSession {
     var arguments = ["attach", "-nobrowse", "-plist"]
     if readOnly { arguments += ["-readonly", "-owners", "on"] }
     if let mountPoint {
-      guard readOnly, mountPoint.isFileURL, mountPoint.path == mountPoint.standardizedFileURL.path,
+      guard readOnly, mountPoint.isFileURL, mountPoint.path == mountPoint.standardized.path,
         mountPoint.path.hasPrefix(journal.output.path + "/")
       else {
         throw MisoError.invalid(
@@ -289,9 +288,9 @@ public final class DiskImageSession {
     }
   }
 
-  public func verifyOwnership() throws {
+  public func verifyOwnership(cleanup: Bool = false) throws {
     guard let whole else { throw MisoError.invalid("Image is not attached") }
-    let matches = try matchingImages()
+    let matches = try matchingImages(cleanup: cleanup)
     guard matches.count == 1, let match = matches.first,
       match.entities.contains(where: { $0.device == whole })
     else {

@@ -51,9 +51,7 @@ public enum BaseInputArchive {
     _ source: URL, guestPath: String? = nil, cancellation: CancellationToken? = nil
   ) throws -> [Entry] {
     if let guestPath { _ = try SafeFile.relativePath(guestPath) }
-    guard source.path == source.resolvingSymlinksInPath().path else {
-      throw MisoError.invalid("Input resource root must be canonical")
-    }
+    try SafeFile.requireNoSymlinks(source)
     let root = try FileMetadata.inspect(source)
     var entries: [Entry] = []
     func visit(_ url: URL, relative: String) throws {
@@ -92,7 +90,10 @@ public enum BaseInputArchive {
             }
           } else {
             _ = try SafeFile.relativeLink(link, at: relative)
-            guard url.resolvingSymlinksInPath().path.hasPrefix(source.path + "/") else {
+            guard
+              url.resolvingSymlinksInPath().path.hasPrefix(
+                source.resolvingSymlinksInPath().path + "/")
+            else {
               throw MisoError.invalid("Input symlink escapes resource")
             }
           }
@@ -119,10 +120,10 @@ public enum BaseInputArchive {
         resource.path.hasPrefix("/")
         ? URL(fileURLWithPath: resource.path)
         : specification.deletingLastPathComponent().appendingPathComponent(resource.path)
-      let source = url.standardizedFileURL
-      guard source.path == source.resolvingSymlinksInPath().path,
-        output.standardizedFileURL.path != source.path,
-        !output.standardizedFileURL.path.hasPrefix(source.path + "/")
+      let source = url.standardized
+      try SafeFile.requireNoSymlinks(source)
+      guard output.standardized.path != source.path,
+        !output.standardized.path.hasPrefix(source.path + "/")
       else { throw MisoError.invalid("Invalid archive resource path") }
       return source
     }

@@ -42,7 +42,8 @@ enum BootInstallation {
     for relative in boot.directories {
       if mounts[relative] != nil { continue }
       let path = try destination(relative, mounts: mounts)
-      guard mkdir(path.path, 0o755) == 0, chown(path.path, 0, 0) == 0 else {
+      try SafeFile.makeDirectory(path, mode: 0o755)
+      guard chown(path.path, 0, 0) == 0 else {
         throw MisoError.system("Create fresh boot directory", errno)
       }
     }
@@ -58,7 +59,9 @@ enum BootInstallation {
     for link in boot.links {
       _ = try SafeFile.relativePath(link.target)
       let path = try destination(link.path, mounts: mounts)
-      guard symlink(link.target, path.path) == 0, lchown(path.path, 0, 0) == 0 else {
+      guard symlink(link.target, path.path) == 0, lchown(path.path, 0, 0) == 0,
+        lchmod(path.path, 0o755) == 0
+      else {
         throw MisoError.system("Create boot link", errno)
       }
     }
@@ -77,6 +80,11 @@ enum BootInstallation {
       guard info.st_mode & S_IFMT == S_IFDIR else {
         throw MisoError.invalid("Missing boot directory")
       }
+      if mounts[relative] == nil {
+        guard info.st_mode == S_IFDIR | 0o755, info.st_uid == 0, info.st_gid == 0 else {
+          throw MisoError.invalid("Installed boot directory permissions differ: \(relative)")
+        }
+      }
     }
     for record in boot.files {
       try cancellation.check()
@@ -89,7 +97,9 @@ enum BootInstallation {
     for link in boot.links {
       let path = try destination(link.path, mounts: mounts, allowLink: true)
       let rootName = String(link.path.split(separator: "/")[0])
-      guard let root = mounts[rootName], try FileMetadata.inspect(path).st_mode & S_IFMT == S_IFLNK,
+      let info = try FileMetadata.inspect(path)
+      guard let root = mounts[rootName], info.st_mode == S_IFLNK | 0o755,
+        info.st_uid == 0, info.st_gid == 0,
         try FileManager.default.destinationOfSymbolicLink(atPath: path.path) == link.target,
         path.resolvingSymlinksInPath().path.hasPrefix(root.root.path + "/")
       else { throw MisoError.invalid("Installed recovery link mismatch") }

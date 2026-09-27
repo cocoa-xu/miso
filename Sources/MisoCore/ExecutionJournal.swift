@@ -37,7 +37,7 @@ public final class ExecutionJournal {
 
   public init(output: URL, operation: String, cancellation: CancellationToken? = nil) throws {
     try Self.validateName(operation)
-    self.output = output.standardizedFileURL
+    self.output = output.standardized
     self.cancellation = try cancellation ?? CancellationToken()
     let host = try HostInfo.current()
     try SafeFile.makeDirectory(self.output)

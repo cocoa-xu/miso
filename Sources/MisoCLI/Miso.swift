@@ -20,7 +20,7 @@ func printJSON(_ value: some Encodable) throws {
   try FileHandle.standardOutput.write(contentsOf: JSON.encode(value))
 }
 
-func fileURL(_ path: String) -> URL { URL(fileURLWithPath: path).standardizedFileURL }
+func fileURL(_ path: String) -> URL { URL(fileURLWithPath: path).standardized }
 
 struct Profiles: ParsableCommand {
   static let configuration = CommandConfiguration(

@@ -4,6 +4,20 @@ import Testing
 
 @testable import MisoCore
 
+@Test func executionStrategiesFollowReviewedTargetProfiles() throws {
+  #expect(
+    try BaseExecutionView.Mode.select(.init(version: "15.6.1", build: "24G90")) == .mountedSystem)
+  #expect(
+    try BaseExecutionView.Mode.select(.init(version: "26.6.2", build: "25G83")) == .copiedTools)
+  #expect(
+    try BaseExecutionView.Mode.select(.init(version: "27.0", build: "26A428")) == .mountedSystem)
+  for target in [
+    MacOSRelease(version: "26.6.2", build: "unknown"), .init(version: "28.0", build: "future"),
+  ] {
+    #expect(throws: (any Error).self) { try BaseExecutionView.Mode.select(target) }
+  }
+}
+
 @Test func executionLinksHaveExplicitModesAndPreserveTargets() throws {
   let temporary = try TemporaryDirectory()
   defer { temporary.remove() }

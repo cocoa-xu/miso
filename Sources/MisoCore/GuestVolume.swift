@@ -57,10 +57,10 @@ struct GuestVolume {
   let device: dev_t
 
   init(_ root: URL) throws {
-    let info = try FileMetadata.inspect(root)
-    guard info.st_mode & S_IFMT == S_IFDIR, root.path == root.resolvingSymlinksInPath().path else {
-      throw MisoError.invalid("Guest volume root must be a canonical directory")
-    }
+    let descriptor = try SafeFile.openDirectory(root)
+    defer { close(descriptor) }
+    var info = stat()
+    guard fstat(descriptor, &info) == 0 else { throw MisoError.system("Inspect guest root", errno) }
     self.root = root
     device = info.st_dev
   }

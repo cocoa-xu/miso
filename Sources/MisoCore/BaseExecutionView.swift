@@ -2,15 +2,50 @@ import Darwin
 import Foundation
 
 enum BaseExecutionView {
+  enum Mode: String, Codable {
+    case mountedSystem
+    case copiedTools
+
+    static func select(_ target: MacOSRelease) throws -> Self {
+      switch try RestoreProfile.select(target).family {
+      case .sequoia, .goldenGate: .mountedSystem
+      case .tahoe: .copiedTools
+      }
+    }
+  }
+
+  struct Prepared {
+    let root: URL
+    let target: MacOSRelease
+    let mode: Mode
+  }
+
   struct Executable: Codable {
     let path: String
     let originalSHA256: String
     let executionSHA256: String
   }
 
-  static func prepare(image: URL, target: MacOSRelease, journal: ExecutionJournal) throws -> URL {
+  static func prepare(image: URL, target: MacOSRelease, journal: ExecutionJournal) throws
+    -> Prepared
+  {
     try journal.measure("executionViewSeconds") {
-      try create(image: image, target: target, journal: journal)
+      let mode = try Mode.select(target)
+      try journal.setMetadata("executionViewMode", value: mode)
+      let root: URL
+      switch mode {
+      case .copiedTools:
+        root = try create(image: image, target: target, journal: journal)
+      case .mountedSystem:
+        root = journal.output.appendingPathComponent("execution-root")
+        try SafeFile.makeDirectory(root)
+        guard chown(root.path, 0, 0) == 0, chmod(root.path, 0o755) == 0 else {
+          throw MisoError.system("Prepare execution mount point", errno)
+        }
+        try journal.setMetadata("executionTools", value: 0)
+        try journal.setMetadata("outputSystemModified", value: false)
+      }
+      return Prepared(root: root, target: target, mode: mode)
     }
   }
 

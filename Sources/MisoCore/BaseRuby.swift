@@ -116,7 +116,7 @@ public enum BaseRuby {
       var probes: [Probe] = []
       var definitions: [String: String] = [:]
       var identity: [UInt32] = []
-      let payload = try ArchiveToolAdapter.withView(root, target: target, journal: journal) {
+      let payload = try ArchiveToolAdapter.withView(root.root, target: target, journal: journal) {
         try GuestExecution.withSession(
           image: image, root: root, username: username, journal: journal
         ) { guest in

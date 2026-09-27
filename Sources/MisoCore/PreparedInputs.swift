@@ -6,9 +6,7 @@ struct PreparedInputs {
   let journalRecord: ImageBundle.FileRecord
 
   init(_ directory: URL) throws {
-    guard directory.path == directory.resolvingSymlinksInPath().path else {
-      throw MisoError.invalid("Prepared input path must be canonical")
-    }
+    try SafeFile.requireNoSymlinks(directory)
     self.directory = directory
     let journalURL = directory.appendingPathComponent("journal.json")
     let journal = try JSON.read(ExecutionJournal.Record.self, from: journalURL)

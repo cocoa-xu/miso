@@ -14,7 +14,7 @@ private func capturePolicy(hash: String = String(repeating: "a", count: 64))
 }
 
 private func captureVolume(_ temporary: TemporaryDirectory) throws -> GuestVolume {
-  try GuestVolume(temporary.url.resolvingSymlinksInPath())
+  try GuestVolume(temporary.url)
 }
 
 @Test func capturePolicyBindsVersionExpiryAndImplementation() throws {

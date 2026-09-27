@@ -4,12 +4,8 @@ import Foundation
 
 enum Artifacts {
   static func clone(_ source: URL, to output: URL) throws {
-    guard source.path == source.resolvingSymlinksInPath().path,
-      output.deletingLastPathComponent().path
-        == output.deletingLastPathComponent().resolvingSymlinksInPath().path
-    else {
-      throw MisoError.invalid("Clone paths must be canonical")
-    }
+    try SafeFile.requireNoSymlinks(source)
+    try SafeFile.requireNoSymlinks(output.deletingLastPathComponent())
     let input = try SafeFile.openRegular(source)
     defer { try? input.close() }
     var info = stat()
@@ -36,9 +32,7 @@ enum Artifacts {
     _ record: ImageBundle.FileRecord, under root: URL, cancellation: CancellationToken? = nil
   ) throws -> URL {
     let path = root.appendingPathComponent(try SafeFile.relativePath(record.path))
-    guard path.path == path.resolvingSymlinksInPath().path else {
-      throw MisoError.invalid("Artifact path contains a symbolic link")
-    }
+    try SafeFile.requireNoSymlinks(path)
     try SafeFile.validateSHA256(record.sha256)
     let input = try SafeFile.openRegular(path)
     defer { try? input.close() }

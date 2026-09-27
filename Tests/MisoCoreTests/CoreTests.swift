@@ -94,10 +94,9 @@ func unsafePaths(_ path: String) {
 }
 
 @Test func fileSafety() throws {
-  let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-    .appendingPathComponent(UUID().uuidString)
-  try SafeFile.makeDirectory(root)
-  defer { try? FileManager.default.removeItem(at: root) }
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let root = temporary.url
   let file = root.appendingPathComponent("file")
   try SafeFile.writeNew(Data("hello".utf8), to: file)
   #expect(throws: (any Error).self) { try SafeFile.writeNew(Data(), to: file) }

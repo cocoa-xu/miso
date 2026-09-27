@@ -74,13 +74,10 @@ public enum SafeFile {
   }
 
   public static func create(_ url: URL) throws -> FileHandle {
-    guard
-      url.deletingLastPathComponent().resolvingSymlinksInPath().path
-        == url.deletingLastPathComponent().standardizedFileURL.path
-    else {
-      throw MisoError.invalid("Output parent must not contain symbolic links")
-    }
-    let fd = open(url.path, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+    let parent = try openDirectory(url.deletingLastPathComponent())
+    defer { close(parent) }
+    let name = try relativePath(url.lastPathComponent)
+    let fd = openat(parent, name, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
     guard fd >= 0 else { throw MisoError.system("Create \(url.lastPathComponent)", errno) }
     return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
   }
@@ -114,14 +111,51 @@ public enum SafeFile {
     guard fsync(parent) == 0 else { throw MisoError.system("Synchronize output directory", errno) }
   }
 
-  public static func makeDirectory(_ url: URL) throws {
-    let parent = url.deletingLastPathComponent()
-    let resolved = parent.resolvingSymlinksInPath().path
-    guard resolved == parent.standardizedFileURL.path else {
-      throw MisoError.invalid("Output parent is not canonical: \(parent.path) -> \(resolved)")
-    }
-    guard mkdir(url.path, 0o700) == 0 else {
+  public static func makeDirectory(_ url: URL, mode: mode_t = 0o700) throws {
+    guard mode & ~0o777 == 0 else { throw MisoError.invalid("Unsafe directory mode") }
+    let parent = try openDirectory(url.deletingLastPathComponent())
+    defer { close(parent) }
+    let name = try relativePath(url.lastPathComponent)
+    guard mkdirat(parent, name, 0o700) == 0 else {
       throw MisoError.system("Create output directory", errno)
+    }
+    let directory = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+    guard directory >= 0 else { throw MisoError.system("Open created directory", errno) }
+    defer { close(directory) }
+    guard fchmod(directory, mode) == 0 else {
+      throw MisoError.system("Set directory permissions", errno)
+    }
+  }
+
+  static func openDirectory(_ url: URL) throws -> Int32 {
+    guard url.isFileURL, url.path.hasPrefix("/"), url.path == url.standardized.path else {
+      throw MisoError.invalid("Directory path must be absolute and normalized")
+    }
+    var descriptor = open("/", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+    guard descriptor >= 0 else { throw MisoError.system("Open filesystem root", errno) }
+    do {
+      for part in url.path.split(separator: "/") {
+        let next = openat(descriptor, String(part), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard next >= 0 else { throw MisoError.system("Open non-symlink directory", errno) }
+        close(descriptor)
+        descriptor = next
+      }
+      return descriptor
+    } catch {
+      close(descriptor)
+      throw error
+    }
+  }
+
+  static func requireNoSymlinks(_ url: URL) throws {
+    let parent = try openDirectory(url.deletingLastPathComponent())
+    defer { close(parent) }
+    var info = stat()
+    guard fstatat(parent, url.lastPathComponent, &info, AT_SYMLINK_NOFOLLOW) == 0 else {
+      throw MisoError.system("Inspect non-symlink path", errno)
+    }
+    guard info.st_mode & S_IFMT != S_IFLNK else {
+      throw MisoError.invalid("Path contains a symbolic link")
     }
   }
 

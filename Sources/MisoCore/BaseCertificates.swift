@@ -160,11 +160,17 @@ public enum BaseCertificates {
     }
     var merged = certificates.filter { expected.contains($0.key) }
     let link = try guest.data.path("opt/homebrew/opt/ca-certificates", allowLeafLink: true)
-    let mozilla = link.appendingPathComponent("share/ca-certificates/cacert.pem")
-      .resolvingSymlinksInPath()
-    guard mozilla.path.hasPrefix(guest.data.root.path + "/opt/homebrew/Cellar/ca-certificates/"),
-      try FileMetadata.inspect(mozilla).st_dev == guest.data.device
-    else { throw MisoError.invalid("Mozilla certificate path escapes its keg") }
+    let linkDestination = try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
+    let prefix = "../Cellar/ca-certificates/"
+    guard linkDestination.hasPrefix(prefix) else {
+      throw MisoError.invalid("Mozilla certificate link escapes its keg")
+    }
+    let version = String(linkDestination.dropFirst(prefix.count))
+    guard try SafeFile.relativePath(version) == version, !version.contains("/") else {
+      throw MisoError.invalid("Invalid Mozilla certificate keg")
+    }
+    let mozilla = try guest.data.path(
+      "opt/homebrew/Cellar/ca-certificates/" + version + "/share/ca-certificates/cacert.pem")
     for der in try CertificatePEM.decode(SafeFile.read(mozilla, limit: 16 << 20)) {
       guard SecCertificateCreateWithData(nil, der as CFData) != nil else {
         throw MisoError.invalid("Invalid Mozilla X509 certificate")

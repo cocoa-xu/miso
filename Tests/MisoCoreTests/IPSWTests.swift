@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 import ZIPFoundation
@@ -7,8 +8,11 @@ import ZIPFoundation
 struct TemporaryDirectory {
   let url: URL
   init() throws {
-    url = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(
-      UUID().uuidString)
+    guard let resolved = realpath(FileManager.default.temporaryDirectory.path, nil) else {
+      throw MisoError.system("Resolve temporary directory", errno)
+    }
+    defer { free(resolved) }
+    url = URL(fileURLWithPath: String(cString: resolved)).appendingPathComponent(UUID().uuidString)
     try SafeFile.makeDirectory(url)
   }
   func remove() { try? FileManager.default.removeItem(at: url) }

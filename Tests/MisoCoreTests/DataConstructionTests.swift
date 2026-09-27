@@ -68,6 +68,35 @@ import Testing
   }
 }
 
+@Test func systemOverlaysRequireExactOwnedReadOnlyRestrictedMounts() throws {
+  let root = URL(fileURLWithPath: "/fixture/system")
+  let overlay = ImageMounts.SystemOverlay(
+    volume: .init(
+      device: "disk987s1", identifier: UUID(), roles: ["System"], name: nil, mountPoint: root.path),
+    root: root)
+  func validate(
+    role: [String] = ["Data"], path: String = "System/Volumes/Data",
+    device: String = "/dev/disk987s1", mountedAt: String = "/fixture/system",
+    flags: UInt32 = UInt32(MNT_RDONLY | MNT_NOSUID), restricted: Bool = true
+  ) throws {
+    try overlay.validate(
+      mount: root.appendingPathComponent(path), role: role, mountedFrom: device,
+      mountedAt: mountedAt, flags: flags, restricted: restricted)
+  }
+  try validate()
+  try validate(role: ["Preboot"], path: "System/Volumes/Preboot")
+  for role in [[], ["System"], ["Data", "Preboot"]] {
+    #expect(throws: (any Error).self) { try validate(role: role) }
+  }
+  for flags in [UInt32(0), UInt32(MNT_RDONLY), UInt32(MNT_NOSUID)] {
+    #expect(throws: (any Error).self) { try validate(flags: flags) }
+  }
+  #expect(throws: (any Error).self) { try validate(device: "/dev/disk987s2") }
+  #expect(throws: (any Error).self) { try validate(mountedAt: "/") }
+  #expect(throws: (any Error).self) { try validate(path: "Users/admin") }
+  #expect(throws: (any Error).self) { try validate(restricted: false) }
+}
+
 @Test func nativeTemplateCopyPreservesContentsLinksAndMetadata() throws {
   let directory = try TemporaryDirectory()
   defer { directory.remove() }

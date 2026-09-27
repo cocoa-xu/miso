@@ -19,9 +19,7 @@ struct ConstructedDisk<Value: ConstructedDiskReceipt> {
   init(directory: URL, operation: String, inputs: PreparedInputs, cancellation: CancellationToken?)
     throws
   {
-    guard directory.path == directory.resolvingSymlinksInPath().path else {
-      throw MisoError.invalid("Source stage path must be canonical")
-    }
+    try SafeFile.requireNoSymlinks(directory)
     let path = directory.appendingPathComponent("journal.json")
     let journal = try JSON.read(ExecutionJournal.Record.self, from: path)
     guard journal.schemaVersion == 1, journal.operation == operation, journal.status == .complete,
