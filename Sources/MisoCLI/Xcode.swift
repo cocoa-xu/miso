@@ -4,7 +4,7 @@ import MisoCore
 
 struct Xcode: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
-    abstract: "Prepare exact-version Xcode inputs without starting a VM.",
+    abstract: "Prepare and install exact-version Xcode layers without starting a VM.",
     subcommands: [
       Defaults.self, PrepareArchive.self, PrepareMetal.self, PreparePackages.self,
       PrepareRuntime.self,
@@ -38,7 +38,7 @@ struct Xcode: AsyncParsableCommand {
   struct InstallFlutter: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
       commandName: "install-flutter",
-      abstract: "Install the prepared Flutter SDK and test Dart in an offline image clone.")
+      abstract: "Install the signed Flutter SDK and relocate its cache in an offline image clone.")
     @Option var source: String
     @Option var prepared: String
     @Option var output: String
