@@ -62,6 +62,23 @@ private func captureVolume(_ temporary: TemporaryDirectory) throws -> GuestVolum
   #expect(throws: (any Error).self) { try policy.verifyImplementation(binary) }
 }
 
+@Test func sequoiaCaptureReminderRequiresExactReleaseAndImplementation() throws {
+  let target = MacOSRelease(version: "15.6.1", build: "24G90")
+  let policy = capturePolicy(
+    hash: "3013d862c3b03ba286a0354321170f12abc1d8d07cff496cfcf41e585fc03f6c")
+  try policy.validate(target: target, now: captureExpiry.addingTimeInterval(-1))
+  #expect(throws: (any Error).self) { try capturePolicy().validate(target: target) }
+  for other in [
+    MacOSRelease(version: "15.6.1", build: "24G91"),
+    MacOSRelease(version: "15.6.2", build: "24G90"),
+  ] {
+    #expect(throws: (any Error).self) { try policy.validate(target: other) }
+  }
+  #expect(throws: (any Error).self) {
+    try policy.validate(target: target, now: captureExpiry)
+  }
+}
+
 @Test func captureReminderRequiresGrantAndPreservesExistingState() throws {
   let temporary = try TemporaryDirectory()
   defer { temporary.remove() }
