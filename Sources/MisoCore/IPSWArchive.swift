@@ -7,10 +7,29 @@ public final class IPSWArchive {
   private let archive: Archive
   private let entries: [String: Entry]
   private let modes: [String: UInt32]
+  private let source: URL
+  private let sourceHandle: FileHandle
+  private let sourceIdentity: stat
+  public let verifiedArchiveSHA256: String?
 
-  public init(_ url: URL) throws {
+  public init(_ url: URL, expectedSHA256: String? = nil) throws {
+    source = url
     let handle = try SafeFile.openRegular(url)
-    defer { try? handle.close() }
+    sourceHandle = handle
+    var identity = stat()
+    guard fstat(handle.fileDescriptor, &identity) == 0 else {
+      throw MisoError.system("Inspect IPSW", errno)
+    }
+    sourceIdentity = identity
+    if let expectedSHA256 {
+      try SafeFile.validateSHA256(expectedSHA256)
+      guard try SafeFile.sha256(handle) == expectedSHA256 else {
+        throw MisoError.invalid("IPSW SHA-256 mismatch")
+      }
+      verifiedArchiveSHA256 = expectedSHA256
+    } else {
+      verifiedArchiveSHA256 = nil
+    }
     let directory = try ZIPDirectory(handle)
     archive = try Archive(url: url, accessMode: .read)
     var indexed: [String: Entry] = [:]
@@ -25,9 +44,27 @@ public final class IPSWArchive {
     }
     entries = indexed
     modes = directory.fileModes
+    try requireUnchangedSource()
+  }
+
+  deinit { try? sourceHandle.close() }
+
+  private func requireUnchangedSource() throws {
+    var current = stat()
+    guard lstat(source.path, &current) == 0,
+      current.st_dev == sourceIdentity.st_dev, current.st_ino == sourceIdentity.st_ino,
+      current.st_size == sourceIdentity.st_size,
+      current.st_mtimespec.tv_sec == sourceIdentity.st_mtimespec.tv_sec,
+      current.st_mtimespec.tv_nsec == sourceIdentity.st_mtimespec.tv_nsec,
+      current.st_ctimespec.tv_sec == sourceIdentity.st_ctimespec.tv_sec,
+      current.st_ctimespec.tv_nsec == sourceIdentity.st_ctimespec.tv_nsec
+    else {
+      throw MisoError.invalid("IPSW changed during use")
+    }
   }
 
   private func regularEntry(_ path: String) throws -> Entry {
+    try requireUnchangedSource()
     _ = try SafeFile.relativePath(path)
     guard let entry = entries[path], entry.type == .file, entry.uncompressedSize > 0,
       let mode = modes[path], mode & UInt32(S_IFMT) == 0 || mode & UInt32(S_IFMT) == S_IFREG
@@ -55,6 +92,7 @@ public final class IPSWArchive {
     guard checksum == entry.checksum, UInt64(data.count) == entry.uncompressedSize else {
       throw MisoError.invalid("IPSW member checksum or size mismatch")
     }
+    try requireUnchangedSource()
     return data
   }
 
@@ -65,9 +103,13 @@ public final class IPSWArchive {
     public let payloadAuthenticated = false
   }
 
-  public func extract(_ member: String, to output: URL, expectedSHA256: String) throws -> Extraction
+  public func extract(_ member: String, to output: URL, expectedSHA256: String? = nil) throws
+    -> Extraction
   {
-    try SafeFile.validateSHA256(expectedSHA256)
+    guard expectedSHA256 != nil || verifiedArchiveSHA256 != nil else {
+      throw MisoError.invalid("Extraction requires a member or complete archive SHA-256")
+    }
+    if let expectedSHA256 { try SafeFile.validateSHA256(expectedSHA256) }
     let entry = try regularEntry(member)
     let handle = try SafeFile.create(output)
     defer { try? handle.close() }
@@ -84,10 +126,12 @@ public final class IPSWArchive {
       }
     }
     let digest = SafeFile.hex(hash.finalize())
-    guard checksum == entry.checksum, written == entry.uncompressedSize, digest == expectedSHA256
+    guard checksum == entry.checksum, written == entry.uncompressedSize,
+      expectedSHA256 == nil || digest == expectedSHA256
     else {
       throw MisoError.invalid("Extracted member checksum mismatch; incomplete output retained")
     }
+    try requireUnchangedSource()
     try handle.synchronize()
     return Extraction(member: member, bytes: written, sha256: digest)
   }

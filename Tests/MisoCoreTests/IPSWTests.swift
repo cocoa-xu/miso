@@ -153,3 +153,24 @@ func restoreSelection(_ profile: RestoreProfile) throws {
   try SafeFile.writeNew(device, to: deviceURL)
   #expect(throws: (any Error).self) { try IPSWArchive(deviceURL).read("member") }
 }
+
+@Test func zipExtractionRequiresPinnedDigestAndUnchangedInput() throws {
+  let directory = try TemporaryDirectory()
+  defer { directory.remove() }
+  let source = directory.url.appendingPathComponent("archive.zip")
+  let content = Data("verified archive fixture".utf8)
+  try zipFixture(at: source, members: [("member", content)])
+  let output = directory.url.appendingPathComponent("output")
+  #expect(throws: (any Error).self) { try IPSWArchive(source).extract("member", to: output) }
+  #expect(!FileManager.default.fileExists(atPath: output.path))
+  #expect(throws: (any Error).self) {
+    try IPSWArchive(source, expectedSHA256: String(repeating: "0", count: 64))
+  }
+  let reader = try IPSWArchive(source, expectedSHA256: SafeFile.sha256(source))
+  #expect(try reader.extract("member", to: output).sha256 == SafeFile.sha256(content))
+  let replacement = directory.url.appendingPathComponent("replacement.zip")
+  try zipFixture(at: replacement, members: [("member", Data("changed".utf8))])
+  try FileManager.default.removeItem(at: source)
+  try FileManager.default.moveItem(at: replacement, to: source)
+  #expect(throws: (any Error).self) { try reader.read("member") }
+}
