@@ -83,9 +83,15 @@ miso xcode prepare-archive --archive Xcode_27.0_Apple_silicon.xip \
 the signed application with filesystem compression, audits every file and selects
 the target developer directory. Its manifest preserves Base completion and records
 Xcode stages separately, with Xcode completion and runtime verification still false.
-First-launch packages, simulator and component installation, complete Xcode image
-construction and independent guest acceptance remain incomplete. These commands
-do not start a VM or install Xcode on the host.
+These commands do not start a VM or install Xcode on the host.
+
+`xcode complete --source <xcode-bundle> --output <stage>` requires every configured
+Xcode layer, rechecks the selected application, SDKs, license and package receipts,
+and installs the four original developer disk payloads from the signed package.
+The final bundle is `<stage>/image/bundle`. Its construction completion flag remains
+separate from runtime verification: first-launch status, compilation, tests and
+simulator execution still require acceptance on an independent disposable clone.
+End-to-end Xcode acceptance remains pending.
 
 This is an in-progress native migration. The commands below work without starting
 a virtual machine. The experimental `restore` and `base build` commands have

@@ -12,8 +12,28 @@ struct Xcode: AsyncParsableCommand {
       InstallMetal.self, PrepareGems.self, InstallGems.self, PrepareCasks.self, InstallCasks.self,
       PrepareSimulatorTools.self, InstallSimulatorTools.self,
       PrepareTuist.self, InstallTuist.self, PrepareAndroid.self, InstallAndroid.self,
-      PrepareFlutter.self, InstallFlutter.self,
+      PrepareFlutter.self, InstallFlutter.self, Complete.self,
     ])
+
+  struct Complete: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Finish all configured Xcode layers and install developer disks without a VM.")
+    @Option var source: String
+    @Option var output: String
+    @Option var config: String?
+
+    @MainActor func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        XcodeCompletion.run(
+          source: fileURL(source), output: fileURL(output),
+          configuration: try config.map {
+            try JSON.read(XcodeConfiguration.self, from: fileURL($0))
+          }
+            ?? .init(), cancellation: cancellation.token))
+    }
+  }
 
   struct InstallFlutter: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
