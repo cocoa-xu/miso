@@ -203,6 +203,9 @@ public enum XcodeSimulatorTools {
         else {
           throw MisoError.invalid("Unexpected simulator tool cache selection")
         }
+        try guest.data.makeDirectories(
+          (cached as NSString).deletingLastPathComponent,
+          uid: guest.account.uid, gid: guest.account.gid)
         let destination = try guest.data.path(cached)
         try Artifacts.copy(
           Artifacts.resolve(inputs.archive, under: replay), to: destination,
