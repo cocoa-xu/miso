@@ -2,7 +2,7 @@ import Foundation
 
 enum HTTPData {
   enum RedirectPolicy: Sendable {
-    case reject, appleKeys
+    case reject, appleKeys, githubRelease
 
     func permits(from source: URL, to destination: URL) -> Bool {
       switch self {
@@ -10,6 +10,13 @@ enum HTTPData {
       case .appleKeys:
         return HTTPData.isAppleKeyURL(source) && HTTPData.isAppleKeyURL(destination)
           && source.path == destination.path
+      case .githubRelease:
+        return HTTPData.isGitHubReleaseURL(source) && destination.scheme == "https"
+          && destination.host == "release-assets.githubusercontent.com"
+          && destination.user == nil && destination.password == nil
+          && destination.fragment == nil && destination.port == nil
+          && destination.absoluteString.utf8.count <= 16_384
+          && destination.path.hasPrefix("/github-production-release-asset/")
       }
     }
   }
@@ -52,6 +59,15 @@ enum HTTPData {
       && url.user == nil && url.password == nil && url.fragment == nil && url.query == nil
       && (url.port == nil || url.port == 443) && url.path.hasPrefix("/fcs-keys/")
       && url.path.count > 10 && url.path.count <= 1024
+  }
+
+  static func isGitHubReleaseURL(_ url: URL) -> Bool {
+    url.scheme == "https" && url.host == "github.com" && url.user == nil && url.password == nil
+      && url.query == nil && url.fragment == nil && url.port == nil
+      && url.path.range(
+        of:
+          #"\A/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z"#,
+        options: .regularExpression) != nil
   }
 
   static func get(

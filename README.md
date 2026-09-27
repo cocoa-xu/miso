@@ -77,8 +77,8 @@ with `base packages install --plan resolved-packages/plan.json --inputs resolved
 and the usual `--source` and `--output` options; installation checks actual target
 runtime versions before invoking package managers.
 
-Homebrew bootstrap, Ruby itself and other third-party release selection still
-require supplied plans. `additionalRubyVersions`
+Homebrew bootstrap and other third-party release selection still require supplied
+plans. `additionalRubyVersions`
 is an explicit compatibility list and can be changed or emptied.
 Versioned formula names such as `node@24` constrain the release line; use `node`
 to select the newest compatible upstream line instead.
@@ -141,13 +141,22 @@ are deferred unless `--post-install` is supplied. That experimental option invok
 upstream hook methods under the same guest restrictions, then checks target tools,
 dependencies and linkage. This remains incomplete Base without VM runtime acceptance.
 
-`base ruby verify --plan ruby.json --inputs source-directory` verifies a resolved
+`base ruby resolve --resolution resolved --bottles bottle-directory --output ruby-sources`
+selects the newest stable Ruby known to the target's verified ruby-build bottle,
+or `rubyVersion` from `--config`. It resolves `additionalRubyVersions` too,
+selects a compatible resolved OpenSSL formula or a vendored source, and downloads
+checksum-bound source archives. Unsupported definition syntax fails closed.
+`--cache ruby-sources` replays without network access; retain the core resolution,
+bottles and source directory for reproducibility. Source selection does not prove
+compiler, SDK or runtime compatibility; the target build must still pass.
+
+`base ruby verify --plan ruby-sources/plan.json --inputs ruby-sources` verifies a resolved
 Ruby build plan and local source digests. `base ruby install` adds `--source bundle
 --output new-stage` and requires root. The plan selects exact Ruby versions,
 source file records, an OpenSSL formula (or vendored source), a default version and
 1–8 compilation jobs. Builds use the target CLT/SDK with explicit target parameters
 and no network access. Extension, default-shim and detached payload checks do not
-replace a VM boot test. Automatic Ruby version resolution remains pending.
+replace a VM boot test.
 
 `base packages verify --plan packages.json --inputs source-directory` validates
 resolved Bundler/npm metadata and local payloads. `base packages install` adds

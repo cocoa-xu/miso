@@ -284,7 +284,31 @@ struct Base: AsyncParsableCommand {
   struct Ruby: ParsableCommand {
     static let configuration = CommandConfiguration(
       abstract: "Build resolved Ruby sources using the target toolchain without booting.",
-      subcommands: [Verify.self, Install.self])
+      subcommands: [Resolve.self, Verify.self, Install.self])
+
+    struct Resolve: AsyncParsableCommand {
+      static let configuration = CommandConfiguration(
+        abstract: "Resolve Ruby sources from a target-compatible ruby-build bottle.")
+      @Option var config: String?
+      @Option var resolution: String
+      @Option var bottles: String
+      @Option var cache: String?
+      @Option var output: String
+      @Option var jobs = 4
+
+      func run() async throws {
+        let settings =
+          try config.map { try JSON.read(BaseConfiguration.self, from: fileURL($0)) }
+          ?? BaseConfiguration()
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          await BaseRubyResolution.run(
+            configuration: settings, resolution: fileURL(resolution), bottles: fileURL(bottles),
+            output: fileURL(output), cache: cache.map(fileURL), jobs: jobs,
+            cancellation: cancellation.token))
+      }
+    }
 
     struct Inputs: ParsableArguments {
       @Option var plan: String

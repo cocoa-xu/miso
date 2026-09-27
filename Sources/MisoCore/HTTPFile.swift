@@ -5,9 +5,9 @@ enum HTTPFile {
     let maximumBytes: Int64
     let gate: HTTPData.RedirectGate
 
-    init(url: URL, maximumBytes: Int64) {
+    init(url: URL, maximumBytes: Int64, redirects: HTTPData.RedirectPolicy) {
       self.maximumBytes = maximumBytes
-      gate = HTTPData.RedirectGate(source: url, policy: .reject)
+      gate = HTTPData.RedirectGate(source: url, policy: redirects)
     }
 
     func urlSession(
@@ -45,6 +45,7 @@ enum HTTPFile {
   static func get(
     _ url: URL, to output: URL, maximumBytes: UInt64,
     cancellation: CancellationToken? = nil,
+    redirects: HTTPData.RedirectPolicy = .reject,
     configuration: URLSessionConfiguration = .ephemeral
   ) async throws {
     try validate(url, maximumBytes: maximumBytes)
@@ -54,7 +55,7 @@ enum HTTPFile {
     configuration.urlCache = nil
     configuration.timeoutIntervalForRequest = 30
     configuration.timeoutIntervalForResource = 300
-    let delegate = Delegate(url: url, maximumBytes: Int64(maximumBytes))
+    let delegate = Delegate(url: url, maximumBytes: Int64(maximumBytes), redirects: redirects)
     let session = URLSession(configuration: configuration)
     defer { session.invalidateAndCancel() }
     var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
@@ -65,7 +66,9 @@ enum HTTPFile {
         let (temporary, response) = try await session.download(for: request, delegate: delegate)
         defer { try? FileManager.default.removeItem(at: temporary) }
         guard let response = response as? HTTPURLResponse, response.statusCode == 200,
-          response.url == url, response.expectedContentLength <= maximumBytes
+          let destination = response.url,
+          destination == url || redirects.permits(from: url, to: destination),
+          response.expectedContentLength <= maximumBytes
         else { throw MisoError.invalid("Unexpected HTTPS payload response") }
         try Artifacts.copy(
           temporary, to: output, maximumBytes: maximumBytes,
