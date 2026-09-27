@@ -64,6 +64,18 @@ import Testing
     #expect(!value.1.contains("allow network"))
   }
 
+  @Test func flutterWritesOnlyItsSDKAndCachesWithoutNetworking() {
+    let value = policy(capability: "flutter")
+    #expect(value.0 == 0)
+    for path in ["flutter", ".pub-cache", ".config/flutter", ".dart-tool"] {
+      #expect(value.1.contains("(subpath \"/Users/admin/\(path)\")"))
+    }
+    #expect(!value.1.contains("(subpath \"/Users/admin/.config\")"))
+    #expect(!value.1.contains("(subpath \"/Users/admin\")"))
+    #expect(value.1.contains("(deny network*)"))
+    #expect(!value.1.contains("allow network"))
+  }
+
   @Test func miseCannotWriteUnrelatedHomeConfiguration() {
     let value = policy(capability: "mise")
     #expect(value.0 == 0)

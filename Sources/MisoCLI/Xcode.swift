@@ -12,7 +12,46 @@ struct Xcode: AsyncParsableCommand {
       InstallMetal.self, PrepareGems.self, InstallGems.self, PrepareCasks.self, InstallCasks.self,
       PrepareSimulatorTools.self, InstallSimulatorTools.self,
       PrepareTuist.self, InstallTuist.self, PrepareAndroid.self, InstallAndroid.self,
+      PrepareFlutter.self, InstallFlutter.self,
     ])
+
+  struct InstallFlutter: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "install-flutter",
+      abstract: "Install the prepared Flutter SDK and test Dart in an offline image clone.")
+    @Option var source: String
+    @Option var prepared: String
+    @Option var output: String
+    @Option var username = "admin"
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        await XcodeFlutterInstallation.install(
+          source: fileURL(source), prepared: fileURL(prepared), output: fileURL(output),
+          username: username, cancellation: cancellation.token))
+    }
+  }
+
+  struct PrepareFlutter: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "prepare-flutter",
+      abstract: "Prepare stable Flutter, Dart and default platform caches with offline replay.")
+    @Option var targetVersion: String
+    @Option var targetBuild: String
+    @Option var cache: String?
+    @Option var output: String
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        await XcodeFlutterInputs.prepare(
+          target: .init(version: targetVersion, build: targetBuild), output: fileURL(output),
+          cache: cache.map(fileURL), cancellation: cancellation.token))
+    }
+  }
 
   struct InstallAndroid: AsyncParsableCommand {
     static let configuration = CommandConfiguration(

@@ -75,8 +75,9 @@ int miso_guest_policy(const char *root, const char *username, const char *capabi
     bool cask = strcmp(capability, "cask") == 0;
     bool mise = strcmp(capability, "mise") == 0;
     bool android = strcmp(capability, "android") == 0;
+    bool flutter = strcmp(capability, "flutter") == 0;
     bool brew = strcmp(capability, "brew") == 0 || cask;
-    if (!readonly && !ruby && !git && !brew && !mise && !android && strcmp(capability, "base")) return EINVAL;
+    if (!readonly && !ruby && !git && !brew && !mise && !android && !flutter && strcmp(capability, "base")) return EINVAL;
     policy_buffer policy = {buffer, capacity, 0, 0};
     append(&policy, "(version 1)(allow default)(deny file-write*)(deny network*)"
                     "(deny mach-lookup)(deny process-info* (target others))"
@@ -108,6 +109,13 @@ int miso_guest_policy(const char *root, const char *username, const char *capabi
         if (android) {
             const char *directories[] = {"android-sdk", ".android"};
             for (size_t i = 0; i < 2; i++) {
+                snprintf(home, sizeof(home), "/Users/%s/%s", username, directories[i]);
+                aliases(&policy, root, "subpath", home);
+            }
+        }
+        if (flutter) {
+            const char *directories[] = {"flutter", ".pub-cache", ".config/flutter", ".dart-tool"};
+            for (size_t i = 0; i < 4; i++) {
                 snprintf(home, sizeof(home), "/Users/%s/%s", username, directories[i]);
                 aliases(&policy, root, "subpath", home);
             }
