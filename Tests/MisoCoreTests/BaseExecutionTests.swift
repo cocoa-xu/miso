@@ -4,6 +4,34 @@ import Testing
 
 @testable import MisoCore
 
+@Test func executionLinksHaveExplicitModesAndPreserveTargets() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  for mode: mode_t in [0o700, 0o755, 0o555] {
+    let link = temporary.url.appendingPathComponent("link-\(mode)")
+    try BaseExecutionView.createLink("/System/Volumes/Data/Users", at: link, mode: mode)
+    #expect(try FileMetadata.inspect(link).st_mode & 0o777 == mode)
+    #expect(
+      try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
+        == "/System/Volumes/Data/Users")
+  }
+}
+
+@Test func executionLinksRejectUnsafeModesAndExistingFiles() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let file = temporary.url.appendingPathComponent("existing")
+  let bytes = Data("preserved".utf8)
+  try SafeFile.writeNew(bytes, to: file)
+  #expect(throws: (any Error).self) { try BaseExecutionView.createLink("/target", at: file) }
+  #expect(try SafeFile.read(file, limit: 64) == bytes)
+  let unsafe = temporary.url.appendingPathComponent("unsafe")
+  #expect(throws: (any Error).self) {
+    try BaseExecutionView.createLink("/target", at: unsafe, mode: 0o777)
+  }
+  #expect(!FileManager.default.fileExists(atPath: unsafe.path))
+}
+
 @Test func executionFirmlinksAreExplicitAndBounded() throws {
   #expect(
     try BaseExecutionView.firmlinks("# mappings\n/Library\tLibrary\n/usr/local usr/local\n") == [

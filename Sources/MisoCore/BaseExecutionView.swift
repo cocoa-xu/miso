@@ -109,9 +109,7 @@ enum BaseExecutionView {
           }
         case S_IFLNK:
           let link = try FileManager.default.destinationOfSymbolicLink(atPath: source.path)
-          guard symlink(link, destination.path) == 0 else {
-            throw MisoError.system("Copy execution link", errno)
-          }
+          try createLink(link, at: destination, mode: info.st_mode & 0o755)
         default: throw MisoError.invalid("Unsupported execution source entry")
         }
       }
@@ -159,6 +157,16 @@ enum BaseExecutionView {
     }
   }
 
+  static func createLink(_ target: String, at destination: URL, mode: mode_t = 0o755) throws {
+    guard mode & ~0o755 == 0 else { throw MisoError.invalid("Unsafe execution link mode") }
+    guard symlink(target, destination.path) == 0 else {
+      throw MisoError.system("Create execution link", errno)
+    }
+    guard lchmod(destination.path, mode) == 0 else {
+      throw MisoError.system("Set execution link mode", errno)
+    }
+  }
+
   static func firmlinks(_ text: String) throws -> [String: String] {
     var bindings: [String: String] = [:]
     for line in text.split(separator: "\n") {
@@ -188,9 +196,7 @@ enum BaseExecutionView {
         throw MisoError.invalid("Firmlink stub must be empty: \(path)")
       }
     }
-    guard symlink("/System/Volumes/Data/" + target, destination.path) == 0 else {
-      throw MisoError.system("Create execution firmlink", errno)
-    }
+    try createLink("/System/Volumes/Data/" + target, at: destination)
   }
 
   private static func buildLibraryOverlay(
@@ -224,9 +230,7 @@ enum BaseExecutionView {
           try visit(path + "/" + name)
         }
       } else {
-        guard symlink("/System/Volumes/Data/" + path, destination.path) == 0 else {
-          throw MisoError.system("Link execution Library payload", errno)
-        }
+        try createLink("/System/Volumes/Data/" + path, at: destination)
       }
     }
     try visit("Library")
