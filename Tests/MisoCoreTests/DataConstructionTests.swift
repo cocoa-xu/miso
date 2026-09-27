@@ -4,6 +4,34 @@ import Testing
 
 @testable import MisoCore
 
+@Test func guestWritesAreAtomicAndBoundToDirectoryIdentity() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let volume = try GuestVolume(temporary.url)
+  let expected = Data([1, 2, 3])
+  try volume.write("nested/value", data: expected, uid: geteuid(), gid: getegid(), mode: 0o640)
+  let directory = try volume.directory("nested")
+  try directory.replace("value", data: Data([4]), uid: geteuid(), gid: getegid(), mode: 0o600)
+  #expect(try SafeFile.read(volume.path("nested/value"), limit: 10) == Data([4]))
+  #expect(try FileMetadata.inspect(volume.path("nested/value")).st_mode & 0o777 == 0o600)
+  try FileManager.default.createSymbolicLink(
+    at: directory.url.appendingPathComponent("link"),
+    withDestinationURL: directory.url.appendingPathComponent("value"))
+  for name in ["link", "../escape", "nested/escape"] {
+    #expect(throws: (any Error).self) {
+      try directory.replace(name, data: expected, uid: geteuid(), gid: getegid(), mode: 0o600)
+    }
+  }
+  #expect(try SafeFile.read(volume.path("nested/value"), limit: 10) == Data([4]))
+  try FileManager.default.moveItem(
+    at: directory.url, to: temporary.url.appendingPathComponent("old"))
+  try SafeFile.makeDirectory(directory.url)
+  #expect(throws: (any Error).self) {
+    try directory.replace("value", data: expected, uid: geteuid(), gid: getegid(), mode: 0o600)
+  }
+  #expect(try FileManager.default.contentsOfDirectory(atPath: directory.url.path).isEmpty)
+}
+
 @Test func guestDirectoryChecksRejectSymlinksWithinTheirVolume() throws {
   let directory = try TemporaryDirectory()
   defer { directory.remove() }

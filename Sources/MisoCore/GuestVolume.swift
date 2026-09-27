@@ -11,6 +11,45 @@ struct GuestDirectory {
     device = info.st_dev
     inode = info.st_ino
   }
+
+  func replace(_ name: String, data: Data, uid: uid_t, gid: gid_t, mode: mode_t) throws {
+    guard try SafeFile.relativePath(name) == name, !name.contains("/") else {
+      throw MisoError.invalid("Expected a guest file name")
+    }
+    let parent = open(url.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+    guard parent >= 0 else { throw MisoError.system("Open guest output directory", errno) }
+    defer { close(parent) }
+    var info = stat()
+    guard fstat(parent, &info) == 0, info.st_dev == device, info.st_ino == inode,
+      info.st_mode & S_IFMT == S_IFDIR
+    else { throw MisoError.invalid("Guest output directory identity changed") }
+    if fstatat(parent, name, &info, AT_SYMLINK_NOFOLLOW) == 0 {
+      guard info.st_mode & S_IFMT == S_IFREG, info.st_dev == device else {
+        throw MisoError.invalid("Refusing to replace a non-regular guest file")
+      }
+    } else if errno != ENOENT {
+      throw MisoError.system("Inspect guest output file", errno)
+    }
+    let temporary = ".\(UUID().uuidString).tmp"
+    let fd = openat(parent, temporary, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+    guard fd >= 0 else { throw MisoError.system("Create guest output file", errno) }
+    let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+    defer {
+      try? handle.close()
+      _ = unlinkat(parent, temporary, 0)
+    }
+    try handle.write(contentsOf: data)
+    guard fchown(fd, uid, gid) == 0, fchmod(fd, mode) == 0 else {
+      throw MisoError.system("Set guest file metadata", errno)
+    }
+    try handle.synchronize()
+    guard renameat(parent, temporary, parent, name) == 0 else {
+      throw MisoError.system("Publish guest output file", errno)
+    }
+    guard fsync(parent) == 0 else {
+      throw MisoError.system("Synchronize guest output directory", errno)
+    }
+  }
 }
 
 struct GuestVolume {
@@ -63,10 +102,9 @@ struct GuestVolume {
     throws
   {
     let target = try path(relative, createParents: true)
-    try SafeFile.replace(data, at: target)
-    guard chown(target.path, uid, gid) == 0, chmod(target.path, mode) == 0 else {
-      throw MisoError.system("Set guest file metadata", errno)
-    }
+    let parent = relative.split(separator: "/").dropLast().joined(separator: "/")
+    try directory(parent.isEmpty ? nil : parent).replace(
+      target.lastPathComponent, data: data, uid: uid, gid: gid, mode: mode)
   }
 
   func contains(_ relative: String) throws -> Bool {
