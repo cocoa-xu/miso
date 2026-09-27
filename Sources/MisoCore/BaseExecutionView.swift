@@ -217,8 +217,11 @@ enum BaseExecutionView {
     let digest = try SafeFile.sha256(executable)
     let temporary = executable.deletingLastPathComponent()
       .appendingPathComponent(".miso-signed-" + UUID().uuidString)
-    try Artifacts.clone(executable, to: temporary)
+    try Artifacts.copy(executable, to: temporary, maximumBytes: UInt64(original.st_size))
     defer { try? FileManager.default.removeItem(at: temporary) }
+    guard chown(temporary.path, original.st_uid, original.st_gid) == 0,
+      chmod(temporary.path, original.st_mode & 0o7777) == 0
+    else { throw MisoError.system("Set signed execution copy metadata", errno) }
     let replacement = try FileMetadata.inspect(temporary)
     guard replacement.st_ino != original.st_ino, replacement.st_dev == original.st_dev,
       replacement.st_mode == original.st_mode, replacement.st_uid == original.st_uid,
