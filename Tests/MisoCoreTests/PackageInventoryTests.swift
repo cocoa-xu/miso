@@ -4,6 +4,45 @@ import Testing
 
 @testable import MisoCore
 
+@Test func cltPreflightRejectsMissingAndChangedInputsWithoutCreatingOutputs() throws {
+  let directory = try TemporaryDirectory()
+  defer { directory.remove() }
+  let profile = RestoreProfile.supported[1]
+  #expect(throws: (any Error).self) {
+    try CommandLineTools.validateInputs(packages: directory.url, profile: profile)
+  }
+  #expect(try FileManager.default.contentsOfDirectory(atPath: directory.url.path).isEmpty)
+  let first = try #require(CLTPins.packages[profile.commandLineTools.product]?.first)
+  try SafeFile.writeNew(Data([1]), to: directory.url.appendingPathComponent(first.filename))
+  #expect(throws: (any Error).self) {
+    try CommandLineTools.validateInputs(packages: directory.url, profile: profile)
+  }
+  #expect(
+    try FileManager.default.contentsOfDirectory(atPath: directory.url.path) == [first.filename])
+}
+
+@Test(
+  .enabled(
+    if: ProcessInfo.processInfo.environment["MISO_CLT_PACKAGES"] != nil
+      && ProcessInfo.processInfo.environment["MISO_CLT_OUTPUT"] != nil))
+func pinnedCLTPackagesPassNativePreparation() throws {
+  let environment = ProcessInfo.processInfo.environment
+  let build = environment["MISO_CLT_BUILD"] ?? "25G83"
+  let profile = try #require(RestoreProfile.supported.first { $0.release.build == build })
+  let packages = URL(fileURLWithPath: try #require(environment["MISO_CLT_PACKAGES"]))
+  let output = URL(fileURLWithPath: try #require(environment["MISO_CLT_OUTPUT"]))
+  let journal = try ExecutionJournal(output: output, operation: "verify-clt-packages")
+  try journal.setMetadata("target", value: profile.release)
+  _ = try journal.perform {
+    let prepared = try CommandLineTools.prepare(
+      packages: packages, profile: profile, journal: journal)
+    #expect(prepared.packages.count == 9)
+    #expect(prepared.expansions.count == 9)
+    #expect(prepared.entries.count > 1_000)
+    return prepared.packages
+  }
+}
+
 @Test func cltProfilesContainUniquePinnedPackages() throws {
   for profile in RestoreProfile.supported {
     let packages = try #require(CLTPins.packages[profile.commandLineTools.product])

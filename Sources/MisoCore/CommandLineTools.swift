@@ -22,31 +22,35 @@ enum CommandLineTools {
     let manualIndexSHA256: String
   }
 
-  static func install(
-    data: GuestVolume, packages: URL, profile: RestoreProfile, journal: ExecutionJournal
-  ) throws -> Receipt {
+  struct Prepared {
+    let packages: [Package]
+    let entries: [String: PackageInventory.Entry]
+    let expansions: [URL]
+  }
+
+  static func validateInputs(
+    packages: URL, profile: RestoreProfile, cancellation: CancellationToken? = nil
+  ) throws -> (source: GuestVolume, pins: [CLTPins.Package]) {
     let product = profile.commandLineTools.product
     guard let pins = CLTPins.packages[product] else { throw MisoError.unsupported("CLT product") }
-    guard try !data.contains(PackageInventory.root) else {
-      throw MisoError.invalid("CLT is already installed")
-    }
-    let receipts = "Library/Apple/System/Library/Receipts/"
-    if try data.contains(receipts.dropLast().description) {
-      guard
-        try !FileManager.default.contentsOfDirectory(
-          atPath: data.path(String(receipts.dropLast())).path
-        ).contains(where: {
-          $0.hasPrefix("com.apple.pkg.CLTools_") && $0.hasSuffix(".plist")
-        })
-      else { throw MisoError.invalid("Existing CLT receipts cannot be replaced") }
-    }
     let source = try GuestVolume(packages)
     for pin in pins {
-      try journal.cancellation.check()
-      guard try SafeFile.sha256(source.path(pin.filename)) == pin.sha256 else {
+      try cancellation?.check()
+      let handle = try SafeFile.openRegular(source.path(pin.filename))
+      defer { try? handle.close() }
+      guard try SafeFile.sha256(handle, cancellation: cancellation) == pin.sha256 else {
         throw MisoError.invalid("CLT package digest mismatch: \(pin.filename)")
       }
     }
+    return (source, pins)
+  }
+
+  static func prepare(packages: URL, profile: RestoreProfile, journal: ExecutionJournal) throws
+    -> Prepared
+  {
+    let product = profile.commandLineTools.product
+    let (source, pins) = try validateInputs(
+      packages: packages, profile: profile, cancellation: journal.cancellation)
     let staging = journal.output.appendingPathComponent("clt-packages")
     try SafeFile.makeDirectory(staging)
     var records: [Package] = []
@@ -118,6 +122,30 @@ enum CommandLineTools {
     }
     try SafeFile.writeNew(
       JSON.encode(combined), to: journal.output.appendingPathComponent("clt-inventory.json"))
+    return Prepared(packages: records, entries: combined, expansions: expansions)
+  }
+
+  static func install(
+    data: GuestVolume, packages: URL, profile: RestoreProfile, journal: ExecutionJournal
+  ) throws -> Receipt {
+    let product = profile.commandLineTools.product
+    guard try !data.contains(PackageInventory.root) else {
+      throw MisoError.invalid("CLT is already installed")
+    }
+    let receipts = "Library/Apple/System/Library/Receipts/"
+    if try data.contains(receipts.dropLast().description) {
+      guard
+        try !FileManager.default.contentsOfDirectory(
+          atPath: data.path(String(receipts.dropLast())).path
+        ).contains(where: {
+          $0.hasPrefix("com.apple.pkg.CLTools_") && $0.hasSuffix(".plist")
+        })
+      else { throw MisoError.invalid("Existing CLT receipts cannot be replaced") }
+    }
+    let prepared = try prepare(packages: packages, profile: profile, journal: journal)
+    let records = prepared.packages
+    let combined = prepared.entries
+    let expansions = prepared.expansions
     var required: UInt64 = 8 << 30
     for (relative, entry) in combined {
       if entry.kind == S_IFREG {

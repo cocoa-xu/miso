@@ -18,6 +18,8 @@ public enum ToolsConstruction {
     }
     _ = try APFSPrivate.requireHost()
     let inputs = try PreparedInputs(prepared)
+    _ = try CommandLineTools.validateInputs(
+      packages: packages, profile: inputs.receipt.profile, cancellation: cancellation)
     let source = try ConstructedDisk<DataConstruction.Receipt>(
       directory: dataStage, operation: "populate-data", inputs: inputs, cancellation: cancellation)
     let journal = try ExecutionJournal(

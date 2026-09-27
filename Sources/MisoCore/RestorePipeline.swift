@@ -18,6 +18,9 @@ public enum RestorePipeline {
       throw MisoError.invalid("Offline restore requires administrator privileges")
     }
     try configuration.validate()
+    guard !configuration.installRosetta else {
+      throw MisoError.unsupported("offline macOS Rosetta installation")
+    }
     _ = try APFSPrivate.requireHost()
     _ = try GuestVolume(packages)
     let journal = try ExecutionJournal(
@@ -31,6 +34,11 @@ public enum RestorePipeline {
     let boot = journal.output.appendingPathComponent("boot")
     let assembled = journal.output.appendingPathComponent("assembled")
     do {
+      try journal.setMetadata("stage", value: "preflight-inputs")
+      let inspection = try RestoreInspection.inspect(ipsw)
+      try journal.setMetadata("target", value: inspection.profile.release)
+      _ = try CommandLineTools.validateInputs(
+        packages: packages, profile: inspection.profile, cancellation: journal.cancellation)
       try journal.setMetadata("stage", value: "prepare")
       let inputs = try await RestorePreparation.run(
         ipsw: ipsw, configuration: configuration, output: prepared,
