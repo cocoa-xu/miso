@@ -5,7 +5,7 @@ import Testing
 
 @testable import MisoCore
 
-private struct PackFixture {
+struct PackFixture {
   var payload = Data()
   var count: UInt32 = 0
 

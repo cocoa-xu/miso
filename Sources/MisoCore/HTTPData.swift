@@ -74,11 +74,13 @@ enum HTTPData {
     _ url: URL, maximumBytes: Int, cancellation: CancellationToken? = nil,
     redirects: RedirectPolicy = .reject,
     accept: String? = nil,
+    gitProtocolV2: Bool = false,
     configuration: URLSessionConfiguration = .ephemeral
   ) async throws -> Data {
     try await fetch(
       url, method: "GET", body: nil, maximumBytes: maximumBytes,
-      cancellation: cancellation, redirects: redirects, accept: accept, configuration: configuration
+      cancellation: cancellation, redirects: redirects, accept: accept,
+      gitProtocolV2: gitProtocolV2, configuration: configuration
     )
   }
 
@@ -91,12 +93,14 @@ enum HTTPData {
     }
     return try await fetch(
       url, method: "POST", body: body, maximumBytes: maximumBytes,
-      cancellation: cancellation, redirects: .reject, accept: nil, configuration: configuration)
+      cancellation: cancellation, redirects: .reject, accept: nil,
+      gitProtocolV2: false, configuration: configuration)
   }
 
   private static func fetch(
     _ url: URL, method: String, body: Data?, maximumBytes: Int, cancellation: CancellationToken?,
-    redirects: RedirectPolicy, accept: String?, configuration: URLSessionConfiguration
+    redirects: RedirectPolicy, accept: String?, gitProtocolV2: Bool,
+    configuration: URLSessionConfiguration
   ) async throws -> Data {
     guard url.scheme == "https", url.host != nil, url.user == nil, url.password == nil,
       url.fragment == nil, maximumBytes > 0, maximumBytes <= 8 << 20
@@ -118,6 +122,7 @@ enum HTTPData {
     defer { session.invalidateAndCancel() }
     var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
     request.httpMethod = method
+    if gitProtocolV2 { request.setValue("version=2", forHTTPHeaderField: "Git-Protocol") }
     request.httpBody = body
     if let accept { request.setValue(accept, forHTTPHeaderField: "Accept") }
     if body != nil { request.setValue("text/xml", forHTTPHeaderField: "Content-Type") }

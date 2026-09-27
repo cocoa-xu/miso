@@ -50,12 +50,14 @@ enum HTTPFile {
   ) async throws {
     try await fetch(
       url, to: output, maximumBytes: maximumBytes, body: nil, contentType: nil,
-      cancellation: cancellation, redirects: redirects, configuration: configuration)
+      cancellation: cancellation, redirects: redirects, gitProtocolV2: false,
+      configuration: configuration)
   }
 
   static func post(
     _ url: URL, body: Data, contentType: String, to output: URL, maximumBytes: UInt64,
     cancellation: CancellationToken? = nil,
+    gitProtocolV2: Bool = false,
     configuration: URLSessionConfiguration = .ephemeral
   ) async throws {
     guard !body.isEmpty, body.count <= 4 << 20,
@@ -64,12 +66,14 @@ enum HTTPFile {
     else { throw MisoError.invalid("Invalid HTTPS payload request body or content type") }
     try await fetch(
       url, to: output, maximumBytes: maximumBytes, body: body, contentType: contentType,
-      cancellation: cancellation, redirects: .reject, configuration: configuration)
+      cancellation: cancellation, redirects: .reject, gitProtocolV2: gitProtocolV2,
+      configuration: configuration)
   }
 
   private static func fetch(
     _ url: URL, to output: URL, maximumBytes: UInt64, body: Data?, contentType: String?,
     cancellation: CancellationToken?, redirects: HTTPData.RedirectPolicy,
+    gitProtocolV2: Bool,
     configuration: URLSessionConfiguration
   ) async throws {
     try validate(url, maximumBytes: maximumBytes)
@@ -84,6 +88,7 @@ enum HTTPFile {
     defer { session.invalidateAndCancel() }
     var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
     request.httpMethod = body == nil ? "GET" : "POST"
+    if gitProtocolV2 { request.setValue("version=2", forHTTPHeaderField: "Git-Protocol") }
     request.httpBody = body
     if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
