@@ -9,6 +9,14 @@ enum BaseExecutionView {
   }
 
   static func prepare(image: URL, target: MacOSRelease, journal: ExecutionJournal) throws -> URL {
+    try journal.measure("executionViewSeconds") {
+      try create(image: image, target: target, journal: journal)
+    }
+  }
+
+  private static func create(image: URL, target: MacOSRelease, journal: ExecutionJournal) throws
+    -> URL
+  {
     let root = journal.output.appendingPathComponent("execution-root")
     try SafeFile.makeDirectory(root)
     guard chmod(root.path, 0o700) == 0 else {

@@ -98,3 +98,18 @@ import Testing
   #expect(first != second)
   #expect(journal.record.commands.map(\.name) == ["install-bottle", "install-bottle"])
 }
+
+@Test func journalMeasuresSuccessfulAndFailedNativeWork() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let journal = try ExecutionJournal(
+    output: temporary.url.appendingPathComponent("journal"),
+    operation: "base-timing")
+  #expect(try journal.measure("successSeconds") { 42 } == 42)
+  #expect(throws: MisoError.self) {
+    try journal.measure("failureSeconds") { throw MisoError.invalid("Expected failure") }
+  }
+  #expect(journal.record.metadata["successSeconds"] != nil)
+  #expect(journal.record.metadata["failureSeconds"] != nil)
+  #expect(journal.record.status == .running)
+}

@@ -63,6 +63,19 @@ public final class ExecutionJournal {
   }
 
   @discardableResult
+  public func measure<T>(_ name: String, body: () throws -> T) throws -> T {
+    let started = ProcessInfo.processInfo.systemUptime
+    do {
+      let value = try body()
+      try setMetadata(name, value: ProcessInfo.processInfo.systemUptime - started)
+      return value
+    } catch {
+      try? setMetadata(name, value: ProcessInfo.processInfo.systemUptime - started)
+      throw error
+    }
+  }
+
+  @discardableResult
   public func run(
     _ name: String, _ command: NativeCommand, cleanup: Bool = false, output: URL? = nil,
     expectedExitCodes: Set<Int32> = [0]

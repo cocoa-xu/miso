@@ -43,11 +43,14 @@ enum BaseImageStage {
       let version = targetFields["version"], let build = targetFields["build"]
     else { throw MisoError.invalid("A never-booted native source bundle is required") }
     let target = try RestoreProfile.select(.init(version: version, build: build)).release
+    let verificationStarted = ProcessInfo.processInfo.systemUptime
     let original = try ImageBundle.verify(source)
+    let initialVerificationSeconds = ProcessInfo.processInfo.systemUptime - verificationStarted
     let journal = try ExecutionJournal(
       output: output, operation: operation, cancellation: cancellation)
     return try journal.perform {
       try journal.setMetadata("target", value: target)
+      try journal.setMetadata("initialSourceVerificationSeconds", value: initialVerificationSeconds)
       let sourceSession = try DiskImageSession(
         image: source.appendingPathComponent("disk.img"), readOnly: true, journal: journal)
       try sourceSession.requireDetached()
@@ -57,13 +60,18 @@ enum BaseImageStage {
         try Artifacts.clone(
           source.appendingPathComponent(name), to: bundle.appendingPathComponent(name))
       }
-      let details = try body(bundle, target, journal)
+      let details = try journal.measure("stageSeconds") { try body(bundle, target, journal) }
       try sourceSession.requireDetached()
-      guard try ImageBundle.verify(source).files == original.files,
+      let sourceAfter = try journal.measure("finalSourceVerificationSeconds") {
+        try ImageBundle.verify(source)
+      }
+      guard sourceAfter.files == original.files,
         try Artifacts.record(manifestURL, relativeTo: source) == sourceManifest
       else { throw MisoError.invalid("Base source changed during construction") }
-      let files = try ImageBundle.requiredFiles.sorted().map {
-        try Artifacts.record(bundle.appendingPathComponent($0), relativeTo: bundle)
+      let files = try journal.measure("outputHashingSeconds") {
+        try ImageBundle.requiredFiles.sorted().map {
+          try Artifacts.record(bundle.appendingPathComponent($0), relativeTo: bundle)
+        }
       }
       for file in files where file.path != "disk.img" {
         guard original.files.contains(file) else {
@@ -80,7 +88,7 @@ enum BaseImageStage {
       try SafeFile.writeNew(
         JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]),
         to: bundle.appendingPathComponent("manifest.json"))
-      _ = try ImageBundle.verify(bundle)
+      try journal.measure("outputVerificationSeconds") { try ImageBundle.verify(bundle) }
       return BaseStageReceipt(
         target: target, sourceManifest: sourceManifest, files: files,
         details: details, originalsUnchanged: true, baseComplete: false,
