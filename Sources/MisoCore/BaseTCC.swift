@@ -2,6 +2,17 @@ import Darwin
 import Foundation
 
 enum BaseTCC {
+  static func directoryMode(userOwned: Bool) -> mode_t {
+    userOwned ? 0o700 : 0o755
+  }
+
+  static func verifyDirectory(_ url: URL, uid: uid_t, gid: gid_t, userOwned: Bool) throws {
+    let info = try FileMetadata.inspect(url)
+    guard info.st_uid == uid, info.st_gid == gid,
+      info.st_mode == S_IFDIR | directoryMode(userOwned: userOwned)
+    else { throw MisoError.invalid("TCC directory ownership or mode differs") }
+  }
+
   struct Grant: Equatable {
     let service: String
     let client: String

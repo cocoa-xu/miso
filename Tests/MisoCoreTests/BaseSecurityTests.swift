@@ -22,6 +22,29 @@ private let securitySchema = """
     PRIMARY KEY(service,client,client_type,indirect_object_identifier));
   """
 
+@Test func tccDirectoriesKeepSharedPolicyReadableAndUserDataPrivate() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let directory = try securityDatabaseURL(temporary).deletingLastPathComponent()
+  for userOwned in [false, true] {
+    let expected: mode_t = userOwned ? 0o700 : 0o755
+    #expect(BaseTCC.directoryMode(userOwned: userOwned) == expected)
+    #expect(chmod(directory.path, expected) == 0)
+    try BaseTCC.verifyDirectory(directory, uid: getuid(), gid: getgid(), userOwned: userOwned)
+    #expect(throws: (any Error).self) {
+      try BaseTCC.verifyDirectory(directory, uid: getuid(), gid: getgid(), userOwned: !userOwned)
+    }
+    #expect(throws: (any Error).self) {
+      try BaseTCC.verifyDirectory(directory, uid: getuid() + 1, gid: getgid(), userOwned: userOwned)
+    }
+  }
+  let link = directory.appendingPathComponent("link")
+  try FileManager.default.createSymbolicLink(at: link, withDestinationURL: directory)
+  #expect(throws: (any Error).self) {
+    try BaseTCC.verifyDirectory(link, uid: getuid(), gid: getgid(), userOwned: true)
+  }
+}
+
 @Test func sqliteBindsTypedValuesAndDeniesExternalDatabases() throws {
   let database = try SQLiteDatabase()
   try database.script("CREATE TABLE sample (i,t,b,n,r)")

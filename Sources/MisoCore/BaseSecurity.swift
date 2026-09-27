@@ -182,7 +182,9 @@ public enum BaseSecurity {
       let gid = userOwned ? guest.account.gid : 0
       try guest.data.makeDirectories(prefix, uid: uid, gid: gid)
       let directory = try guest.data.directory(prefix).url
-      guard chown(directory.path, uid, gid) == 0, chmod(directory.path, 0o700) == 0 else {
+      guard chown(directory.path, uid, gid) == 0,
+        chmod(directory.path, BaseTCC.directoryMode(userOwned: userOwned)) == 0
+      else {
         throw MisoError.system("Set TCC directory metadata", errno)
       }
       let path = prefix + "/TCC.db"
@@ -237,6 +239,11 @@ public enum BaseSecurity {
   private static func verifyMetadata(
     _ url: URL, account: BaseImageStage.Account, userOwned: Bool, database: Bool
   ) throws {
+    if database {
+      try BaseTCC.verifyDirectory(
+        url.deletingLastPathComponent(), uid: userOwned ? account.uid : 0,
+        gid: userOwned ? account.gid : 0, userOwned: userOwned)
+    }
     let info = try FileMetadata.inspect(url)
     guard info.st_uid == (userOwned ? account.uid : 0),
       info.st_gid == (userOwned ? account.gid : 0),
