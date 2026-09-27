@@ -11,8 +11,27 @@ struct Xcode: AsyncParsableCommand {
       InstallApplication.self, InstallPackages.self, InstallBottles.self, InstallRuntime.self,
       InstallMetal.self, PrepareGems.self, InstallGems.self, PrepareCasks.self, InstallCasks.self,
       PrepareSimulatorTools.self, InstallSimulatorTools.self,
-      PrepareTuist.self, InstallTuist.self, PrepareAndroid.self,
+      PrepareTuist.self, InstallTuist.self, PrepareAndroid.self, InstallAndroid.self,
     ])
+
+  struct InstallAndroid: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "install-android",
+      abstract: "Install and test the prepared Android SDK and NDK in an offline image clone.")
+    @Option var source: String
+    @Option var prepared: String
+    @Option var output: String
+    @Option var username = "admin"
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        await XcodeAndroidInstallation.install(
+          source: fileURL(source), prepared: fileURL(prepared), output: fileURL(output),
+          username: username, cancellation: cancellation.token))
+    }
+  }
 
   struct PrepareAndroid: AsyncParsableCommand {
     static let configuration = CommandConfiguration(

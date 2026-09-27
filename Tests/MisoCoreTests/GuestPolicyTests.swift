@@ -54,6 +54,16 @@ import Testing
     #expect(!policy(capability: "brew").1.contains("/Applications/"))
   }
 
+  @Test func androidCannotWriteUnrelatedHomeFilesOrUseTheNetwork() {
+    let value = policy(capability: "android")
+    #expect(value.0 == 0)
+    #expect(value.1.contains("(subpath \"/Users/admin/android-sdk\")"))
+    #expect(value.1.contains("(subpath \"/Users/admin/.android\")"))
+    #expect(!value.1.contains("(subpath \"/Users/admin\")"))
+    #expect(value.1.contains("(deny network*)"))
+    #expect(!value.1.contains("allow network"))
+  }
+
   @Test func miseCannotWriteUnrelatedHomeConfiguration() {
     let value = policy(capability: "mise")
     #expect(value.0 == 0)
