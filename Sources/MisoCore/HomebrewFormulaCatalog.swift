@@ -7,6 +7,17 @@ struct HomebrewFormulaCatalog {
 
   var count: Int { documents.count }
 
+  static func download(
+    to output: URL, cancellation: CancellationToken? = nil,
+    configuration: URLSessionConfiguration = .ephemeral
+  ) async throws -> Self {
+    try await HTTPFile.get(
+      URL(string: "https://formulae.brew.sh/api/formula.json")!, to: output,
+      maximumBytes: UInt64(maximumBytes), cancellation: cancellation,
+      configuration: configuration)
+    return try Self(SafeFile.read(output, limit: maximumBytes))
+  }
+
   init(_ data: Data) throws {
     guard data.count <= Self.maximumBytes,
       let entries = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],

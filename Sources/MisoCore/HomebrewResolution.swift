@@ -251,11 +251,11 @@ public enum HomebrewResolution {
           data = try SafeFile.read(try GuestVolume(metadata).path(name + ".json"), limit: 8 << 20)
         } else {
           if catalog == nil {
-            let bytes = try await HTTPData.get(
-              URL(string: "https://formulae.brew.sh/api/formula.json")!,
-              maximumBytes: HomebrewFormulaCatalog.maximumBytes, cancellation: journal.cancellation)
-            let snapshot = try HomebrewFormulaCatalog(bytes)
-            try journal.setMetadata("catalogSHA256", value: SafeFile.sha256(bytes))
+            let archive = journal.output.appendingPathComponent("catalog.json")
+            let snapshot = try await HomebrewFormulaCatalog.download(
+              to: archive, cancellation: journal.cancellation)
+            try journal.setMetadata(
+              "catalog", value: Artifacts.record(archive, relativeTo: journal.output))
             try journal.setMetadata("catalogRevision", value: snapshot.revision)
             try journal.setMetadata("catalogFormulaCount", value: snapshot.count)
             catalog = snapshot

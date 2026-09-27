@@ -13,6 +13,44 @@ private func catalogData(_ entries: [[String: Any]]) throws -> Data {
   try JSONSerialization.data(withJSONObject: entries)
 }
 
+private final class CatalogHTTPProtocol: URLProtocol, @unchecked Sendable {
+  override class func canInit(with request: URLRequest) -> Bool { true }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func stopLoading() {}
+
+  override func startLoading() {
+    do {
+      let entries = (0..<1_100).map { index in
+        var entry = catalogEntry("formula-\(index)")
+        entry["description"] = String(repeating: "x", count: 8_192)
+        return entry
+      }
+      let bytes = try catalogData(entries)
+      let response = HTTPURLResponse(
+        url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+        headerFields: ["Content-Length": String(bytes.count)])!
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: bytes)
+      client?.urlProtocolDidFinishLoading(self)
+    } catch {
+      client?.urlProtocol(self, didFailWithError: error)
+    }
+  }
+}
+
+@Test func formulaCatalogDownloadSupportsLargerThanMetadataResponses() async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let output = temporary.url.appendingPathComponent("catalog.json")
+  let configuration = URLSessionConfiguration.ephemeral
+  configuration.protocolClasses = [CatalogHTTPProtocol.self]
+  let catalog = try await HomebrewFormulaCatalog.download(to: output, configuration: configuration)
+  #expect(catalog.count == 1_100)
+  #expect(catalog.revision == catalogRevision)
+  #expect(try Data(contentsOf: output).count > 8 << 20)
+  #expect(throws: (any Error).self) { try catalog.document("missing") }
+}
+
 @Test func formulaCatalogPreservesOneSnapshotAndSelectedMetadata() throws {
   var entry = catalogEntry("node@24")
   entry["versions"] = ["stable": "24.9.0"]
