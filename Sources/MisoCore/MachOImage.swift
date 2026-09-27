@@ -13,6 +13,7 @@ struct MachOImage {
   let segments: [Segment]
   let symbols: [String: UInt64]
   let ambiguousSymbols: Set<String>
+  let minimumMacOS: UInt32?
 
   init(_ data: Data, offset: Int = 0) throws {
     self.data = data
@@ -31,6 +32,7 @@ struct MachOImage {
     var members: [String: UInt64] = [:]
     var segments: [Segment] = []
     var table: (Int, Int, Int, Int)?
+    var minimumMacOS: UInt32?
     for _ in 0..<count {
       guard cursor <= end - 8 else { throw MisoError.invalid("Truncated Mach-O load command") }
       let command = try data.integer(at: cursor, as: UInt32.self)
@@ -39,6 +41,19 @@ struct MachOImage {
         throw MisoError.invalid("Invalid Mach-O load command size")
       }
       switch command {
+      case 0x32:
+        guard size >= 24 else { throw MisoError.invalid("Truncated Mach-O build version") }
+        if try data.integer(at: cursor + 8, as: UInt32.self) == 1 {
+          guard minimumMacOS == nil,
+            try data.integer(at: cursor + 20, as: UInt32.self) == (size - 24) / 8
+          else { throw MisoError.invalid("Ambiguous Mach-O build version") }
+          minimumMacOS = try data.integer(at: cursor + 12, as: UInt32.self)
+        }
+      case 0x24:
+        guard size == 16, minimumMacOS == nil else {
+          throw MisoError.invalid("Ambiguous Mach-O minimum version")
+        }
+        minimumMacOS = try data.integer(at: cursor + 8, as: UInt32.self)
       case 0x8000_0035:
         guard size >= 32, type == 12 else { throw MisoError.invalid("Invalid fileset entry") }
         let memberOffset = try data.integer(at: cursor + 16, as: UInt64.self)
@@ -75,6 +90,7 @@ struct MachOImage {
       cursor += size
     }
     guard cursor == end else { throw MisoError.invalid("Mach-O command count mismatch") }
+    self.minimumMacOS = minimumMacOS
     var symbols: [String: UInt64] = [:]
     var ambiguous = Set<String>()
     if let (offset, count, strings, size) = table {

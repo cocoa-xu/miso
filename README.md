@@ -57,9 +57,28 @@ miso base archive create --spec inputs.json --output archived-inputs
 miso base archive verify archived-inputs
 ```
 
-Resolution does not install software or prove runtime compatibility. Only core
-formula requests are currently resolved; Homebrew itself, Ruby, npm and third-party
-selectors are configuration for the remaining migration. `additionalRubyVersions`
+Resolution does not install software or prove runtime compatibility. `base resolve`
+resolves core formula requests. `base packages resolve` separately resolves Bundler,
+yarn and pnpm against explicit target Ruby, RubyGems, Node and npm versions:
+
+```sh
+miso base packages resolve --config base.json --target-version 26.6.2 \
+  --target-build 25G83 --ruby-version 4.0.7 --rubygems-version 4.0.20 \
+  --node-formula node@24 --node-version 24.21.0 --npm-version 11.19.0 \
+  --output resolved-packages
+```
+
+Omit npm request versions to follow the upstream stable channel with compatibility
+fallback. `--bundler-version` selects an exact Bundler release. Payloads, registry
+metadata and `plan.json` are retained; repeating the command with
+`--cache resolved-packages` and a new output directory replays without network
+access. Missing cached inputs fail instead of falling back to the network. Install
+with `base packages install --plan resolved-packages/plan.json --inputs resolved-packages`
+and the usual `--source` and `--output` options; installation checks actual target
+runtime versions before invoking package managers.
+
+Homebrew bootstrap, Ruby itself and other third-party release selection still
+require supplied plans. `additionalRubyVersions`
 is an explicit compatibility list and can be changed or emptied.
 Versioned formula names such as `node@24` constrain the release line; use `node`
 to select the newest compatible upstream line instead.
@@ -88,7 +107,7 @@ Recipes contain `schemaVersion: 1`, `target`, `username`, and ordered `steps`:
 and SHA-256 hashes, and `directories` relative to `--inputs`. Bottle steps also
 select `formulae`. Archive and resolution records name `archive.json` and
 `resolution.json`. Final cleanup is derived from the verified package and CA plans.
-This replay interface does not yet select the latest non-core packages for you.
+This replay interface consumes supplied inputs; it does not run online resolvers.
 
 The explicit Base security stage reduces SIP protections and configures automation
 permissions. It is not applied by the Vanilla restore command. Security, settings,

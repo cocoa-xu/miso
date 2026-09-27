@@ -57,11 +57,13 @@ enum HTTPData {
   static func get(
     _ url: URL, maximumBytes: Int, cancellation: CancellationToken? = nil,
     redirects: RedirectPolicy = .reject,
+    accept: String? = nil,
     configuration: URLSessionConfiguration = .ephemeral
   ) async throws -> Data {
     try await fetch(
       url, method: "GET", body: nil, maximumBytes: maximumBytes,
-      cancellation: cancellation, redirects: redirects, configuration: configuration)
+      cancellation: cancellation, redirects: redirects, accept: accept, configuration: configuration
+    )
   }
 
   static func post(
@@ -73,12 +75,12 @@ enum HTTPData {
     }
     return try await fetch(
       url, method: "POST", body: body, maximumBytes: maximumBytes,
-      cancellation: cancellation, redirects: .reject, configuration: configuration)
+      cancellation: cancellation, redirects: .reject, accept: nil, configuration: configuration)
   }
 
   private static func fetch(
     _ url: URL, method: String, body: Data?, maximumBytes: Int, cancellation: CancellationToken?,
-    redirects: RedirectPolicy, configuration: URLSessionConfiguration
+    redirects: RedirectPolicy, accept: String?, configuration: URLSessionConfiguration
   ) async throws -> Data {
     guard url.scheme == "https", url.host != nil, url.user == nil, url.password == nil,
       url.fragment == nil, maximumBytes > 0, maximumBytes <= 8 << 20
@@ -86,6 +88,11 @@ enum HTTPData {
       throw MisoError.invalid("Invalid HTTPS request")
     }
     try cancellation?.check()
+    if let accept {
+      guard !accept.isEmpty, accept.utf8.count <= 128,
+        accept.utf8.allSatisfy({ (32...126).contains($0) })
+      else { throw MisoError.invalid("Invalid HTTP Accept header") }
+    }
     configuration.httpCookieStorage = nil
     configuration.urlCredentialStorage = nil
     configuration.urlCache = nil
@@ -96,6 +103,7 @@ enum HTTPData {
     var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
     request.httpMethod = method
     request.httpBody = body
+    if let accept { request.setValue(accept, forHTTPHeaderField: "Accept") }
     if body != nil { request.setValue("text/xml", forHTTPHeaderField: "Content-Type") }
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
     request.setValue(body == nil ? "miso" : "InetURL/1.0", forHTTPHeaderField: "User-Agent")

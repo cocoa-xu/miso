@@ -2,6 +2,22 @@ import CryptoKit
 import Foundation
 
 public enum BasePackageInputs {
+  public struct Runtimes: Codable, Equatable {
+    public let node: String
+    public let npm: String
+    public let rubygems: String
+
+    public init(node: String, npm: String, rubygems: String) {
+      self.node = node
+      self.npm = npm
+      self.rubygems = rubygems
+    }
+
+    func validate() throws {
+      for version in [node, npm, rubygems] { _ = try StableVersion(version) }
+    }
+  }
+
   public struct Package: Codable {
     let name: String
     let version: String
@@ -16,10 +32,12 @@ public enum BasePackageInputs {
     let nodeFormula: String
     let bundler: Package
     let npm: [Package]
+    var runtimes: Runtimes? = nil
 
     func validate() throws {
       _ = try RestoreProfile.select(target)
       _ = try StableVersion(rubyVersion)
+      try runtimes?.validate()
       guard schemaVersion == 1, bundler.name == "bundler", (1...64).contains(npm.count),
         Set(npm.map(\.name)).count == npm.count,
         nodeFormula.range(of: #"\Anode(@[0-9]+)?\z"#, options: .regularExpression) != nil

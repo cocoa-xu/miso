@@ -68,6 +68,21 @@ public enum BasePackages {
             "package-ruby-version", arguments: [rubyBin + "/ruby", "-e", "print RUBY_VERSION"])
             == plan.rubyVersion
         else { throw MisoError.invalid("Package target Ruby differs from plan") }
+        if let runtimes = plan.runtimes {
+          let node = "/opt/homebrew/opt/" + plan.nodeFormula + "/bin"
+          let environment = ["/usr/bin/env", "PATH=\(node):/usr/bin:/bin"]
+          let actual = try BasePackageInputs.Runtimes(
+            node: guest.run(
+              "package-node-version", arguments: [node + "/node", "-p", "process.versions.node"]),
+            npm: guest.run(
+              "package-npm-version", arguments: environment + [node + "/npm", "--version"]),
+            rubygems: guest.run(
+              "package-rubygems-version",
+              arguments: [rubyBin + "/ruby", "-rrubygems", "-e", "print Gem::VERSION"]))
+          guard actual == runtimes else {
+            throw MisoError.invalid("Package resolver runtimes differ from the target image")
+          }
+        }
         try guest.run(
           "bundler-install",
           arguments: rubyEnvironment + [

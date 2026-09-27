@@ -11,6 +11,15 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
   override func startLoading() {
     let url = request.url!
     let path = url.lastPathComponent
+    if path == "accept" {
+      let response = HTTPURLResponse(
+        url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(
+        self, didLoad: Data((request.value(forHTTPHeaderField: "Accept") ?? "missing").utf8))
+      client?.urlProtocolDidFinishLoading(self)
+      return
+    }
     if path == "stall" { return }
     if path == "redirect" {
       let response = HTTPURLResponse(
@@ -36,10 +45,70 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
   }
 }
 
+@Test func nativeHTTPDeliversTheRegistryAcceptHeader() async throws {
+  let accept = "application/vnd.npm.install-v1+json"
+  let data = try await HTTPData.get(
+    URL(string: "https://fixture.test/accept")!, maximumBytes: 64,
+    accept: accept, configuration: stubConfiguration())
+  #expect(String(data: data, encoding: .utf8) == accept)
+}
+
+@Test func boundedNativePayloadDownload() async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let output = temporary.url.appendingPathComponent("payload")
+  try await HTTPFile.get(
+    URL(string: "https://fixture.test/ok")!, to: output, maximumBytes: 64,
+    configuration: stubConfiguration())
+  #expect(try SafeFile.read(output, limit: 64) == Data(repeating: 42, count: 64))
+}
+
+@Test(arguments: ["declared-large", "streamed-large", "error", "empty", "redirect"])
+func nativePayloadDownloadRejectsInvalidResponses(_ path: String) async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let output = temporary.url.appendingPathComponent("payload")
+  await #expect(throws: (any Error).self) {
+    try await HTTPFile.get(
+      URL(string: "https://fixture.test/\(path)")!, to: output, maximumBytes: 64,
+      configuration: stubConfiguration())
+  }
+  #expect(!FileManager.default.fileExists(atPath: output.path))
+}
+
+@Test func nativePayloadDownloadCancellationWhileWaiting() async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let token = try CancellationToken()
+  let cancellation = Task {
+    try await Task.sleep(for: .milliseconds(150))
+    token.cancel()
+  }
+  defer { cancellation.cancel() }
+  await #expect(throws: (any Error).self) {
+    try await HTTPFile.get(
+      URL(string: "https://fixture.test/stall")!,
+      to: temporary.url.appendingPathComponent("payload"), maximumBytes: 64,
+      cancellation: token, configuration: stubConfiguration())
+  }
+}
+
 private func stubConfiguration() -> URLSessionConfiguration {
   let configuration = URLSessionConfiguration.ephemeral
   configuration.protocolClasses = [StubHTTPProtocol.self]
   return configuration
+}
+
+@Test func nativeHTTPAcceptRejectsHeaderInjection() async {
+  for accept in [
+    "", "application/json\r\nAuthorization: secret", String(repeating: "a", count: 129),
+  ] {
+    await #expect(throws: (any Error).self) {
+      try await HTTPData.get(
+        URL(string: "https://fixture.test/ok")!, maximumBytes: 64,
+        accept: accept, configuration: stubConfiguration())
+    }
+  }
 }
 
 @Test func appleKeyRedirectBoundaries() {

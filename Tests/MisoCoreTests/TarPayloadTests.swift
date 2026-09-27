@@ -4,7 +4,7 @@ import Testing
 
 @testable import MisoCore
 
-private func tarEntry(
+func tarEntry(
   path: String, type: UInt8 = 48, content: Data = Data(), link: String = "", mode: UInt16 = 0o755
 ) -> Data {
   var header = Data(repeating: 0, count: 512)
@@ -26,6 +26,28 @@ private func tarEntry(
   let checksum = header.reduce(0) { $0 + Int($1) }
   field(String(format: "%06o", checksum) + "\0 ", at: 148, width: 8)
   return header + content + Data(repeating: 0, count: (512 - content.count % 512) % 512)
+}
+
+@Test func tarMemberReadsAreBoundedAndRejectLinks() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let path = temporary.url.appendingPathComponent("member.tar")
+  try SafeFile.writeNew(
+    tarEntry(path: "package/file", content: Data("value".utf8)) + Data(repeating: 0, count: 1024),
+    to: path)
+  #expect(try TarPayload.file(path, path: "package/file", maximumBytes: 5) == Data("value".utf8))
+  for (member, limit) in [("package/file", 4), ("missing", 5)] {
+    #expect(throws: (any Error).self) {
+      try TarPayload.file(path, path: member, maximumBytes: limit)
+    }
+  }
+  let link = temporary.url.appendingPathComponent("link.tar")
+  try SafeFile.writeNew(
+    tarEntry(path: "package/file", type: 50, link: "other") + Data(repeating: 0, count: 1024),
+    to: link)
+  #expect(throws: (any Error).self) {
+    try TarPayload.file(link, path: "package/file", maximumBytes: 5)
+  }
 }
 
 @Test func nativeTarExtractsBytesModesAndLinksWithoutSubprocesses() throws {

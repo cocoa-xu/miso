@@ -212,7 +212,40 @@ struct Base: AsyncParsableCommand {
   struct Packages: ParsableCommand {
     static let configuration = CommandConfiguration(
       abstract: "Validate or install resolved local Bundler and npm packages.",
-      subcommands: [Verify.self, Install.self])
+      subcommands: [Resolve.self, Verify.self, Install.self])
+
+    struct Resolve: AsyncParsableCommand {
+      static let configuration = CommandConfiguration(
+        abstract: "Resolve and download target-compatible Bundler, yarn and pnpm inputs.")
+      @Option var targetVersion: String
+      @Option var targetBuild: String
+      @Option var rubyVersion: String
+      @Option var rubygemsVersion: String
+      @Option var nodeFormula: String
+      @Option var nodeVersion: String
+      @Option var npmVersion: String
+      @Option var bundlerVersion: String?
+      @Option var config: String?
+      @Option var cache: String?
+      @Option var output: String
+
+      func run() async throws {
+        let settings =
+          try config.map { try JSON.read(BaseConfiguration.self, from: fileURL($0)) }
+          ?? BaseConfiguration()
+        try settings.validate()
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          await BasePackageResolution.run(
+            requests: settings.npm, bundlerVersion: bundlerVersion,
+            target: MacOSRelease(version: targetVersion, build: targetBuild),
+            rubyVersion: rubyVersion,
+            nodeFormula: nodeFormula,
+            runtimes: .init(node: nodeVersion, npm: npmVersion, rubygems: rubygemsVersion),
+            output: fileURL(output), cache: cache.map(fileURL), cancellation: cancellation.token))
+      }
+    }
 
     struct Inputs: ParsableArguments {
       @Option var plan: String

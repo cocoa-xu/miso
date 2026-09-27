@@ -89,6 +89,39 @@ enum TarPayload {
     }
   }
 
+  static func file(
+    _ source: URL, path: String, maximumBytes: Int, cancellation: CancellationToken? = nil
+  ) throws -> Data {
+    _ = try SafeFile.relativePath(path)
+    guard (1...(256 << 20)).contains(maximumBytes) else {
+      throw MisoError.invalid("Invalid tar member limit")
+    }
+    var entries: [Entry] = []
+    var result: Data?
+    try read(source, cancellation: cancellation) { entry, reader in
+      entries.append(entry)
+      guard entry.path == path else { return }
+      guard result == nil, entry.kind == S_IFREG, entry.link == nil, entry.hardlink == nil,
+        entry.bytes <= maximumBytes
+      else { throw MisoError.invalid("Invalid tar member") }
+      var data = Data(count: Int(entry.bytes))
+      var consumed = 0
+      while consumed < data.count {
+        try cancellation?.check()
+        let count = min(1 << 20, data.count - consumed)
+        let read = data.withUnsafeMutableBytes {
+          archive_read_data(reader, $0.baseAddress!.advanced(by: consumed), count)
+        }
+        guard read > 0, read <= count else { throw MisoError.invalid("Truncated tar member") }
+        consumed += read
+      }
+      result = data
+    }
+    try validate(entries)
+    guard let result else { throw MisoError.invalid("Missing tar member: \(path)") }
+    return result
+  }
+
   static func extract(
     _ source: URL, into destination: URL, entries: [Entry], uid: uid_t, gid: gid_t,
     cancellation: CancellationToken? = nil
