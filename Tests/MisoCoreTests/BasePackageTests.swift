@@ -4,6 +4,34 @@ import Testing
 
 @testable import MisoCore
 
+@Test func bundlerVersionAcceptsCurrentAndLegacyPresentation() throws {
+  for output in ["4.0.21", "Bundler version 4.0.21", "4.0.21\n"] {
+    #expect(try BasePackages.bundlerVersion(output, expected: "4.0.21") == "4.0.21")
+  }
+}
+
+@Test func bundlerVersionRejectsDifferentOrAmbiguousVersions() throws {
+  for output in [
+    "4.0.22", "Bundler version 4.0.20", "", "4.0.21\n4.0.22", "warning: 4.0.21", "4.0.21.rc1",
+  ] {
+    #expect(throws: (any Error).self) {
+      try BasePackages.bundlerVersion(output, expected: "4.0.21")
+    }
+  }
+}
+
+@Test func bundlerMismatchPreservesBoundedExpectedAndActualValues() throws {
+  do {
+    _ = try BasePackages.bundlerVersion(
+      "4.0.22\n" + String(repeating: "x", count: 4096), expected: "4.0.21")
+    Issue.record("Expected a version mismatch")
+  } catch {
+    #expect(error.localizedDescription.contains("expected 4.0.21"))
+    #expect(error.localizedDescription.contains("4.0.22\\n"))
+    #expect(error.localizedDescription.count < 400)
+  }
+}
+
 @Test func npmIntegrityStreamsAndHonorsCancellation() throws {
   let temporary = try TemporaryDirectory()
   defer { temporary.remove() }

@@ -81,9 +81,12 @@ public enum BasePackages {
           arguments: rubyEnvironment + [
             "/" + rbenv + "/shims/bundle", "--version",
           ], capability: .ruby)
-        guard bundler == "Bundler version " + plan.bundler.version else {
-          throw MisoError.invalid("Installed Bundler differs from plan")
-        }
+        try journal.setMetadata(
+          "bundlerVersionProbe",
+          value: [
+            "expected": plan.bundler.version, "actual": String(bundler.prefix(1024)),
+          ])
+        _ = try bundlerVersion(bundler, expected: plan.bundler.version)
         probes["bundler"] = bundler
         let nodeBin = "/opt/homebrew/opt/" + plan.nodeFormula + "/bin"
         let environment = [
@@ -207,5 +210,16 @@ public enum BasePackages {
       throw MisoError.invalid("npm reported dependency problems")
     }
     return (listing.dependencies ?? [:]).mapValues(\.version)
+  }
+
+  static func bundlerVersion(_ text: String, expected: String) throws -> String {
+    _ = try StableVersion(expected)
+    let actual = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard [expected, "Bundler version " + expected].contains(actual) else {
+      throw MisoError.invalid(
+        "Bundler version mismatch: expected \(expected), received \(String(reflecting: String(actual.prefix(256))))"
+      )
+    }
+    return expected
   }
 }
