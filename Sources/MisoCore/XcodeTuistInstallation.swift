@@ -137,8 +137,19 @@ public enum XcodeTuistInstallation {
       else { throw MisoError.invalid("Mise Tuist registration differs from installed payload") }
       probes["executable"] = try mise("mise-tuist-executable", ["which", "tuist"])
       let executable = "/" + home + "/.local/share/mise/installs/tuist/" + input.formula.version
+      let miseLink = try FileManager.default.destinationOfSymbolicLink(
+        atPath: guest.data.path("opt/homebrew/bin/mise", allowLeafLink: true).path)
+      let miseTarget = URL(fileURLWithPath: "/opt/homebrew/bin")
+        .appendingPathComponent(miseLink).standardizedFileURL.path
+      let shimTarget = try FileManager.default.destinationOfSymbolicLink(
+        atPath: guest.data.path(
+          home + "/.local/share/mise/shims/tuist", allowLeafLink: true
+        ).path)
       guard ["/" + tool + "/tuist", executable + "/tuist"].contains(probes["executable"] ?? ""),
-        try guest.data.contains(home + "/.local/share/mise/shims/tuist")
+        miseTarget.hasPrefix("/opt/homebrew/Cellar/mise/"), miseTarget.hasSuffix("/bin/mise"),
+        shimTarget == miseTarget,
+        try FileMetadata.inspect(guest.data.path(String(miseTarget.dropFirst()))).st_mode & S_IFMT
+          == S_IFREG
       else { throw MisoError.invalid("Mise cannot resolve the pinned Tuist executable") }
       let installedTool = try guest.data.path(tool + "/tuist")
       guard
