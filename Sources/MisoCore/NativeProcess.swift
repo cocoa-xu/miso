@@ -33,6 +33,7 @@ public struct NativeCommand: Sendable {
     case mount = "/sbin/mount"
     case unmount = "/sbin/umount"
     case codesign = "/usr/bin/codesign"
+    case xip = "/usr/bin/xip"
   }
 
   public let executable: URL
@@ -40,6 +41,7 @@ public struct NativeCommand: Sendable {
   public let environment: [String: String]
   public let timeout: TimeInterval
   public let input: URL?
+  public let workingDirectory: URL?
   public let redactedArguments: Set<Int>
   private(set) var appleToolSHA256: String?
 
@@ -52,13 +54,18 @@ public struct NativeCommand: Sendable {
     return command
   }
 
-  public init(_ tool: SystemTool, arguments: [String] = [], timeout: TimeInterval = 300) throws {
-    try self.init(tool.rawValue, arguments: arguments, timeout: timeout)
+  public init(
+    _ tool: SystemTool, arguments: [String] = [], timeout: TimeInterval = 300,
+    workingDirectory: URL? = nil
+  ) throws {
+    try self.init(
+      tool.rawValue, arguments: arguments, timeout: timeout, workingDirectory: workingDirectory)
   }
 
   init(
     _ executable: String, arguments: [String] = [], timeout: TimeInterval = 300,
-    environment: [String: String] = [:], input: URL? = nil, redactedArguments: Set<Int> = []
+    environment: [String: String] = [:], input: URL? = nil, redactedArguments: Set<Int> = [],
+    workingDirectory: URL? = nil
   ) throws {
     guard executable.hasPrefix("/"), !executable.contains("\0"),
       arguments.allSatisfy({ !$0.contains("\0") }), timeout.isFinite, timeout > 0,
@@ -75,6 +82,8 @@ public struct NativeCommand: Sendable {
     self.arguments = arguments
     self.timeout = timeout
     self.input = input
+    if let workingDirectory { _ = try GuestVolume(workingDirectory) }
+    self.workingDirectory = workingDirectory?.standardized
     self.redactedArguments = redactedArguments
     self.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C", "LC_ALL": "C"]
       .merging(environment) { _, value in value }
@@ -118,15 +127,19 @@ public enum NativeProcess {
     }
     defer { try? input.close() }
     let strings = [command.executable.path] + command.arguments
+    if let directory = command.workingDirectory { _ = try GuestVolume(directory) }
+    let directories = command.workingDirectory.map { [$0.path] } ?? []
     let environment = command.environment.sorted { $0.key < $1.key }.map { $0.key + "=" + $0.value }
     var result = miso_process_result()
     let status = try withCStringArray(strings) { arguments in
       try withCStringArray(environment) { environment in
-        command.executable.path.withCString { executable in
-          miso_process_run(
-            executable, arguments, environment, input.fileDescriptor,
-            stdout.fileDescriptor, stderr.fileDescriptor, command.timeout, 2,
-            cancellation?.storage, &result)
+        try withCStringArray(directories) { directory in
+          command.executable.path.withCString { executable in
+            miso_process_run(
+              executable, arguments, environment, directory[0], input.fileDescriptor,
+              stdout.fileDescriptor, stderr.fileDescriptor, command.timeout, 2,
+              cancellation?.storage, &result)
+          }
         }
       }
     }

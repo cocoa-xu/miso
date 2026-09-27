@@ -11,6 +11,7 @@ public final class ExecutionJournal {
     public let stdout: String
     public let stderr: String
     public let expectedExitCodes: [Int32]?
+    public let workingDirectory: String?
     public var finishedAt: Date?
     public var result: ProcessReceipt?
     public var error: String?
@@ -105,7 +106,8 @@ public final class ExecutionJournal {
       CommandRecord(
         name: name, arguments: command.recordedArguments,
         startedAt: Date(), stdout: outName, stderr: errName,
-        expectedExitCodes: expectedExitCodes.sorted()))
+        expectedExitCodes: expectedExitCodes.sorted(),
+        workingDirectory: command.workingDirectory?.path))
     try save()
     do {
       let result = try NativeProcess.run(

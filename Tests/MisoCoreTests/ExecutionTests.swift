@@ -37,6 +37,36 @@ private func withProcess<T>(_ body: (FileHandle, FileHandle, URL) throws -> T) t
   }
 }
 
+@Test func nativeProcessUsesAChildWorkingDirectoryWithoutChangingTheParent() throws {
+  let parent = FileManager.default.currentDirectoryPath
+  try withProcess { out, err, output in
+    let directory = output.deletingLastPathComponent().appendingPathComponent("space and $literal")
+    try SafeFile.makeDirectory(directory)
+    let result = try NativeProcess.run(
+      NativeCommand("/bin/pwd", workingDirectory: directory), stdout: out, stderr: err)
+    #expect(result.succeeded)
+    #expect(
+      String(decoding: try SafeFile.read(output, limit: 4096), as: UTF8.self)
+        .trimmingCharacters(in: .whitespacesAndNewlines) == directory.path)
+    #expect(FileManager.default.currentDirectoryPath == parent)
+    let command = try NativeCommand("/bin/pwd", workingDirectory: directory)
+    try FileManager.default.removeItem(at: directory)
+    #expect(throws: MisoError.self) {
+      try NativeProcess.run(command, stdout: out, stderr: err)
+    }
+  }
+}
+
+@Test func nativeProcessRejectsLinkedWorkingDirectories() throws {
+  try withProcess { _, _, output in
+    let directory = output.deletingLastPathComponent()
+    let link = directory.appendingPathComponent("link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: directory)
+    #expect(throws: MisoError.self) { try NativeCommand("/bin/pwd", workingDirectory: link) }
+    #expect(throws: MisoError.self) { try NativeCommand("/bin/pwd", workingDirectory: output) }
+  }
+}
+
 @Test func nativeProcessTerminatesTimedOutGroup() throws {
   try withProcess { out, err, _ in
     let command = try NativeCommand(
@@ -67,7 +97,8 @@ private func withProcess<T>(_ body: (FileHandle, FileHandle, URL) throws -> T) t
   let journal = try ExecutionJournal(
     output: directory.url.appendingPathComponent("operation"), operation: "test-operation")
   let command = try NativeCommand(
-    "/usr/bin/printf", arguments: ["%s", "secret-value"], redactedArguments: [1])
+    "/usr/bin/printf", arguments: ["%s", "secret-value"], redactedArguments: [1],
+    workingDirectory: directory.url)
   _ = try journal.run("redacted", command)
   let captured = try SafeFile.read(
     journal.output.appendingPathComponent("journal.json"), limit: 1 << 20)
@@ -85,6 +116,7 @@ private func withProcess<T>(_ body: (FileHandle, FileHandle, URL) throws -> T) t
     ExecutionJournal.Record.self,
     from: SafeFile.read(journal.output.appendingPathComponent("journal.json"), limit: 1 << 20))
   #expect(stored.status == .failed && stored.commands.last?.result?.exitCode == 1)
+  #expect(stored.commands.first?.workingDirectory == directory.url.path)
   let success = try ExecutionJournal(
     output: directory.url.appendingPathComponent("success"), operation: "success")
   _ = try success.perform { ["passed": true] }

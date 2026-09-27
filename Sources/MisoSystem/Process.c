@@ -37,7 +37,8 @@ static double monotonic_seconds(void) {
 }
 
 static int spawn_process(const char *executable, char *const arguments[],
-                         char *const environment[], int input, int output, int error,
+                         char *const environment[], const char *directory,
+                         int input, int output, int error,
                          pid_t *pid) {
     posix_spawn_file_actions_t actions;
     posix_spawnattr_t attributes;
@@ -63,7 +64,8 @@ static int spawn_process(const char *executable, char *const arguments[],
         !(status = posix_spawn_file_actions_adddup2(&actions, input, STDIN_FILENO)) &&
         !(status = posix_spawn_file_actions_adddup2(&actions, output, STDOUT_FILENO)) &&
         !(status = posix_spawn_file_actions_adddup2(&actions, error, STDERR_FILENO))) {
-        status = posix_spawn(pid, executable, &actions, &attributes, arguments, environment);
+        if (directory) status = posix_spawn_file_actions_addchdir_np(&actions, directory);
+        if (!status) status = posix_spawn(pid, executable, &actions, &attributes, arguments, environment);
     }
     posix_spawnattr_destroy(&attributes);
     posix_spawn_file_actions_destroy(&actions);
@@ -71,11 +73,12 @@ static int spawn_process(const char *executable, char *const arguments[],
 }
 
 int miso_process_run(const char *executable, char *const arguments[],
-                     char *const environment[], int input, int output, int error,
+                     char *const environment[], const char *directory,
+                     int input, int output, int error,
                      double timeout_seconds, double grace_seconds,
                      const miso_cancellation *cancellation, miso_process_result *result) {
     if (!executable || !arguments || !arguments[0] || !environment || !result ||
-        input < 0 || output < 0 || error < 0 || !isfinite(timeout_seconds) ||
+        (directory && directory[0] != '/') || input < 0 || output < 0 || error < 0 || !isfinite(timeout_seconds) ||
         !isfinite(grace_seconds) || timeout_seconds <= 0 || grace_seconds < 0) return EINVAL;
     memset(result, 0, sizeof(*result));
     result->exit_code = -1;
@@ -86,7 +89,7 @@ int miso_process_run(const char *executable, char *const arguments[],
     double started = monotonic_seconds();
     if (started < 0) return errno;
     pid_t pid;
-    int status = spawn_process(executable, arguments, environment, input, output, error, &pid);
+    int status = spawn_process(executable, arguments, environment, directory, input, output, error, &pid);
     if (status) return status;
 
     bool terminating = false;

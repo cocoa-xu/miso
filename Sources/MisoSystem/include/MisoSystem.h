@@ -32,7 +32,8 @@ int miso_copy_tree(const char *source, const char *destination,
                    const miso_cancellation *cancellation);
 
 int miso_process_run(const char *executable, char *const arguments[],
-                     char *const environment[], int input, int output, int error,
+                     char *const environment[], const char *directory,
+                     int input, int output, int error,
                      double timeout_seconds, double grace_seconds,
                      const miso_cancellation *cancellation, miso_process_result *result);
 
