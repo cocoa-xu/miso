@@ -76,7 +76,7 @@ struct Xcode: AsyncParsableCommand {
   struct InstallAndroid: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
       commandName: "install-android",
-      abstract: "Install and test the prepared Android SDK and NDK in an offline image clone.")
+      abstract: "Install the prepared Android SDK and NDK and test Java tooling offline.")
     @Option var source: String
     @Option var prepared: String
     @Option var output: String

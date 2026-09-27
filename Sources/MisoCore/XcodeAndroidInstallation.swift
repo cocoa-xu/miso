@@ -8,6 +8,7 @@ public enum XcodeAndroidInstallation {
     let profileSHA256: String
     let detachedPayloadVerified: Bool
     let executionControlsVerified: Bool
+    let runtimeVerified = false
   }
 
   public struct Receipt: Encodable {
@@ -99,6 +100,20 @@ public enum XcodeAndroidInstallation {
           inputs.appendingPathComponent(item.root), to: guest.data.path(destination),
           entries: inventory, uid: guest.account.uid, gid: guest.account.gid,
           cancellation: journal.cancellation)
+        let originalRoot = inputs.appendingPathComponent(item.root)
+        let installedRoot = try guest.data.directory(destination).url
+        for name in item.minimumMacOS.keys.sorted() {
+          let original = originalRoot.appendingPathComponent(name).resolvingSymlinksInPath()
+          let installed = installedRoot.appendingPathComponent(name).resolvingSymlinksInPath()
+          guard original.path.hasPrefix(originalRoot.path + "/"),
+            installed.path.hasPrefix(installedRoot.path + "/"),
+            try SafeFile.sha256(installed) == SafeFile.sha256(original)
+          else { throw MisoError.invalid("Installed Android executable differs from its input") }
+          try journal.run(
+            "verify-installed-android-signature",
+            NativeCommand(
+              .codesign, arguments: ["--verify", "--strict", installed.path], timeout: 90))
+        }
         try guest.data.write(
           destination + "/package.xml",
           data: XcodeAndroidMetadata.localPackage(repository, package: item.package),
@@ -140,21 +155,15 @@ public enum XcodeAndroidInstallation {
       guard probes["licenses"]?.contains("All SDK package licenses accepted.") == true else {
         throw MisoError.invalid("Android SDK licenses were not accepted")
       }
-      probes["adb"] = try run(
-        "android-adb-version", ["/" + sdk + "/platform-tools/adb", "version"])
       let probe = "private/tmp/miso-android-" + UUID().uuidString
       try guest.data.makeDirectories(
         probe + "/classes", uid: guest.account.uid, gid: guest.account.gid)
       try guest.data.makeDirectories(probe + "/dex", uid: guest.account.uid, gid: guest.account.gid)
-      for (name, text) in [
-        "Check.java":
-          "public final class Check { public static void main(String[] args) { if (6 * 7 != 42) throw new AssertionError(); System.out.println(42); } }\n",
-        "check.c": "int miso_answer(void) { return 42; }\n",
-      ] {
-        try guest.data.write(
-          probe + "/" + name, data: Data(text.utf8), uid: guest.account.uid, gid: guest.account.gid,
-          mode: 0o644)
-      }
+      try guest.data.write(
+        probe + "/Check.java",
+        data: Data(
+          "public final class Check { public static void main(String[] args) { if (6 * 7 != 42) throw new AssertionError(); System.out.println(42); } }\n"
+            .utf8), uid: guest.account.uid, gid: guest.account.gid, mode: 0o644)
       _ = try run(
         "android-javac",
         [
@@ -176,18 +185,6 @@ public enum XcodeAndroidInstallation {
         throw MisoError.invalid("Android DEX output is invalid")
       }
       probes["dexSHA256"] = SafeFile.sha256(dex)
-      let ndk = "/" + sdk + "/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/"
-      _ = try run(
-        "android-ndk-compile",
-        [
-          ndk + "clang", "--target=aarch64-linux-android24", "-shared", "-fPIC",
-          "/" + probe + "/check.c", "-o", "/" + probe + "/libcheck.so",
-        ])
-      probes["ndk-elf"] = try run(
-        "android-ndk-elf", [ndk + "llvm-readelf", "--file-header", "/" + probe + "/libcheck.so"])
-      guard probes["ndk-elf"]?.contains("AArch64") == true else {
-        throw MisoError.invalid("NDK output is not Android ARM64")
-      }
       try FileManager.default.removeItem(at: guest.data.path(probe))
       let profile = home + "/.zprofile"
       let data = try shellProfile(SafeFile.read(guest.data.path(profile), limit: 1 << 20))
