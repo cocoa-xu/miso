@@ -164,7 +164,7 @@ private let securitySchema = """
 }
 
 @Test @MainActor func securityProbeAcceptsOnlySystemCookieAliases() {
-  for prefix in ["/var", "/private/var"] {
+  for prefix in ["/var", "/private/var", "//var", "///private/var"] {
     #expect(
       BaseSecurity.validProbeIdentity(
         [
@@ -184,6 +184,15 @@ private let securitySchema = """
         "home": "/Users/admin",
         "automation_cookie_path": "/tmp/no-auth-required",
       ], home: "/Users/admin"))
+  for cookie in [
+    "var/db/com.apple.dt.automationmode/no-auth-required",
+    "//server/var/db/com.apple.dt.automationmode/no-auth-required",
+    "/var/../var/db/com.apple.dt.automationmode/no-auth-required",
+  ] {
+    #expect(
+      !BaseSecurity.validProbeIdentity(
+        ["home": "/Users/admin", "automation_cookie_path": cookie], home: "/Users/admin"))
+  }
 }
 
 @Test func baseSecurityBindsMountedBootInputsWithoutRetainedTree() throws {

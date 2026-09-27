@@ -270,11 +270,12 @@ public enum BaseSecurity {
 
   static func validProbeIdentity(_ result: [String: Any], home: String) -> Bool {
     guard result["home"] as? String == home,
-      let cookie = result["automation_cookie_path"] as? String
+      let cookie = result["automation_cookie_path"] as? String, cookie.hasPrefix("/")
     else { return false }
+    let absolute = "/" + cookie.drop(while: { $0 == "/" })
     return [
       "/var/db/com.apple.dt.automationmode/no-auth-required",
       "/private/var/db/com.apple.dt.automationmode/no-auth-required",
-    ].contains(cookie)
+    ].contains(absolute)
   }
 }
