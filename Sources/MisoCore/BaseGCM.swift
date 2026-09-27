@@ -70,7 +70,8 @@ public enum BaseGCM {
         try guest.data.write(receipt + ".bom", data: SafeFile.read(prepared.bom, limit: 16 << 20))
         try verifyReceipt(plan, data: guest.data, journal: journal)
         try configure(guest)
-        try directory("Users/\(username)/base-inputs", data: guest.data)
+        try guest.data.makeDirectories(
+          "Users/\(username)/base-inputs", uid: guest.account.uid, gid: guest.account.gid)
         try guest.data.write(
           recipePath,
           data: SafeFile.read(GuestVolume(inputs).path(plan.recipe.path), limit: 1 << 20),
