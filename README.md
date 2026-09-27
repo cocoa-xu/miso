@@ -88,7 +88,9 @@ without administrator privileges. Add `--formula name` to select a dependency cl
 `base bottles install` accepts the same inputs plus `--source bundle --output new-stage`
 and requires root. It installs local bottles with target Homebrew, denies network
 access, audits exact versions and verifies the detached payload. Post-install hooks
-are deferred; this remains an incomplete Base stage without runtime acceptance.
+are deferred unless `--post-install` is supplied. That experimental option invokes
+upstream hook methods under the same guest restrictions, then checks target tools,
+dependencies and linkage. This remains incomplete Base without VM runtime acceptance.
 
 Configuration defaults use `admin/admin`, disable FileVault, and request SSH/VNC.
 They are intended for isolated test systems; change credentials before exposing a

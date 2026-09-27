@@ -37,6 +37,8 @@ struct Base: AsyncParsableCommand {
       @Option var source: String
       @Option var output: String
       @Option var username = "admin"
+      @Flag(help: "Run upstream post-install methods and target software probes.") var postInstall =
+        false
       func run() throws {
         let cancellation = try CancellationScope()
         defer { withExtendedLifetime(cancellation) {} }
@@ -45,6 +47,7 @@ struct Base: AsyncParsableCommand {
             source: fileURL(source),
             resolution: fileURL(inputs.resolution), bottles: fileURL(inputs.bottles),
             names: inputs.formula, output: fileURL(output), username: username,
+            postInstall: postInstall,
             cancellation: cancellation.token))
       }
     }

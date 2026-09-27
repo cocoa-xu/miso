@@ -9,11 +9,12 @@ public enum BaseBottles {
     let payloadEntries: Int
     let detachedPayloadVerified: Bool
     let executionControlsVerified: Bool
+    let lifecycleProbes: [String: String]?
   }
 
   public static func run(
     source: URL, resolution: URL, bottles: URL, names: [String], output: URL,
-    username: String = "admin", cancellation: CancellationToken? = nil
+    username: String = "admin", postInstall: Bool = false, cancellation: CancellationToken? = nil
   ) throws -> BaseStageReceipt<Details> {
     let selection = try HomebrewBottleInputs.load(
       resolution: resolution, bottles: bottles, names: names, cancellation: cancellation)
@@ -29,6 +30,7 @@ public enum BaseBottles {
       let root = try BaseExecutionView.prepare(image: image, target: target, journal: journal)
       var installed: [String: String] = [:]
       var accountIdentity: [UInt32] = []
+      var lifecycleProbes: [String: String]?
       let payload = try GuestExecution.withSession(
         image: image, root: root, username: username, journal: journal
       ) { guest in
@@ -49,6 +51,12 @@ public enum BaseBottles {
         var expected = before
         for payload in selection.payloads {
           let formula = payload.formula
+          let sourcePath = formula.sourceURL.pathComponents.dropFirst(4).joined(separator: "/")
+          let tapPath = "opt/homebrew/Library/Taps/homebrew/homebrew-core/" + sourcePath
+          guard try SafeFile.sha256(guest.data.path(tapPath)) == formula.sourceSHA256 else {
+            throw MisoError.invalid(
+              "Installed formula source differs from resolution: \(formula.name)")
+          }
           if let current = before[formula.name] {
             guard current == formula.kegVersion else {
               throw MisoError.invalid(
@@ -71,18 +79,16 @@ public enum BaseBottles {
           try guest.data.write(
             relative + "/" + payload.sidecarName,
             data: JSON.encode(payload.sidecar), mode: 0o444)
-          let sourcePath = formula.sourceURL.pathComponents.dropFirst(4).joined(separator: "/")
-          let tapPath = "opt/homebrew/Library/Taps/homebrew/homebrew-core/" + sourcePath
-          guard try SafeFile.sha256(guest.data.path(tapPath)) == formula.sourceSHA256 else {
-            throw MisoError.invalid(
-              "Installed formula source differs from resolution: \(formula.name)")
-          }
           try guest.run(
             "install-bottle",
             arguments: GuestExecution.brewArguments(
               ["install", "--skip-post-install", "/" + relative + "/" + payload.filename],
               username: username), capability: .brew, timeout: 600)
           expected[formula.name] = formula.kegVersion
+        }
+        if postInstall {
+          lifecycleProbes = try HomebrewLifecycle.run(
+            selection.payloads.map(\.formula), guest: guest)
         }
         installed = try installedVersions(
           guest.run(
@@ -154,11 +160,12 @@ public enum BaseBottles {
       }
       return Details(
         selection: selection, installed: installed,
-        deferredPostInstall: selection.payloads.filter { $0.formula.hasPostInstall }.map {
-          $0.formula.name
-        },
+        deferredPostInstall: selection.payloads.filter { $0.formula.hasPostInstall && !postInstall }
+          .map {
+            $0.formula.name
+          },
         payloadEntries: payload.count, detachedPayloadVerified: true,
-        executionControlsVerified: true)
+        executionControlsVerified: true, lifecycleProbes: lifecycleProbes)
     }
   }
 

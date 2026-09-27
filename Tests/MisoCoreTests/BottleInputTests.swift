@@ -4,9 +4,11 @@ import Testing
 
 @testable import MisoCore
 
-private func bottleFormula(revision: Int = 0, rebuild: Int = 0) -> HomebrewResolution.Formula {
+private func bottleFormula(
+  name: String = "example", version: String = "1.2.3", revision: Int = 0, rebuild: Int = 0
+) -> HomebrewResolution.Formula {
   HomebrewResolution.Formula(
-    name: "example", version: "1.2.3", revision: revision,
+    name: name, version: version, revision: revision,
     dependencies: [], systemDependencies: [],
     bottle: .init(
       tag: "arm64_tahoe",
@@ -145,4 +147,29 @@ private func bottleIndex(annotations changes: [String: String] = [:], duplicate:
     path: file.path, kind: UInt16(S_IFLNK), mode: file.mode,
     bytes: 0, link: "other")
   #expect(throws: (any Error).self) { try TarPayload.validate([symlink, alias]) }
+}
+
+@Test func lifecycleProbesFollowResolvedVersionsAndFormulaNames() throws {
+  let probes = try HomebrewLifecycle.probes([
+    bottleFormula(name: "node@22", version: "22.18.0"),
+    bottleFormula(name: "python@3.13", version: "3.13.7"),
+    bottleFormula(name: "awscli", version: "2.37.3"),
+  ])
+  #expect(
+    probes.first { $0.name == "node@22" }?.arguments.first
+      == "/opt/homebrew/opt/node@22/bin/node")
+  #expect(probes.first { $0.name == "node@22" }?.arguments.last?.contains("v22.18.0") == true)
+  #expect(
+    probes.first { $0.name == "python@3.13" }?.arguments.first
+      == "/opt/homebrew/opt/python@3.13/bin/python3.13")
+  #expect(
+    probes.first { $0.name == "awscli" }?.arguments
+      == ["/opt/homebrew/opt/awscli/bin/aws", "--version"])
+  #expect(probes.contains { $0.name == "node@22-npm" })
+  #expect(throws: (any Error).self) {
+    try HomebrewLifecycle.probes([bottleFormula(name: "node", version: "1.0\";exit(0)")])
+  }
+  #expect(throws: (any Error).self) {
+    try HomebrewLifecycle.probes([bottleFormula(name: "python@3.13", version: "3.13-rc1")])
+  }
 }
