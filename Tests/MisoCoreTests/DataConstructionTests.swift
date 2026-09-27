@@ -139,6 +139,46 @@ import Testing
   }
 }
 
+@Test func templateAttributesAccountForHostProvenanceAndRejectOtherAdditions() throws {
+  let directory = try TemporaryDirectory()
+  defer { directory.remove() }
+  let source = directory.url.appendingPathComponent("source")
+  let destination = directory.url.appendingPathComponent("destination")
+  try SafeFile.writeNew(Data([1]), to: source)
+  try SafeFile.writeNew(Data([1]), to: destination)
+  let expected = Data("source attribute".utf8)
+  #expect(
+    expected.withUnsafeBytes {
+      setxattr(source.path, "user.miso-template", $0.baseAddress, $0.count, 0, 0)
+    } == 0)
+  let provenance = Data([1, 2, 0] + [UInt8](repeating: 0, count: 8))
+  #expect(
+    provenance.withUnsafeBytes {
+      setxattr(destination.path, "com.apple.provenance", $0.baseAddress, $0.count, 0, 0)
+    } == 0)
+  #expect(try FileMetadata.restoreAttributes(source, to: destination, ignoringCompression: false))
+  #expect(
+    try FileMetadata.attributes(destination, ignoringCompression: false)["user.miso-template"]
+      == expected)
+  #expect(
+    expected.withUnsafeBytes {
+      setxattr(destination.path, "user.miso-unexpected", $0.baseAddress, $0.count, 0, 0)
+    } == 0)
+  #expect(throws: MisoError.self) {
+    try FileMetadata.restoreAttributes(source, to: destination, ignoringCompression: false)
+  }
+}
+
+@Test func templateReceiptsRemainReadableWithoutHostProvenanceCounts() throws {
+  let fields: [String: Any] = [
+    "entries": 0, "regularFiles": 0, "logicalBytes": 0, "contentSHA256": "fixture",
+    "metadataRepairs": 0, "firmlinks": [String](), "deferredFirmlinks": [String](),
+  ]
+  let receipt = try JSONDecoder().decode(
+    DataTemplate.Receipt.self, from: JSONSerialization.data(withJSONObject: fields))
+  #expect(receipt.hostProvenanceAttributes == nil)
+}
+
 @Test func guestPathsRejectLinkParentsAndUnsafeLeaves() throws {
   let directory = try TemporaryDirectory()
   defer { directory.remove() }

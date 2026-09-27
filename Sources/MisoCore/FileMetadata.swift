@@ -91,12 +91,17 @@ enum FileMetadata {
   }
 
   static func restoreAttributes(_ source: URL, to destination: URL, ignoringCompression: Bool)
-    throws
+    throws -> Bool
   {
-    let expected = try attributes(source, ignoringCompression: ignoringCompression)
-    let actual = try attributes(destination, ignoringCompression: ignoringCompression)
-    guard Set(actual.keys).isSubset(of: Set(expected.keys)) else {
-      throw MisoError.invalid("Unexpected copied extended attribute")
+    let hostAttribute = "com.apple.provenance"
+    var expected = try attributes(source, ignoringCompression: ignoringCompression)
+    var actual = try attributes(destination, ignoringCompression: ignoringCompression)
+    expected.removeValue(forKey: hostAttribute)
+    let hostProvenance = actual.removeValue(forKey: hostAttribute) != nil
+    let unexpected = Set(actual.keys).subtracting(expected.keys)
+    guard unexpected.isEmpty else {
+      throw MisoError.invalid(
+        "Unexpected copied attributes at \(destination.path): \(unexpected.sorted())")
     }
     for (name, value) in expected where actual[name] != value {
       let status = value.withUnsafeBytes {
@@ -104,9 +109,12 @@ enum FileMetadata {
       }
       guard status == 0 else { throw MisoError.system("Restore extended attribute", errno) }
     }
-    guard try expected == attributes(destination, ignoringCompression: ignoringCompression) else {
+    let verified = try attributes(destination, ignoringCompression: ignoringCompression)
+      .filter { $0.key != hostAttribute }
+    guard expected == verified else {
       throw MisoError.invalid("Copied extended attribute verification failed")
     }
+    return hostProvenance
   }
 
   static func copyTree(

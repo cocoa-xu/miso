@@ -18,6 +18,11 @@ uses Apple's `pkgutil`, `lsbom`, `ditto` and `makewhatis`; CLT package scripts a
 executed. Base provisioning uses the target's package-manager runtime, not a host
 Homebrew installation. This is not a fully static binary.
 
+Data template audits compare file content, ownership, modes, ACLs and extended
+attributes. Host-generated `com.apple.provenance` tracking is retained and counted
+separately in the template receipt; it is not copied from the source or required
+to match across volumes. Other unexpected extended attributes remain errors.
+
 `xcode prepare-archive` verifies a checksum-bound XIP with Apple's `xip`, checks
 the extracted application signature, and records its exact version, build,
 minimum macOS version and configured SDKs. Expansion has a bounded execution

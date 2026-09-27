@@ -11,6 +11,7 @@ enum DataTemplate {
     let logicalBytes: UInt64
     let contentSHA256: String
     let metadataRepairs: Int
+    let hostProvenanceAttributes: Int?
     let firmlinks: [String]
     let deferredFirmlinks: [String]
   }
@@ -59,6 +60,7 @@ enum DataTemplate {
     return Receipt(
       entries: audit.entries, regularFiles: audit.regularFiles, logicalBytes: audit.logicalBytes,
       contentSHA256: audit.contentSHA256, metadataRepairs: audit.metadataRepairs,
+      hostProvenanceAttributes: audit.hostProvenanceAttributes,
       firmlinks: links.0, deferredFirmlinks: links.1)
   }
 
@@ -106,6 +108,7 @@ enum DataTemplate {
     var content = SHA256()
     var files = 0
     var bytes: UInt64 = 0
+    var provenance = 0
     for (relative, expected, checksum) in entries.sorted(by: { $0.0 < $1.0 }) {
       try cancellation.check()
       let origin = source.appendingPathComponent(relative)
@@ -114,9 +117,12 @@ enum DataTemplate {
       guard FileMetadata.equivalent(expected, actual),
         try FileMetadata.acl(origin) == FileMetadata.acl(target)
       else { throw MisoError.invalid("Template metadata mismatch: \(relative)") }
-      try FileMetadata.restoreAttributes(
+      if try FileMetadata.restoreAttributes(
         origin, to: target,
         ignoringCompression: (expected.st_flags | actual.st_flags) & UInt32(UF_COMPRESSED) != 0)
+      {
+        provenance += 1
+      }
       if let checksum {
         guard try SafeFile.sha256(target) == checksum else {
           throw MisoError.invalid("Copied file changed during verification")
@@ -135,7 +141,8 @@ enum DataTemplate {
     return Receipt(
       entries: entries.count, regularFiles: files, logicalBytes: bytes,
       contentSHA256: content.finalize().map { String(format: "%02x", $0) }.joined(),
-      metadataRepairs: repairs, firmlinks: [], deferredFirmlinks: [])
+      metadataRepairs: repairs, hostProvenanceAttributes: provenance,
+      firmlinks: [], deferredFirmlinks: [])
   }
 
   static func verifyFirmlinks(
