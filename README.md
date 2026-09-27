@@ -16,8 +16,8 @@ Homebrew installation. This is not a fully static binary.
 This is an in-progress native migration. The commands below work without starting
 a virtual machine. The experimental `restore` command connects the native vanilla
 stages, with single-command offline acceptance on macOS 26.6.2. Base currently
-exposes native provisioning stages and an experimental replay build; fresh full-build
-acceptance is still in progress. Upgrade execution is not yet exposed. A recognized profile is not a claim of
+exposes native provisioning stages and an experimental replay build, with fresh
+single-command offline acceptance on macOS 26.6.2. Upgrade execution is not yet exposed. A recognized profile is not a claim of
 native end-to-end validation. Write stages fail closed on unvalidated host ABIs.
 
 ```sh
