@@ -129,9 +129,11 @@ public final class DiskImageSession {
     struct Image: Decodable {
       let path: String?
       let entities: [DiskImageAttachment.Entity]
+      let writable: Bool?
       enum CodingKeys: String, CodingKey {
         case path = "image-path"
         case entities = "system-entities"
+        case writable = "writeable"
       }
     }
     let images: [Image]
@@ -276,6 +278,9 @@ public final class DiskImageSession {
       match.entities.contains(where: { $0.device == whole })
     else {
       throw MisoError.invalid("Image attachment ownership changed")
+    }
+    guard match.writable == !readOnly else {
+      throw MisoError.invalid("Backing image attachment access differs from requested access")
     }
     attachment = DiskImageAttachment(entities: match.entities)
   }

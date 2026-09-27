@@ -14,8 +14,9 @@ executed. This is not a fully static binary.
 
 This is an in-progress native migration. The commands below work without starting
 a virtual machine. The experimental `restore` command connects the native vanilla
-stages; its end-to-end acceptance is still in progress. Base provisioning and
-upgrade execution are not yet exposed. A recognized profile is not a claim of
+stages, with single-command offline acceptance on macOS 26.6.2. Base currently
+exposes input preparation and its static layer, not a complete build. Upgrade
+execution is not yet exposed. A recognized profile is not a claim of
 native end-to-end validation. Write stages fail closed on unvalidated host ABIs.
 
 ```sh
@@ -33,6 +34,45 @@ swift run miso ipsw inspect restore.ipsw --verify-digest
 its `--sha256` or the complete `--archive-sha256`. `upgrade plan` performs a three-way Data-template comparison for an exact
 recognized source/target pair. It rejects conflicts and never modifies an image.
 Use each command's `--help` for arguments.
+
+`base defaults` prints package requests. Omitted versions mean the newest stable
+target-compatible upstream release, not the host's installed version. Explicit
+versions must be available upstream; they are never silently substituted.
+The core formula resolver supports current and upstream versioned formulae, not
+arbitrary historical Homebrew revisions. It checks arm64 bottle availability,
+runtime requirements and dependency closure, and verifies pinned formula sources.
+Unknown installation hooks still require a compatible execution adapter.
+
+```sh
+miso base defaults > base.json
+miso base resolve --config base.json --target-version 15.6.1 \
+  --target-build 24G90 --output resolved
+miso base resolve --config base.json --target-version 15.6.1 \
+  --target-build 24G90 --metadata resolved/metadata --output replayed
+miso base archive create --spec inputs.json --output archived-inputs
+miso base archive verify archived-inputs
+```
+
+Resolution does not install software or prove runtime compatibility. Only core
+formula requests are currently resolved; Homebrew itself, Ruby, npm and third-party
+selectors are configuration for the remaining migration. `additionalRubyVersions`
+is an explicit compatibility list and can be changed or emptied.
+Versioned formula names such as `node@24` constrain the release line; use `node`
+to select the newest compatible upstream line instead.
+
+Archive specifications contain `schemaVersion: 1`, a `target` with `version` and
+`build`, and `resources`: objects with `name`, local `path`, and optional `origin`.
+Archives copy the actual inputs and preserve modes, relative links and digests;
+verification is network-free and works after moving the archive. An archive of
+selected software inputs is not a complete macOS/Base reconstruction kit.
+Keep private input archives separately from disposable build intermediates.
+
+`base static` requires a completed never-booted bundle, the Actions Runner release
+metadata and matching arm64 archive, and a GitHub known-hosts file. It clones the
+bundle, writes the static user/service payloads, and verifies them after read-only
+reattachment. Its output remains explicitly incomplete Base, without runtime
+acceptance. All construction must use a local APFS workspace; slow external
+volumes are suitable for input archives, not working images.
 
 Configuration defaults use `admin/admin`, disable FileVault, and request SSH/VNC.
 They are intended for isolated test systems; change credentials before exposing a
