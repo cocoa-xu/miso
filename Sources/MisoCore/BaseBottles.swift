@@ -17,10 +17,35 @@ public enum BaseBottles {
     source: URL, resolution: URL, bottles: URL, names: [String], output: URL,
     username: String = "admin", postInstall: Bool = false, cancellation: CancellationToken? = nil
   ) throws -> BaseStageReceipt<Details> {
+    try install(
+      source: source, resolution: resolution, bottles: bottles, names: names,
+      output: output, username: username, postInstall: postInstall, layer: .base,
+      cancellation: cancellation)
+  }
+
+  public static func installXcode(
+    source: URL, resolution: URL, bottles: URL, names: [String], output: URL,
+    username: String = "admin", cancellation: CancellationToken? = nil
+  ) throws -> BaseStageReceipt<Details> {
+    try install(
+      source: source, resolution: resolution, bottles: bottles, names: names,
+      output: output, username: username, postInstall: true, layer: .xcode,
+      cancellation: cancellation)
+  }
+
+  private static func install(
+    source: URL, resolution: URL, bottles: URL, names: [String], output: URL,
+    username: String, postInstall: Bool, layer: BaseImageStage.Layer,
+    cancellation: CancellationToken?
+  ) throws -> BaseStageReceipt<Details> {
     let selection = try HomebrewBottleInputs.load(
       resolution: resolution, bottles: bottles, names: names, cancellation: cancellation)
+    guard (selection.xcode == nil) == (layer == .base) else {
+      throw MisoError.invalid("Bottle resolution prerequisites differ from the image layer")
+    }
     return try BaseImageStage.run(
-      source: source, output: output, operation: "base-bottles", cancellation: cancellation
+      source: source, output: output, operation: layer == .base ? "base-bottles" : "xcode-bottles",
+      layer: layer, cancellation: cancellation
     ) { bundle, target, journal in
       guard target == selection.target else {
         throw MisoError.invalid("Bottle resolution target differs from image")
@@ -39,6 +64,20 @@ public enum BaseBottles {
       ) { guest in
         accountIdentity = [guest.account.uid, guest.account.gid]
         try guest.verifyControls(target: target)
+        if let configuration = selection.xcode {
+          let app = try guest.data.directory(configuration.applicationPath).url
+          _ = try XcodeArchive.inspect(app, target: target, configuration: configuration)
+          try AppleCode.validate(app)
+          let selected = try guest.data.path(
+            "private/var/db/xcode_select_link", allowLeafLink: true)
+          guard
+            try FileManager.default.destinationOfSymbolicLink(atPath: selected.path)
+              == "/" + configuration.applicationPath + "/Contents/Developer"
+          else {
+            throw MisoError.invalid(
+              "Installed developer selection differs from bottle requirements")
+          }
+        }
         let before = try installedVersions(
           guest.run(
             "bottles-before",
@@ -108,8 +147,11 @@ public enum BaseBottles {
           expected[formula.name] = formula.kegVersion
         }
         if postInstall {
+          let formulae = selection.payloads.map(\.formula).filter {
+            layer == .base || before[$0.name] == nil
+          }
           lifecycleProbes = try HomebrewLifecycle.run(
-            selection.payloads.map(\.formula), guest: guest, execution: execution)
+            formulae, guest: guest, execution: execution)
         }
         installed = try installedVersions(
           guest.run(

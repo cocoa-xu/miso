@@ -257,6 +257,14 @@ the resolved dependency closure and verifies its digests, OCI indexes and layout
 reuses verified completed files from the same resolution and downloads missing pairs;
 it does not modify the previous output. Add `--formula name` to select a closure.
 
+For developer formulae that require Xcode, `base resolve --xcode-config xcode.json`
+records an explicit target prerequisite and retains it during bottle validation.
+`xcode install-bottles` verifies that the installed, selected Xcode matches it before
+using the existing offline bottle installer. It preserves the completed Base layer
+and runs post-install methods only for newly installed formulae, preserving existing
+Base configuration such as its certificate bundle. CLT-only resolution remains the
+default and rejects runtime Xcode requirements.
+
 `base bottles verify --resolution resolved --bottles bottle-directory` validates
 resolved formula sources and local `<name>.tar.gz` / `<name>.tar.index.json` inputs
 without administrator privileges. Add `--formula name` to select a dependency closure.

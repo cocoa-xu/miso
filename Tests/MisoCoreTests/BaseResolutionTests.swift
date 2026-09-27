@@ -261,3 +261,50 @@ private func formulaMetadata(
       output: directory.url.appendingPathComponent("tampered"), metadata: metadata)
   }
 }
+
+@Test func xcodeRuntimeRequirementsRequireAnExplicitCompatibleTarget() throws {
+  let target = MacOSRelease(version: "27.0.1", build: "26A434")
+  let data = try formulaMetadata(
+    tag: "arm64_golden_gate",
+    changes: [
+      "requirements": [["name": "xcode", "version": "27.0", "contexts": [], "specs": ["stable"]]]
+    ])
+  #expect(throws: MisoError.self) {
+    try HomebrewResolution.parse(data, name: "example", target: target)
+  }
+  #expect(
+    try HomebrewResolution.parse(data, name: "example", target: target, xcode: .init()).name
+      == "example")
+  var older = XcodeConfiguration()
+  older.version = "26.6"
+  #expect(throws: MisoError.self) {
+    try HomebrewResolution.parse(data, name: "example", target: target, xcode: older)
+  }
+}
+
+@Test func xcodeResolutionRetainsItsPrerequisiteDuringBottleValidation() async throws {
+  let directory = try TemporaryDirectory()
+  defer { directory.remove() }
+  let metadata = directory.url.appendingPathComponent("metadata")
+  try SafeFile.makeDirectory(metadata)
+  try SafeFile.writeNew(
+    formulaMetadata(
+      tag: "arm64_golden_gate",
+      changes: ["requirements": [["name": "xcode", "version": "8.0", "contexts": []]]]),
+    to: metadata.appendingPathComponent("example.json"))
+  try SafeFile.writeNew(formulaSource, to: metadata.appendingPathComponent("example.rb"))
+  let output = directory.url.appendingPathComponent("resolution")
+  let receipt = try await HomebrewResolution.run(
+    requests: [.init(name: "example")], target: .init(version: "27.0.1", build: "26A434"),
+    output: output, metadata: metadata, xcode: .init())
+  #expect(receipt.xcode == XcodeConfiguration())
+  #expect(
+    try HomebrewBottleInputs.resolve(output, names: [], cancellation: nil).receipt.xcode
+      == receipt.xcode)
+  var changed = receipt
+  changed.xcode = nil
+  try SafeFile.replace(JSON.encode(changed), at: output.appendingPathComponent("resolution.json"))
+  #expect(throws: MisoError.self) {
+    try HomebrewBottleInputs.resolve(output, names: [], cancellation: nil)
+  }
+}

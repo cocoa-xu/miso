@@ -8,7 +8,7 @@ struct Xcode: AsyncParsableCommand {
     subcommands: [
       Defaults.self, PrepareArchive.self, PrepareMetal.self, PreparePackages.self,
       PrepareRuntime.self,
-      InstallApplication.self, InstallPackages.self,
+      InstallApplication.self, InstallPackages.self, InstallBottles.self,
     ])
 
   struct InstallPackages: ParsableCommand {
@@ -26,6 +26,28 @@ struct Xcode: AsyncParsableCommand {
         XcodePackageInstallation.install(
           source: fileURL(source), preparedArchive: fileURL(prepared),
           output: fileURL(output), cancellation: cancellation.token))
+    }
+  }
+
+  struct InstallBottles: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "install-bottles",
+      abstract: "Install developer bottles bound to the image's exact Xcode configuration.")
+    @Option var source: String
+    @Option var resolution: String
+    @Option var bottles: String
+    @Option var formula: [String] = []
+    @Option var username = "admin"
+    @Option var output: String
+
+    func run() throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        BaseBottles.installXcode(
+          source: fileURL(source), resolution: fileURL(resolution), bottles: fileURL(bottles),
+          names: formula,
+          output: fileURL(output), username: username, cancellation: cancellation.token))
     }
   }
 

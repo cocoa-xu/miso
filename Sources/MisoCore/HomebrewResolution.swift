@@ -36,6 +36,7 @@ public enum HomebrewResolution {
     public let payloadsIncluded: Bool
     public let installationVerified: Bool
     public let completeBaseResolution: Bool
+    public var xcode: XcodeConfiguration? = nil
   }
 
   private static let macOSMajors: [String: Int] = [
@@ -52,7 +53,10 @@ public enum HomebrewResolution {
     return "arm64_" + name
   }
 
-  static func parse(_ bytes: Data, name: String, target: MacOSRelease) throws -> Formula {
+  static func parse(
+    _ bytes: Data, name: String, target: MacOSRelease, xcode: XcodeConfiguration? = nil
+  ) throws -> Formula {
+    try xcode?.validate()
     try PackageRequest(name: name).validate()
     let tag = try tag(for: target)
     let original = try object(bytes)
@@ -81,7 +85,7 @@ public enum HomebrewResolution {
     guard source.hasPrefix("Formula/"), source.hasSuffix(".rb") else {
       throw MisoError.invalid("Unexpected formula source path")
     }
-    try compatible(requirements, target: target)
+    try compatible(requirements, target: target, xcode: xcode)
     let builtins = value["uses_from_macos"] as? [Any] ?? []
     let bounds = value["uses_from_macos_bounds"] as? [[String: String]] ?? []
     guard builtins.count == bounds.count else {
@@ -160,7 +164,9 @@ public enum HomebrewResolution {
     return value
   }
 
-  static func compatible(_ requirements: [[String: Any]], target: MacOSRelease) throws {
+  static func compatible(
+    _ requirements: [[String: Any]], target: MacOSRelease, xcode: XcodeConfiguration? = nil
+  ) throws {
     let targetVersion = try MacOSVersion(target.version)
     for item in requirements {
       if let contexts = item["contexts"] as? [String], !contexts.isEmpty,
@@ -176,6 +182,12 @@ public enum HomebrewResolution {
       }
       let version = item["version"] as? String
       switch name {
+      case "xcode":
+        guard let xcode else { throw MisoError.unsupported("formula requires Xcode") }
+        try xcode.validate()
+        if let version, try StableVersion(xcode.version) < StableVersion(version) {
+          throw MisoError.unsupported("formula requires Xcode \(version)")
+        }
       case "macos":
         if let version {
           let minimum: MacOSVersion
@@ -220,6 +232,7 @@ public enum HomebrewResolution {
 
   public static func run(
     requests: [PackageRequest], target: MacOSRelease, output: URL, metadata: URL? = nil,
+    xcode: XcodeConfiguration? = nil,
     cancellation: CancellationToken? = nil
   ) async throws -> Receipt {
     guard !requests.isEmpty, requests.count <= 256,
@@ -228,6 +241,7 @@ public enum HomebrewResolution {
       throw MisoError.invalid("Expected unique Homebrew formula requests")
     }
     for request in requests { try request.validate() }
+    try xcode?.validate()
     _ = try tag(for: target)
     if let metadata { _ = try GuestVolume(metadata) }
     let journal = try ExecutionJournal(
@@ -235,6 +249,7 @@ public enum HomebrewResolution {
     do {
       try journal.setMetadata("target", value: target)
       try journal.setMetadata("requests", value: requests)
+      if let xcode { try journal.setMetadata("xcode", value: xcode) }
       let directory = journal.output.appendingPathComponent("metadata")
       try SafeFile.makeDirectory(directory)
       var documents: [String: Data] = [:]
@@ -274,7 +289,7 @@ public enum HomebrewResolution {
         var pending = root.dependencies
         while let name = pending.popLast() {
           if resolved[name] != nil { continue }
-          let formula = try parse(await document(name), name: name, target: target)
+          let formula = try parse(await document(name), name: name, target: target, xcode: xcode)
           resolved[name] = formula
           pending += formula.dependencies
         }
@@ -285,7 +300,7 @@ public enum HomebrewResolution {
         let data = try await document(request.name)
         let original = try object(data)
         do {
-          let primary = try parse(data, name: request.name, target: target)
+          let primary = try parse(data, name: request.name, target: target, xcode: xcode)
           if request.version == nil || request.version == primary.version {
             let resolved = try await closure(primary)
             roots[request.name] = primary.name
@@ -299,7 +314,7 @@ public enum HomebrewResolution {
         for name in Array(Set(names)).sorted() {
           let candidateData = try await document(name)
           do {
-            let candidate = try parse(candidateData, name: name, target: target)
+            let candidate = try parse(candidateData, name: name, target: target, xcode: xcode)
             if request.version == nil || request.version == candidate.version {
               candidates.append(candidate)
             }
@@ -346,11 +361,12 @@ public enum HomebrewResolution {
         .map {
           try Artifacts.record(directory.appendingPathComponent($0), relativeTo: journal.output)
         }
-      let result = Receipt(
+      var result = Receipt(
         schemaVersion: 1, target: target, requests: requests, selectedRoots: roots,
         formulae: formulae, installOrder: try installOrder(formulae, roots: Array(roots.values)),
         metadata: records, payloadsIncluded: false, installationVerified: false,
         completeBaseResolution: false)
+      result.xcode = xcode
       try SafeFile.writeNew(
         JSON.encode(result), to: journal.output.appendingPathComponent("resolution.json"))
       try journal.finish(result)

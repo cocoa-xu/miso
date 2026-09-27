@@ -612,6 +612,9 @@ struct Base: AsyncParsableCommand {
     @Option var config: String?
     @Option var formula: [String] = []
     @Option var metadata: String?
+    @Option(
+      help: "Require this explicit target Xcode configuration instead of CLT-only resolution.")
+    var xcodeConfig: String?
     @Option var output: String
 
     func run() async throws {
@@ -628,7 +631,9 @@ struct Base: AsyncParsableCommand {
         await HomebrewResolution.run(
           requests: formula.isEmpty ? settings.formulae : formula.map { PackageRequest(name: $0) },
           target: MacOSRelease(version: targetVersion, build: targetBuild), output: fileURL(output),
-          metadata: metadata.map(fileURL), cancellation: cancellation.token))
+          metadata: metadata.map(fileURL),
+          xcode: try xcodeConfig.map { try JSON.read(XcodeConfiguration.self, from: fileURL($0)) },
+          cancellation: cancellation.token))
     }
   }
 

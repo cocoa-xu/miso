@@ -32,6 +32,7 @@ public enum HomebrewBottleInputs {
     let target: MacOSRelease
     let resolutionSHA256: String
     let payloads: [Payload]
+    var xcode: XcodeConfiguration? = nil
   }
 
   static func verifyFormulaSources(
@@ -76,7 +77,9 @@ public enum HomebrewBottleInputs {
     }
     for (name, formula) in receipt.formulae {
       let data = try SafeFile.read(documents.path("metadata/\(name).json"), limit: 8 << 20)
-      guard try HomebrewResolution.parse(data, name: name, target: receipt.target) == formula,
+      guard
+        try HomebrewResolution.parse(data, name: name, target: receipt.target, xcode: receipt.xcode)
+          == formula,
         try SafeFile.sha256(documents.path("metadata/\(name).rb")) == formula.sourceSHA256
       else { throw MisoError.invalid("Formula differs from resolution: \(name)") }
     }
@@ -144,7 +147,8 @@ public enum HomebrewBottleInputs {
       throw MisoError.invalid("Resolution changed during validation")
     }
     return Selection(
-      target: resolved.receipt.target, resolutionSHA256: resolved.sha256, payloads: payloads)
+      target: resolved.receipt.target, resolutionSHA256: resolved.sha256, payloads: payloads,
+      xcode: resolved.receipt.xcode)
   }
 
   static func parseIndex(
