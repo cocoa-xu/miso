@@ -31,6 +31,18 @@ private func captureVolume(_ temporary: TemporaryDirectory) throws -> GuestVolum
   }
 }
 
+@Test func goldenGatePatchCaptureReminderRequiresItsReviewedBuildAndCode() throws {
+  let target = MacOSRelease(version: "27.0.1", build: "26A434")
+  let policy = capturePolicy(
+    hash: "471218d0849d6f177bf62036d2d7e2aca89ea4333b7398d9b72d3b1cb3ee1e2b")
+  try policy.validate(target: target, now: captureExpiry.addingTimeInterval(-1))
+  #expect(throws: (any Error).self) { try capturePolicy().validate(target: target) }
+  #expect(throws: (any Error).self) {
+    try policy.validate(target: .init(version: "27.0.1", build: "26A428"))
+  }
+  #expect(throws: (any Error).self) { try policy.validate(target: target, now: captureExpiry) }
+}
+
 @Test func capturePolicyBindsVersionExpiryAndImplementation() throws {
   let policy = capturePolicy()
   try policy.validate(target: captureTarget, now: captureExpiry.addingTimeInterval(-1))

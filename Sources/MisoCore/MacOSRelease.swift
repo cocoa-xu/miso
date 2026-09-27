@@ -54,7 +54,6 @@ public struct RestoreProfile: Codable, Equatable, Sendable {
   public let family: Family
   public let ipswSHA256: String
   public let commandLineTools: CommandLineTools
-  public let virtualPolicyKextSHA256: String
 
   public struct CommandLineTools: Codable, Equatable, Sendable {
     public let product: String
@@ -117,20 +116,22 @@ public struct RestoreProfile: Codable, Equatable, Sendable {
       release: .init(version: "15.6.1", build: "24G90"), family: .sequoia,
       ipswSHA256: "3d87686b691ac765eb6a6b3082b2334e2af9710096a00432dd519af89ff2ea78",
       commandLineTools: .init(
-        product: "082-41241", version: "16.4.0.0.1.1747106510", sdk: "MacOSX15.5.sdk"),
-      virtualPolicyKextSHA256: "2c7ee7afeb62fb9a739ffa847d9a1abe04112dddb232ae566868764c16d15c0c"),
+        product: "082-41241", version: "16.4.0.0.1.1747106510", sdk: "MacOSX15.5.sdk")),
     Self(
       release: .init(version: "26.6.2", build: "25G83"), family: .tahoe,
       ipswSHA256: "885503b7f4b06609e9a512f2befd40f59730640a3f1233e3892d60affdd51c95",
       commandLineTools: .init(
-        product: "140-17812", version: "26.6.0.0.1781586589", sdk: "MacOSX26.5.sdk"),
-      virtualPolicyKextSHA256: "c26aa378119dceef89eb214132125c40cc6d33485fd438f636fdfb354c0b0038"),
+        product: "140-17812", version: "26.6.0.0.1781586589", sdk: "MacOSX26.5.sdk")),
     Self(
       release: .init(version: "27.0", build: "26A428"), family: .goldenGate,
       ipswSHA256: "2a5d3c695d501022b7fad9adaffcf2627bcb867d993fb5662dcd41bac99a2836",
       commandLineTools: .init(
-        product: "082-83364", version: "27.0.0.0.1788430756", sdk: "MacOSX27.0.sdk"),
-      virtualPolicyKextSHA256: "e8dfc1b356d685fab5f5a0319fcab37d4796c2fc11b1b51aecb403c447b9f12e"),
+        product: "082-83364", version: "27.0.0.0.1788430756", sdk: "MacOSX27.0.sdk")),
+    Self(
+      release: .init(version: "27.0.1", build: "26A434"), family: .goldenGate,
+      ipswSHA256: "2f016638293c3e641b8b25391a76fbc16563b3711915a5551cf8aa0f5598a5c1",
+      commandLineTools: .init(
+        product: "082-83364", version: "27.0.0.0.1788430756", sdk: "MacOSX27.0.sdk")),
   ]
 
   public static func select(_ release: MacOSRelease) throws -> Self {

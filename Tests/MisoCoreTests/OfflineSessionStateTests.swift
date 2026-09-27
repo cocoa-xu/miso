@@ -14,6 +14,29 @@ private let sessionSchema = """
     PRIMARY KEY(service,client,client_type,indirect_object_identifier));
   """
 
+@Test func goldenGatePatchSessionUsesExactImplementationAndVersionStamps() throws {
+  let target = MacOSRelease(version: "27.0.1", build: "26A434")
+  let profile = try #require(try OfflineSessionState.profile(for: target))
+  let previous = try #require(try OfflineSessionState.profile(for: sessionTarget))
+  #expect(profile.stamps["SystemVersionStampAsString"] as? String == "27.0.1")
+  #expect(profile.stamps["BuildVersionStampAsString"] as? String == "26A434")
+  #expect(profile.versionNumber == (27 << 24) | (1 << 8))
+  #expect(profile.buildNumber == (26 << 21) | (434 << 5))
+  #expect(profile.loginSHA256 != previous.loginSHA256)
+  #expect(profile.loginSHA256 == "59aed05e3e14eaaf551aa4cc488205a72867f385c36620f991849687ac68058d")
+  #expect(profile.tccdSHA256 == previous.tccdSHA256)
+  #expect(profile.schemaSHA256 == previous.schemaSHA256)
+  #expect(
+    try OfflineSessionState.screenSharingRequirement(for: target)
+      == OfflineSessionState.screenSharingRequirement(for: sessionTarget))
+  for release in [
+    MacOSRelease(version: "27.0.1", build: "26A428"),
+    .init(version: "27.0", build: "26A434"), .init(version: "27.0.2", build: "26A434"),
+  ] {
+    #expect(throws: (any Error).self) { try OfflineSessionState.profile(for: release) }
+  }
+}
+
 @Test func sessionProfilesBindOnlyReviewedReleasesAndCodeIdentity() throws {
   let profile = try #require(try OfflineSessionState.profile(for: sessionTarget))
   #expect(profile.stamps["SystemVersionStampAsString"] as? String == "27.0")

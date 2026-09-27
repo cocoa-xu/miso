@@ -13,7 +13,8 @@ enum BaseCaptureReminder {
 
     func validate(target: MacOSRelease, now: Date = Date()) throws {
       let goldenGate =
-        target == MacOSRelease(version: "27.0", build: "26A428")
+        [MacOSRelease(version: "27.0", build: "26A428"), .init(version: "27.0.1", build: "26A434")]
+        .contains(target)
         && replaydSHA256 == "471218d0849d6f177bf62036d2d7e2aca89ea4333b7398d9b72d3b1cb3ee1e2b"
       let sequoia =
         target == MacOSRelease(version: "15.6.1", build: "24G90")

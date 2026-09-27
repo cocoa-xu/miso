@@ -17,7 +17,7 @@ func invalidVersions(_ value: String) {
 }
 
 @Test func exactProfiles() throws {
-  #expect(RestoreProfile.supported.count == 3)
+  #expect(RestoreProfile.supported.count == 4)
   #expect(UpgradeProfile.supported.count == 5)
   for profile in RestoreProfile.supported {
     #expect(try RestoreProfile.select(profile.release) == profile)
@@ -33,6 +33,35 @@ func invalidVersions(_ value: String) {
   #expect(throws: (any Error).self) {
     try RestoreProfile.select(.init(version: "26.1", build: "unknown"))
   }
+}
+
+@Test func goldenGatePatchRestoreBindsExactArchiveAndRelease() throws {
+  let target = MacOSRelease(version: "27.0.1", build: "26A434")
+  let profile = try RestoreProfile.select(target)
+  let previous = try RestoreProfile.select(.init(version: "27.0", build: "26A428"))
+  #expect(profile.family == .goldenGate)
+  #expect(profile.ipswSHA256 == "2f016638293c3e641b8b25391a76fbc16563b3711915a5551cf8aa0f5598a5c1")
+  #expect(profile.commandLineTools == previous.commandLineTools)
+  #expect(profile.ipswSHA256 != previous.ipswSHA256)
+  for release in [
+    MacOSRelease(version: "27.0.1", build: "26A428"),
+    .init(version: "27.0", build: "26A434"), .init(version: "27.0.2", build: "26A434"),
+  ] {
+    #expect(throws: (any Error).self) { try RestoreProfile.select(release) }
+  }
+}
+
+@Test func restoreProfilesDecodeHistoricalInformationalFields() throws {
+  let profile = try RestoreProfile.select(.init(version: "27.0", build: "26A428"))
+  var record = try #require(
+    JSONSerialization.jsonObject(with: JSONEncoder().encode(profile)) as? [String: Any])
+  record["virtualPolicyKextSHA256"] = String(repeating: "a", count: 64)
+  let decoded = try JSONDecoder().decode(
+    RestoreProfile.self, from: JSONSerialization.data(withJSONObject: record))
+  #expect(decoded == profile)
+  let encoded = try #require(
+    JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded)) as? [String: Any])
+  #expect(encoded["virtualPolicyKextSHA256"] == nil)
 }
 
 @Test(arguments: ["", "/etc/passwd", "../a", "a/../b", "a//b", "a/", "./a", "a\\b", "a\0b"])

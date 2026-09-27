@@ -29,15 +29,28 @@ enum OfflineSessionState {
   static func profile(for target: MacOSRelease) throws -> Profile? {
     let restore = try RestoreProfile.select(target)
     guard restore.family == .goldenGate else { return nil }
-    guard target == MacOSRelease(version: "27.0", build: "26A428") else {
+    let implementation: (loginSHA256: String, versionNumber: Int, buildNumber: Int)
+    switch target {
+    case MacOSRelease(version: "27.0", build: "26A428"):
+      implementation = (
+        "c5e445044388abe7e8441aef87417884771ae41da64402a8d26c8671d2d131d7",
+        452_984_832, 54_539_648
+      )
+    case MacOSRelease(version: "27.0.1", build: "26A434"):
+      implementation = (
+        "59aed05e3e14eaaf551aa4cc488205a72867f385c36620f991849687ac68058d",
+        452_985_088, 54_539_840
+      )
+    default:
       throw MisoError.unsupported("Session state needs an exact macOS 27 profile")
     }
     return Profile(
       target: target,
-      loginSHA256: "c5e445044388abe7e8441aef87417884771ae41da64402a8d26c8671d2d131d7",
+      loginSHA256: implementation.loginSHA256,
       tccdSHA256: "51511100c32201166912c7152302f093528344975403b1c663f7247fb95638c0",
       schemaSHA256: "f24d4076c1123e89102defbd09c860f4668147c74609644dc0e06f3be5e6d072",
-      schemaVersion: 36, versionNumber: 452_984_832, buildNumber: 54_539_648)
+      schemaVersion: 36, versionNumber: implementation.versionNumber,
+      buildNumber: implementation.buildNumber)
   }
 
   static func screenSharingRequirement(for target: MacOSRelease) throws -> Data? {
