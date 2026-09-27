@@ -48,6 +48,30 @@ enum HTTPFile {
     redirects: HTTPData.RedirectPolicy = .reject,
     configuration: URLSessionConfiguration = .ephemeral
   ) async throws {
+    try await fetch(
+      url, to: output, maximumBytes: maximumBytes, body: nil, contentType: nil,
+      cancellation: cancellation, redirects: redirects, configuration: configuration)
+  }
+
+  static func post(
+    _ url: URL, body: Data, contentType: String, to output: URL, maximumBytes: UInt64,
+    cancellation: CancellationToken? = nil,
+    configuration: URLSessionConfiguration = .ephemeral
+  ) async throws {
+    guard !body.isEmpty, body.count <= 4 << 20,
+      contentType.range(of: #"\Aapplication/[a-z0-9.+-]{1,80}\z"#, options: .regularExpression)
+        != nil
+    else { throw MisoError.invalid("Invalid HTTPS payload request body or content type") }
+    try await fetch(
+      url, to: output, maximumBytes: maximumBytes, body: body, contentType: contentType,
+      cancellation: cancellation, redirects: .reject, configuration: configuration)
+  }
+
+  private static func fetch(
+    _ url: URL, to output: URL, maximumBytes: UInt64, body: Data?, contentType: String?,
+    cancellation: CancellationToken?, redirects: HTTPData.RedirectPolicy,
+    configuration: URLSessionConfiguration
+  ) async throws {
     try validate(url, maximumBytes: maximumBytes)
     try cancellation?.check()
     configuration.httpCookieStorage = nil
@@ -59,6 +83,9 @@ enum HTTPFile {
     let session = URLSession(configuration: configuration)
     defer { session.invalidateAndCancel() }
     var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+    request.httpMethod = body == nil ? "GET" : "POST"
+    request.httpBody = body
+    if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
     request.setValue("miso", forHTTPHeaderField: "User-Agent")
     try await withThrowingTaskGroup(of: Void.self) { group in

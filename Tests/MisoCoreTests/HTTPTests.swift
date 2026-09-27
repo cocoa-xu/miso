@@ -11,6 +11,27 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
   override func startLoading() {
     let url = request.url!
     let path = url.lastPathComponent
+    if path == "post" {
+      var body = request.httpBody ?? Data()
+      if let stream = request.httpBodyStream {
+        stream.open()
+        defer { stream.close() }
+        var buffer = [UInt8](repeating: 0, count: 128)
+        while stream.hasBytesAvailable {
+          let count = stream.read(&buffer, maxLength: buffer.count)
+          if count <= 0 { break }
+          body.append(contentsOf: buffer.prefix(count))
+        }
+      }
+      let metadata =
+        "\(request.httpMethod ?? "") \(request.value(forHTTPHeaderField: "Content-Type") ?? "")\n"
+      let response = HTTPURLResponse(
+        url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: Data(metadata.utf8) + body)
+      client?.urlProtocolDidFinishLoading(self)
+      return
+    }
     if path == "accept" {
       let response = HTTPURLResponse(
         url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
@@ -61,6 +82,68 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
     URL(string: "https://fixture.test/ok")!, to: output, maximumBytes: 64,
     configuration: stubConfiguration())
   #expect(try SafeFile.read(output, limit: 64) == Data(repeating: 42, count: 64))
+}
+
+@Test func nativePayloadPostPreservesBodyAndContentType() async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let output = temporary.url.appendingPathComponent("payload")
+  let body = Data([0, 1, 2, 255])
+  try await HTTPFile.post(
+    URL(string: "https://fixture.test/post")!, body: body,
+    contentType: "application/x-git-upload-pack-request", to: output, maximumBytes: 128,
+    configuration: stubConfiguration())
+  #expect(
+    try SafeFile.read(output, limit: 128)
+      == Data("POST application/x-git-upload-pack-request\n".utf8) + body)
+}
+
+@Test(arguments: ["declared-large", "streamed-large", "error", "empty", "redirect"])
+func nativePayloadPostRejectsInvalidResponses(_ path: String) async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let output = temporary.url.appendingPathComponent("payload")
+  await #expect(throws: (any Error).self) {
+    try await HTTPFile.post(
+      URL(string: "https://fixture.test/\(path)")!, body: Data([1]),
+      contentType: "application/x-git-upload-pack-request", to: output, maximumBytes: 64,
+      configuration: stubConfiguration())
+  }
+  #expect(!FileManager.default.fileExists(atPath: output.path))
+}
+
+@Test func nativePayloadPostRejectsInvalidRequests() async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  for (body, type) in [
+    (Data(), "application/json"), (Data(repeating: 1, count: (4 << 20) + 1), "application/json"),
+    (Data([1]), "text/plain"), (Data([1]), "application/json\r\nAuthorization: secret"),
+  ] {
+    await #expect(throws: MisoError.self) {
+      try await HTTPFile.post(
+        URL(string: "https://fixture.test/post")!, body: body, contentType: type,
+        to: temporary.url.appendingPathComponent("payload"), maximumBytes: 128,
+        configuration: stubConfiguration())
+    }
+  }
+}
+
+@Test func nativePayloadPostCancellation() async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let token = try CancellationToken()
+  let cancellation = Task {
+    try await Task.sleep(for: .milliseconds(150))
+    token.cancel()
+  }
+  defer { cancellation.cancel() }
+  await #expect(throws: (any Error).self) {
+    try await HTTPFile.post(
+      URL(string: "https://fixture.test/stall")!, body: Data([1]),
+      contentType: "application/x-git-upload-pack-request",
+      to: temporary.url.appendingPathComponent("payload"), maximumBytes: 64,
+      cancellation: token, configuration: stubConfiguration())
+  }
 }
 
 @Test(arguments: ["declared-large", "streamed-large", "error", "empty", "redirect"])
