@@ -2,10 +2,34 @@ import ArgumentParser
 import Foundation
 import MisoCore
 
-struct Xcode: ParsableCommand {
+struct Xcode: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     abstract: "Prepare exact-version Xcode inputs without starting a VM.",
-    subcommands: [Defaults.self, PrepareArchive.self])
+    subcommands: [Defaults.self, PrepareArchive.self, PrepareMetal.self])
+
+  struct PrepareMetal: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "prepare-metal",
+      abstract: "Download and verify the exact Xcode Metal asset without installing it on the host."
+    )
+    @Option var config: String?
+    @Option(help: "Signed catalog for offline replay; requires --archive.") var catalog: String?
+    @Option(help: "Encrypted Apple asset for offline replay; requires --catalog.") var archive:
+      String?
+    @Option var output: String
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      let settings =
+        try config.map { try JSON.read(XcodeConfiguration.self, from: fileURL($0)) }
+        ?? XcodeConfiguration()
+      try printJSON(
+        await XcodeMetal.prepare(
+          configuration: settings, catalog: catalog.map(fileURL), archive: archive.map(fileURL),
+          output: fileURL(output), cancellation: cancellation.token))
+    }
+  }
 
   struct Defaults: ParsableCommand {
     static let configuration = CommandConfiguration(

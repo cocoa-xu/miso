@@ -34,6 +34,7 @@ public struct NativeCommand: Sendable {
     case unmount = "/sbin/umount"
     case codesign = "/usr/bin/codesign"
     case xip = "/usr/bin/xip"
+    case appleArchive = "/usr/bin/aa"
   }
 
   public let executable: URL

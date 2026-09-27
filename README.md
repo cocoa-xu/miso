@@ -30,6 +30,15 @@ time and a separate working directory. The default standard configuration
 selects Xcode 27.0 (27A266a), all four arm64 simulator platforms and MetalToolchain;
 it never selects the host's Xcode version.
 
+`xcode prepare-metal` fetches the exact configured build from Apple's signed asset
+catalog, authenticates the Pallas signature and Apple certificate chain, checks the
+archive hash, decrypts it with AppleArchive and expands it with Apple's `aa patch`.
+It verifies the arm64 restore identity, disk-image digest and Metal executable's
+Apple signature on a read-only mount. It does not install a host component.
+For offline replay, pass the saved `catalog.jwt` and `asset.aar` using `--catalog`
+and `--archive`. Both are required together. The receipt records input preparation
+separately from Xcode image construction and runtime acceptance.
+
 ```sh
 miso xcode defaults > xcode.json
 miso xcode prepare-archive --archive Xcode_27.0_Apple_silicon.xip \
