@@ -12,8 +12,11 @@ enum BaseCaptureReminder {
     let expiresAt: Date
 
     func validate(target: MacOSRelease, now: Date = Date()) throws {
-      guard schemaVersion == 1, try MacOSVersion(target.version).major == 26 else {
-        throw MisoError.unsupported("Screen capture reminder policy requires a macOS 26 profile")
+      let goldenGate =
+        target == MacOSRelease(version: "27.0", build: "26A428")
+        && replaydSHA256 == "471218d0849d6f177bf62036d2d7e2aca89ea4333b7398d9b72d3b1cb3ee1e2b"
+      guard schemaVersion == 1, try MacOSVersion(target.version).major == 26 || goldenGate else {
+        throw MisoError.unsupported("Screen capture reminder policy requires a reviewed profile")
       }
       try SafeFile.validateSHA256(replaydSHA256)
       guard expiresAt.timeIntervalSince1970.isFinite, expiresAt > now else {
