@@ -75,6 +75,11 @@ private func rubyBuild(_ version: String = "4.0.7") -> BaseRuby.Build {
   let text = String(decoding: try JSON.encode(probe), as: UTF8.self)
   #expect(
     try BaseRuby.validateProbe(text, build: rubyBuild(), toolchain: toolchain).version == "4.0.7")
+  #expect(
+    try BaseRuby.validateProbe(
+      text.replacingOccurrences(of: "aarch64-apple", with: "arm64-apple"),
+      build: rubyBuild(), toolchain: toolchain
+    ).host == "arm64-apple-darwin25")
   #expect(throws: (any Error).self) {
     try BaseRuby.validateProbe(
       text.replacingOccurrences(of: "darwin25", with: "darwin27"),

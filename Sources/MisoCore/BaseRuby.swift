@@ -200,6 +200,7 @@ public enum BaseRuby {
             arguments: [
               "/" + rbenv + "/versions/" + build.version + "/bin/ruby", "-e", probeProgram,
             ], capability: .ruby)
+          try journal.setMetadata("rubyProbe-" + build.version, value: probe)
           probes.append(try validateProbe(probe, build: build, toolchain: toolchain))
         }
         try guest.run(
@@ -295,7 +296,8 @@ public enum BaseRuby {
 
   static func validateProbe(_ text: String, build: Build, toolchain: Toolchain) throws -> Probe {
     let probe = try JSONDecoder().decode(Probe.self, from: Data(text.utf8))
-    guard probe.version == build.version, probe.host == toolchain.triplet,
+    let arm64Triplet = toolchain.triplet.replacingOccurrences(of: "aarch64", with: "arm64")
+    guard probe.version == build.version, [toolchain.triplet, arm64Triplet].contains(probe.host),
       probe.platform == toolchain.triplet.replacingOccurrences(of: "-apple", with: "")
         || probe.platform
           == toolchain.triplet.replacingOccurrences(of: "aarch64-apple", with: "arm64"),
