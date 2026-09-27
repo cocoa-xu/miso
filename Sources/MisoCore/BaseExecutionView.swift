@@ -85,6 +85,7 @@ enum BaseExecutionView {
       }
       let bindings = try firmlinks(firmlinkText)
       var originals: [(String, String)] = []
+      var compilerTools: [Executable] = []
       let resign = ["25G83", "26A434"].contains(target.build)
       if !resign {
         throw MisoError.unsupported("Base execution view for target build \(target.build)")
@@ -131,12 +132,9 @@ enum BaseExecutionView {
           guard chmod(destination.path, info.st_mode & 0o755) == 0 else {
             throw MisoError.system("Set execution file mode", errno)
           }
-          let toolPaths = [
-            "bin/", "sbin/", "usr/bin/", "usr/sbin/", "usr/libexec/",
-            "Library/Developer/CommandLineTools/usr/bin/",
-            "Library/Developer/CommandLineTools/usr/libexec/",
-          ]
-          if resign, toolPaths.contains(where: { relative.hasPrefix($0) }),
+          let localSignature = resign && requiresLocalSignature(relative)
+          let compilerTool = relative.hasPrefix("Library/Developer/CommandLineTools/usr/")
+          if localSignature || compilerTool,
             try isExecutable(destination)
           {
             let digest = try SafeFile.sha256(source)
@@ -148,7 +146,13 @@ enum BaseExecutionView {
             guard try SafeFile.sha256(destination) == digest else {
               throw MisoError.invalid("Execution copy hash mismatch")
             }
-            originals.append((relative, digest))
+            if localSignature {
+              originals.append((relative, digest))
+            } else {
+              try AppleCode.validate(destination, scope: .executable)
+              compilerTools.append(
+                Executable(path: relative, originalSHA256: digest, executionSHA256: digest))
+            }
           }
         case S_IFLNK:
           let link = try FileManager.default.destinationOfSymbolicLink(atPath: source.path)
@@ -200,12 +204,21 @@ enum BaseExecutionView {
       try SafeFile.writeNew(
         JSON.encode(executableRecords),
         to: journal.output.appendingPathComponent("execution-tools.json"))
+      try SafeFile.writeNew(
+        JSON.encode(compilerTools),
+        to: journal.output.appendingPathComponent("execution-compiler-tools.json"))
       guard chown(root.path, 0, 0) == 0, chmod(root.path, 0o755) == 0 else {
         throw MisoError.system("Finalize execution root", errno)
       }
       try journal.setMetadata("executionTools", value: executableRecords.count)
       try journal.setMetadata("outputSystemModified", value: false)
       return root
+    }
+  }
+
+  static func requiresLocalSignature(_ relative: String) -> Bool {
+    ["bin/", "sbin/", "usr/bin/", "usr/sbin/", "usr/libexec/"].contains {
+      relative.hasPrefix($0)
     }
   }
 

@@ -115,6 +115,22 @@ import Testing
   #expect(try FileMetadata.inspect(file).st_ino == renewed.st_ino)
 }
 
+@Test func executionSigningExcludesAppleDeveloperTools() {
+  for path in [
+    "bin/sh", "sbin/mount", "usr/bin/clang", "usr/sbin/pkgutil", "usr/libexec/path_helper",
+  ] {
+    #expect(BaseExecutionView.requiresLocalSignature(path))
+  }
+  for path in [
+    "Library/Developer/CommandLineTools/usr/bin/clang",
+    "Library/Developer/CommandLineTools/usr/libexec/git-core/git",
+    "Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild",
+    "System/Library/Frameworks/Foundation.framework/Foundation",
+  ] {
+    #expect(!BaseExecutionView.requiresLocalSignature(path))
+  }
+}
+
 @Test func baseTreeCopyBindsContentModesAndLinks() throws {
   let temporary = try TemporaryDirectory()
   defer { temporary.remove() }
