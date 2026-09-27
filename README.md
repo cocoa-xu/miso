@@ -90,6 +90,11 @@ Command Line Tools through a process-local `DEVELOPER_DIR`. The delivered develo
 selection continues to point at the configured Xcode. Its executable toolchain is
 validated in the disposable guest.
 
+Hardened developer CLI payloads retain their original signatures. Offline stages
+verify their bytes, signatures and registrations; executable checks run during
+guest acceptance. Flutter installation rebases the authenticated package cache
+configuration to guest paths without executing or modifying Dart binaries.
+
 `xcode complete --source <xcode-bundle> --output <stage>` requires every configured
 Xcode layer, rechecks the selected application, SDKs, license and package receipts,
 and installs the four original developer disk payloads from the signed package.

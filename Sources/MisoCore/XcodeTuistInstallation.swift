@@ -9,6 +9,7 @@ public enum XcodeTuistInstallation {
     let profileSHA256: String
     let detachedPayloadVerified: Bool
     let executionControlsVerified: Bool
+    let runtimeVerified = false
   }
 
   public struct Receipt: Encodable {
@@ -134,18 +135,19 @@ public enum XcodeTuistInstallation {
             home + "/.local/share/mise/installs/tuist/" + input.formula.version, allowLeafLink: true
           ).path) == "/" + tool
       else { throw MisoError.invalid("Mise Tuist registration differs from installed payload") }
-      probes["version"] = try mise(
-        "mise-tuist-version", ["exec", selection, "--", "tuist", "version"])
-      guard probes["version"] == input.formula.version else {
-        throw MisoError.invalid("Tuist version differs from prepared input")
-      }
-      probes["shim"] = try guest.run(
-        "tuist-shim-version",
-        arguments: environment + ["/" + home + "/.local/share/mise/shims/tuist", "version"],
-        capability: .mise, timeout: 90)
-      guard probes["shim"] == input.formula.version else {
-        throw MisoError.invalid("Tuist shim cannot resolve the pinned tool")
-      }
+      probes["executable"] = try mise("mise-tuist-executable", ["which", "tuist"])
+      let executable = "/" + home + "/.local/share/mise/installs/tuist/" + input.formula.version
+      guard ["/" + tool + "/tuist", executable + "/tuist"].contains(probes["executable"] ?? ""),
+        try guest.data.contains(home + "/.local/share/mise/shims/tuist")
+      else { throw MisoError.invalid("Mise cannot resolve the pinned Tuist executable") }
+      let installedTool = try guest.data.path(tool + "/tuist")
+      guard
+        try SafeFile.sha256(installedTool)
+          == SafeFile.sha256(expanded.appendingPathComponent("tuist"))
+      else { throw MisoError.invalid("Installed Tuist differs from its signed input") }
+      try journal.run(
+        "verify-installed-tuist-signature",
+        NativeCommand(.codesign, arguments: ["--verify", "--strict", installedTool.path]))
       let profile = home + "/.zprofile"
       let data = try shellProfile(SafeFile.read(guest.data.path(profile), limit: 1 << 20))
       let mode = try FileMetadata.inspect(guest.data.path(profile)).st_mode & 0o777

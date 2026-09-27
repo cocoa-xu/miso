@@ -4,10 +4,10 @@ import Foundation
 public enum XcodeCaskInstallation {
   public struct Details: Encodable {
     let installed: [String: String]
-    let probes: [String: String]
     let payloadEntries: Int
     let detachedPayloadVerified: Bool
     let executionControlsVerified: Bool
+    let runtimeVerified = false
   }
 
   public struct Receipt: Encodable {
@@ -67,7 +67,6 @@ public enum XcodeCaskInstallation {
     let paths = ["opt/homebrew", "Applications/Kiro CLI.app"]
     var identity: [UInt32] = []
     var installed: [String: String] = [:]
-    var probes: [String: String] = [:]
     let payload = try GuestExecution.withSession(
       image: image, root: root, username: username, journal: journal
     ) { guest in
@@ -145,14 +144,20 @@ public enum XcodeCaskInstallation {
                 "/" + metadataPath, cask.token, cask.version, cask.url.absoluteString, cask.sha256,
               ]))
           try FileManager.default.removeItem(at: guest.data.path(metadataPath))
-          let executable = cask.token == "claude-code" ? "claude" : cask.token
-          let version = try guest.run(
-            "cask-version", arguments: ["/opt/homebrew/bin/" + executable, "--version"],
-            capability: .cask, timeout: 90)
-          guard version.contains(cask.version) else {
-            throw MisoError.invalid("Cask version probe differs from prepared input")
+          let installedExecutable =
+            cask.token == "kiro-cli"
+            ? "Applications/" + cask.executable
+            : directory + "/" + cask.version + "/" + cask.executable
+          let executable = try guest.data.path(installedExecutable)
+          guard
+            try SafeFile.sha256(executable)
+              == SafeFile.sha256(original.appendingPathComponent(cask.executable))
+          else {
+            throw MisoError.invalid("Installed cask executable differs from its signed input")
           }
-          probes[cask.token] = version
+          try journal.run(
+            "verify-installed-cask-executable",
+            NativeCommand(.codesign, arguments: ["--verify", "--strict", executable.path]))
           expected[cask.token] = cask.version
         }
         try restore()
@@ -204,7 +209,7 @@ public enum XcodeCaskInstallation {
       }
     }
     return Details(
-      installed: installed, probes: probes,
+      installed: installed,
       payloadEntries: payload.values.reduce(0) { $0 + $1.count }, detachedPayloadVerified: true,
       executionControlsVerified: true)
   }
