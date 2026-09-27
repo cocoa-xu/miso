@@ -10,7 +10,46 @@ struct Xcode: AsyncParsableCommand {
       PrepareRuntime.self,
       InstallApplication.self, InstallPackages.self, InstallBottles.self, InstallRuntime.self,
       InstallMetal.self, PrepareGems.self, InstallGems.self, PrepareCasks.self, InstallCasks.self,
+      PrepareSimulatorTools.self, InstallSimulatorTools.self,
     ])
+
+  struct PrepareSimulatorTools: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "prepare-simulator-tools",
+      abstract: "Prepare the pinned Wix simulator utilities bottle and tap.")
+    @Option var targetVersion: String
+    @Option var targetBuild: String
+    @Option var cache: String?
+    @Option var output: String
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        await XcodeSimulatorTools.prepare(
+          target: .init(version: targetVersion, build: targetBuild), output: fileURL(output),
+          cache: cache.map(fileURL), cancellation: cancellation.token))
+    }
+  }
+
+  struct InstallSimulatorTools: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "install-simulator-tools",
+      abstract: "Install the prepared Wix bottle into an offline image clone.")
+    @Option var source: String
+    @Option var prepared: String
+    @Option var output: String
+    @Option var username = "admin"
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        await XcodeSimulatorTools.install(
+          source: fileURL(source), prepared: fileURL(prepared), output: fileURL(output),
+          username: username, cancellation: cancellation.token))
+    }
+  }
 
   struct InstallCasks: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
