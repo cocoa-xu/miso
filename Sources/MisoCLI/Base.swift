@@ -7,7 +7,8 @@ struct Base: AsyncParsableCommand {
     abstract: "Prepare target-compatible Base inputs without starting a VM.",
     subcommands: [
       Defaults.self, Resolve.self, Archive.self, Static.self, Bootstrap.self, Bottles.self,
-      Ruby.self, Packages.self, Taps.self, GCM.self, Security.self, Settings.self, CA.self,
+      Ruby.self, Packages.self, Taps.self, GCM.self, Runner.self, Security.self, Settings.self,
+      CA.self,
       Cleanup.self, Build.self,
     ])
 

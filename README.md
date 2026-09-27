@@ -173,6 +173,14 @@ discover arbitrary historical versions or prove runtime compatibility. Use
 `base gcm inspect --plan gcm-sources/plan.json --inputs gcm-sources --output inspection`
 for package/binary signature and payload checks without executing package scripts.
 
+`base runner resolve --target-version 15.6.1 --target-build 24G90 --output runner-sources`
+preserves the latest stable Actions Runner release, or `--package-version`, with
+its ARM64 archive and upstream checksum. Runner and bundled Node executable
+deployment targets must support the target macOS. `--cache runner-sources` replays
+offline. Unsupported releases fail closed; historical fallback is explicit.
+This does not register a runner or prove runtime compatibility. The preserved
+archive and `release.json` are inputs to `base static`.
+
 Configuration defaults use `admin/admin`, disable FileVault, and request SSH/VNC.
 They are intended for isolated test systems; change credentials before exposing a
 guest to an untrusted network. Rosetta and ARM Linux translation are opt-in.
