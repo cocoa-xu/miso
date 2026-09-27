@@ -74,10 +74,22 @@ enum HTTPFile {
     _ sha256: String, to output: URL, cancellation: CancellationToken? = nil,
     configuration: URLSessionConfiguration = .ephemeral
   ) async throws {
-    try SafeFile.validateSHA256(sha256)
+    try await homebrewBlob(
+      HomebrewRegistry.blob(name: "portable-ruby", sha256: sha256),
+      to: output, maximumBytes: 64 << 20, cancellation: cancellation,
+      configuration: configuration)
+  }
+
+  static func homebrewBlob(
+    _ url: URL, to output: URL, maximumBytes: UInt64,
+    cancellation: CancellationToken? = nil,
+    configuration: URLSessionConfiguration = .ephemeral
+  ) async throws {
+    guard HomebrewRegistry.permits(url) else {
+      throw MisoError.invalid("Invalid Homebrew bottle URL")
+    }
     try await fetch(
-      URL(string: "https://ghcr.io/v2/homebrew/core/portable-ruby/blobs/sha256:\(sha256)")!,
-      to: output, maximumBytes: 64 << 20, body: nil, contentType: nil,
+      url, to: output, maximumBytes: maximumBytes, body: nil, contentType: nil,
       cancellation: cancellation, redirects: .homebrewBlob, gitProtocolV2: false,
       authorization: "Bearer QQ==", configuration: configuration)
   }
@@ -110,11 +122,18 @@ enum HTTPFile {
       group.addTask { [request] in
         let (temporary, response) = try await session.download(for: request, delegate: delegate)
         defer { try? FileManager.default.removeItem(at: temporary) }
-        guard let response = response as? HTTPURLResponse, response.statusCode == 200,
-          let destination = response.url,
-          destination == url || redirects.permits(from: url, to: destination),
-          response.expectedContentLength <= maximumBytes
-        else { throw MisoError.invalid("Unexpected HTTPS payload response") }
+        guard let response = response as? HTTPURLResponse else {
+          throw MisoError.invalid("Expected an HTTPS payload response")
+        }
+        guard response.statusCode == 200 else {
+          throw MisoError.invalid("HTTPS payload request failed with status \(response.statusCode)")
+        }
+        guard let destination = response.url,
+          destination == url || redirects.permits(from: url, to: destination)
+        else { throw MisoError.invalid("HTTPS payload response destination changed") }
+        guard response.expectedContentLength <= maximumBytes else {
+          throw MisoError.invalid("HTTPS payload exceeds size limit")
+        }
         try Artifacts.copy(
           temporary, to: output, maximumBytes: maximumBytes,
           cancellation: cancellation)

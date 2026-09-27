@@ -15,6 +15,13 @@ public enum BasePipeline {
     let vmStarted = false
   }
 
+  static func verifyInputs(
+    _ recipe: BaseBuildRecipe, inputs: URL, cancellation: CancellationToken
+  ) throws {
+    try recipe.validate()
+    _ = try preflight(recipe, inputs: GuestVolume(inputs), cancellation: cancellation)
+  }
+
   public static func run(
     source: URL, recipe recipeURL: URL, inputs: URL, output: URL,
     keepIntermediates: Bool = false, cancellation: CancellationToken? = nil
@@ -174,13 +181,24 @@ public enum BasePipeline {
     var packages: BasePackageInputs.Plan?
     var ca: BaseCAInputs.Plan?
     var core: GuestVolume?
+    var formulae: [HomebrewResolution.Formula] = []
+    var agents: [String] = []
+    var configuredAgents: [String] = []
     for step in recipe.steps {
-      for record in step.files.values {
-        _ = try Artifacts.resolve(record, under: inputs.root, cancellation: cancellation)
+      for (key, record) in step.files {
+        do {
+          _ = try Artifacts.resolve(record, under: inputs.root, cancellation: cancellation)
+        } catch {
+          throw MisoError.invalid("Base \(step.stage.rawValue) input \(key): \(error)")
+        }
       }
       func file(_ key: String) throws -> URL { try inputs.path(step.files[key]!.path) }
       func directory(_ key: String) throws -> URL {
-        try inputs.directory(step.directories[key]!).url
+        do {
+          return try inputs.directory(step.directories[key]!).url
+        } catch {
+          throw MisoError.invalid("Base \(step.stage.rawValue) directory \(key): \(error)")
+        }
       }
       for key in step.directories.keys { _ = try directory(key) }
       switch step.stage {
@@ -197,6 +215,7 @@ public enum BasePipeline {
         guard let core else { throw MisoError.invalid("Missing bootstrap core snapshot") }
         try HomebrewBottleInputs.verifyFormulaSources(
           bottles.payloads.map(\.formula), core: core, cancellation: cancellation)
+        formulae = bottles.payloads.map(\.formula)
         releases.append(bottles.target)
       case .ruby:
         ruby = try BaseRuby.verify(
@@ -207,10 +226,11 @@ public enum BasePipeline {
           plan: file("plan"), inputs: directory("inputs"), cancellation: cancellation)
         releases.append(packages!.target)
       case .taps:
-        releases.append(
-          try BaseTapInputs.verify(
-            plan: file("plan"), inputs: directory("inputs"), cancellation: cancellation
-          ).target)
+        let taps = try BaseTapInputs.verify(
+          plan: file("plan"), inputs: directory("inputs"), cancellation: cancellation)
+        agents = taps.taps.flatMap(\.formulas).filter { $0.name == "tart-guest-agent" }.map(
+          \.kegVersion)
+        releases.append(taps.target)
       case .gcm:
         releases.append(
           try BaseGCMInputs.verify(
@@ -219,10 +239,12 @@ public enum BasePipeline {
       case .security:
         let plan = try JSON.read(BaseSecurity.Plan.self, from: file("plan"))
         try plan.validate()
+        configuredAgents.append(plan.tartVersion)
         releases.append(plan.target)
       case .settings:
         let plan = try JSON.read(BaseSystemSettings.Plan.self, from: file("plan"))
         try plan.validate()
+        configuredAgents.append(plan.tartVersion)
         releases.append(plan.target)
       case .certificates:
         ca = try BaseCAInputs.verify(
@@ -233,6 +255,17 @@ public enum BasePipeline {
     guard releases.allSatisfy({ $0 == recipe.target }), let ruby, let packages, let ca,
       ruby.builds.contains(where: { $0.version == packages.rubyVersion })
     else { throw MisoError.invalid("Base recipe target or Ruby identities differ") }
+    try verifyBindings(
+      formulae: formulae.map(\.name), node: packages.nodeFormula, python: ca.pythonFormula,
+      agents: agents, configuredAgents: configuredAgents)
     return Plans(ruby: ruby, packages: packages, ca: ca)
+  }
+
+  static func verifyBindings(
+    formulae: [String], node: String, python: String, agents: [String], configuredAgents: [String]
+  ) throws {
+    guard formulae.contains(node), formulae.contains(python), agents.count == 1,
+      configuredAgents.count == 2, configuredAgents.allSatisfy({ $0 == agents[0] })
+    else { throw MisoError.invalid("Base recipe runtime or guest-agent versions differ") }
   }
 }

@@ -57,6 +57,37 @@ miso base archive create --spec inputs.json --output archived-inputs
 miso base archive verify archived-inputs
 ```
 
+`base prepare` combines software resolution, downloads and checksum-bound plans
+without root or a VM. It selects target-compatible versions and pins a matching
+core snapshot. Runtime constraints come from the selected archives, not host tools.
+
+```sh
+miso base prepare --target-version 15.6.1 --target-build 24G90 \
+  --sources examples/homebrew-mirrors.json --output prepared-software
+miso base prepare --target-version 15.6.1 --target-build 24G90 \
+  --sources examples/homebrew-mirrors.json --cache prepared-software --output replayed-software
+```
+
+The source mapping is optional. Use `--config` for package selections and
+`--bundler-version` for an exact Bundler release. Cache replay requires the same
+configuration and never falls back to network access. `--resolved-formulae` and
+`--resolved-bottles` together import previously resolved core inputs; other software
+is still resolved online. Keep the whole output directory for replay.
+`preparation.json` records selected versions and stage receipts. This prepares
+software only: target security/settings/CA inputs, trusted known-host keys and a
+complete build recipe are still required for `base build`. No installation or
+runtime verification is implied.
+
+`base recipe --software prepared-software --template previous-recipe.json
+--inputs input-root --output new-recipe` replaces a prior recipe's software stages
+while preserving its username, trusted known-host keys and target-specific
+security/settings/CA inputs. Both old platform inputs and prepared software must
+remain under `input-root`. Preflight rejects target, runtime or guest-agent version
+mismatches; it does not read privileged boot policy material or verify a VM.
+Unreadable inputs fail without producing a completed recipe. Build with
+`base build --source vanilla-bundle --recipe new-recipe/recipe.json --inputs input-root
+--output base-bundle` after administrator authorization.
+
 Resolution does not install software or prove runtime compatibility. `base resolve`
 resolves core formula requests. `base packages resolve` separately resolves Bundler,
 yarn and pnpm against explicit target Ruby, RubyGems, Node and npm versions:
@@ -155,6 +186,12 @@ The temporary execution view is not part of the exported bundle. This experiment
 stage does not install the complete Base package set or prove VM bootability.
 Use only trusted package inputs; a chroot is not a virtual-machine security boundary.
 
+`base bottles download --resolution resolved --output bottle-directory` downloads
+the resolved dependency closure and verifies its digests, OCI indexes and layouts.
+`--cache bottle-directory` is strict offline replay. `--reuse stopped-download`
+reuses verified completed files from the same resolution and downloads missing pairs;
+it does not modify the previous output. Add `--formula name` to select a closure.
+
 `base bottles verify --resolution resolved --bottles bottle-directory` validates
 resolved formula sources and local `<name>.tar.gz` / `<name>.tar.index.json` inputs
 without administrator privileges. Add `--formula name` to select a dependency closure.
@@ -183,6 +220,11 @@ source file records, an OpenSSL formula (or vendored source), a default version 
 1–8 compilation jobs. Builds use the target CLT/SDK with explicit target parameters
 and no network access. Extension, default-shim and detached payload checks do not
 replace a VM boot test.
+
+`base packages runtimes --resolution resolved --bottles bottle-directory
+--node-formula node@24 --ruby-plan ruby-sources/plan.json --ruby-inputs ruby-sources
+--output runtime-inputs` inspects Node, npm and RubyGems versions without executing
+archive contents. This inspection is included in `base prepare`.
 
 `base packages verify --plan packages.json --inputs source-directory` validates
 resolved Bundler/npm metadata and local payloads. `base packages install` adds

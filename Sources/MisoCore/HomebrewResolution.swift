@@ -131,8 +131,7 @@ public enum HomebrewResolution {
     }
     try SafeFile.validateSHA256(digest)
     guard
-      url.path
-        == "/v2/homebrew/core/\(name.replacingOccurrences(of: "@", with: "/"))/blobs/sha256:\(digest)"
+      url == (try HomebrewRegistry.blob(name: name, sha256: digest))
     else {
       throw MisoError.invalid("Bottle URL identity mismatch")
     }

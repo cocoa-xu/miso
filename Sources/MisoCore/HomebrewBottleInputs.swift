@@ -48,11 +48,16 @@ public enum HomebrewBottleInputs {
     }
   }
 
-  public static func load(
-    resolution: URL, bottles: URL, names: [String], cancellation: CancellationToken?
-  ) throws -> Selection {
+  struct Resolved {
+    let receipt: HomebrewResolution.Receipt
+    let sha256: String
+    let formulae: [HomebrewResolution.Formula]
+  }
+
+  static func resolve(
+    _ resolution: URL, names: [String], cancellation: CancellationToken?
+  ) throws -> Resolved {
     let documents = try GuestVolume(resolution)
-    let directory = try GuestVolume(bottles)
     let receiptURL = try documents.path("resolution.json")
     let resolutionHash = try SafeFile.sha256(receiptURL)
     let receipt = try JSON.read(HomebrewResolution.Receipt.self, from: receiptURL)
@@ -87,10 +92,24 @@ public enum HomebrewBottleInputs {
       }
       if selected.insert(name).inserted { pending += formula.dependencies }
     }
+    guard try SafeFile.sha256(receiptURL) == resolutionHash else {
+      throw MisoError.invalid("Resolution changed during validation")
+    }
+    return Resolved(
+      receipt: receipt, sha256: resolutionHash,
+      formulae: receipt.installOrder.filter { selected.contains($0) }.map { receipt.formulae[$0]! })
+  }
+
+  public static func load(
+    resolution: URL, bottles: URL, names: [String], cancellation: CancellationToken?
+  ) throws -> Selection {
+    let resolved = try resolve(resolution, names: names, cancellation: cancellation)
+    let directory = try GuestVolume(bottles)
+    let selected = Set(resolved.formulae.map(\.name))
     var payloads: [Payload] = []
-    for name in receipt.installOrder where selected.contains(name) {
+    for formula in resolved.formulae {
       try cancellation?.check()
-      let formula = receipt.formulae[name]!
+      let name = formula.name
       let archiveURL = try directory.path(name + ".tar.gz")
       let indexURL = try directory.path(name + ".tar.index.json")
       let archive = try Artifacts.record(archiveURL, relativeTo: bottles)
@@ -100,7 +119,7 @@ public enum HomebrewBottleInputs {
       let index = try Artifacts.record(indexURL, relativeTo: bottles)
       let tab = try parseIndex(
         SafeFile.read(indexURL, limit: 8 << 20), formula: formula, bytes: archive.bytes)
-      try validateDependencies(tab, formulae: receipt.formulae, selected: selected)
+      try validateDependencies(tab, formulae: resolved.receipt.formulae, selected: selected)
       let entries: [TarPayload.Entry]
       do {
         entries = try TarPayload.inspect(
@@ -119,10 +138,13 @@ public enum HomebrewBottleInputs {
       }
       payloads.append(Payload(formula: formula, archive: archive, index: index, tab: tab))
     }
-    guard try SafeFile.sha256(receiptURL) == resolutionHash else {
+    guard
+      try SafeFile.sha256(resolution.appendingPathComponent("resolution.json")) == resolved.sha256
+    else {
       throw MisoError.invalid("Resolution changed during validation")
     }
-    return Selection(target: receipt.target, resolutionSHA256: resolutionHash, payloads: payloads)
+    return Selection(
+      target: resolved.receipt.target, resolutionSHA256: resolved.sha256, payloads: payloads)
   }
 
   static func parseIndex(

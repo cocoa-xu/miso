@@ -18,19 +18,15 @@ enum HTTPData {
           && destination.absoluteString.utf8.count <= 16_384
           && destination.path.hasPrefix("/github-production-release-asset/")
       case .homebrewBlob:
-        let prefix = "/v2/homebrew/core/portable-ruby/blobs/sha256:"
-        guard source.scheme == "https", source.host == "ghcr.io", source.user == nil,
-          source.password == nil, source.port == nil, source.query == nil, source.fragment == nil,
-          source.path.hasPrefix(prefix)
-        else { return false }
-        let hash = String(source.path.dropFirst(prefix.count))
-        guard (try? SafeFile.validateSHA256(hash)) != nil else { return false }
+        guard HomebrewRegistry.permits(source) else { return false }
+        let hash = String(source.lastPathComponent.dropFirst("sha256:".count))
         return destination.scheme == "https"
           && destination.host == "pkg-containers.githubusercontent.com"
           && destination.user == nil && destination.password == nil && destination.port == nil
           && destination.fragment == nil && destination.absoluteString.utf8.count <= 16_384
           && destination.path.range(
-            of: "\\A/ghcrblobs[0-9]{1,4}/blobs/sha256:" + hash + "\\z", options: .regularExpression)
+            of: "\\A/ghcr(?:blobs)?[0-9]{1,4}/blobs/sha256:" + hash + "\\z",
+            options: .regularExpression)
             != nil
       }
     }
@@ -97,7 +93,7 @@ enum HTTPData {
     try await fetch(
       url, method: "GET", body: nil, maximumBytes: maximumBytes,
       cancellation: cancellation, redirects: redirects, accept: accept,
-      gitProtocolV2: gitProtocolV2, configuration: configuration
+      gitProtocolV2: gitProtocolV2, authorization: nil, configuration: configuration
     )
   }
 
@@ -111,12 +107,25 @@ enum HTTPData {
     return try await fetch(
       url, method: "POST", body: body, maximumBytes: maximumBytes,
       cancellation: cancellation, redirects: .reject, accept: nil,
-      gitProtocolV2: false, configuration: configuration)
+      gitProtocolV2: false, authorization: nil, configuration: configuration)
+  }
+
+  static func homebrewIndex(
+    _ url: URL, cancellation: CancellationToken? = nil,
+    configuration: URLSessionConfiguration = .ephemeral
+  ) async throws -> Data {
+    guard HomebrewRegistry.permits(url, index: true) else {
+      throw MisoError.invalid("Invalid Homebrew OCI index URL")
+    }
+    return try await fetch(
+      url, method: "GET", body: nil, maximumBytes: 8 << 20, cancellation: cancellation,
+      redirects: .reject, accept: "application/vnd.oci.image.index.v1+json",
+      gitProtocolV2: false, authorization: "Bearer QQ==", configuration: configuration)
   }
 
   private static func fetch(
     _ url: URL, method: String, body: Data?, maximumBytes: Int, cancellation: CancellationToken?,
-    redirects: RedirectPolicy, accept: String?, gitProtocolV2: Bool,
+    redirects: RedirectPolicy, accept: String?, gitProtocolV2: Bool, authorization: String?,
     configuration: URLSessionConfiguration
   ) async throws -> Data {
     guard url.scheme == "https", url.host != nil, url.user == nil, url.password == nil,
@@ -141,6 +150,7 @@ enum HTTPData {
     request.httpMethod = method
     if gitProtocolV2 { request.setValue("version=2", forHTTPHeaderField: "Git-Protocol") }
     request.httpBody = body
+    if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
     if let accept { request.setValue(accept, forHTTPHeaderField: "Accept") }
     if body != nil { request.setValue("text/xml", forHTTPHeaderField: "Content-Type") }
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")

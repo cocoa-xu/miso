@@ -41,7 +41,7 @@ public enum BaseRunnerResolution {
     }
   }
 
-  public struct Receipt: Encodable {
+  public struct Receipt: Codable {
     let schemaVersion: Int
     let target: MacOSRelease
     let requestedVersion: String?

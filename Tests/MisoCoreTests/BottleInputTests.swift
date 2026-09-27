@@ -84,6 +84,18 @@ private func bottleIndex(annotations changes: [String: String] = [:], duplicate:
   }
 }
 
+@Test func bottleRegistryTagsKeepRevisionAndRebuildDistinct() throws {
+  #expect(
+    try HomebrewRegistry.index(bottleFormula(name: "node@24", revision: 2, rebuild: 3))
+      .absoluteString == "https://ghcr.io/v2/homebrew/core/node/24/manifests/1.2.3_2-3")
+  #expect(
+    try HomebrewRegistry.index(bottleFormula(name: "c++util")).absoluteString
+      == "https://ghcr.io/v2/homebrew/core/cxxutil/manifests/1.2.3")
+  for version in ["../bad", "1+2", "", String(repeating: "1", count: 129)] {
+    #expect(throws: MisoError.self) { try HomebrewRegistry.index(bottleFormula(version: version)) }
+  }
+}
+
 @Test func bottleSidecarOmitsRebuildButArchiveRetainsIt() throws {
   let payload = HomebrewBottleInputs.Payload(
     formula: bottleFormula(revision: 2, rebuild: 1),

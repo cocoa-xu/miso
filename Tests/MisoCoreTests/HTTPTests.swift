@@ -19,7 +19,10 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
       let response = HTTPURLResponse(
         url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
       client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-      client?.urlProtocol(self, didLoad: Data((value ?? "missing").utf8))
+      let accept =
+        url.path.contains("/manifests/")
+        ? "\n" + (request.value(forHTTPHeaderField: "Accept") ?? "missing") : ""
+      client?.urlProtocol(self, didLoad: Data(((value ?? "missing") + accept).utf8))
       client?.urlProtocolDidFinishLoading(self)
       return
     }
@@ -124,6 +127,55 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
     URL(string: "https://fixture.test/ok")!, to: output, maximumBytes: 64,
     configuration: stubConfiguration())
   #expect(try SafeFile.read(output, limit: 64) == Data(repeating: 42, count: 64))
+}
+
+@Test func homebrewIndexesAndBottlesUseBoundedAnonymousRegistryRequests() async throws {
+  let index = URL(string: "https://ghcr.io/v2/homebrew/core/node/24/manifests/24.1.0_2-1")!
+  let bytes = try await HTTPData.homebrewIndex(index, configuration: stubConfiguration())
+  #expect(
+    bytes == Data("Bearer QQ==\napplication/vnd.oci.image.index.v1+json".utf8))
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let output = temporary.url.appendingPathComponent("bottle")
+  try await HTTPFile.homebrewBlob(
+    HomebrewRegistry.blob(name: "node@24", sha256: String(repeating: "a", count: 64)),
+    to: output, maximumBytes: 64, configuration: stubConfiguration())
+  #expect(try SafeFile.read(output, limit: 64) == Data("Bearer QQ==".utf8))
+  await #expect(throws: MisoError.self) {
+    try await HTTPData.homebrewIndex(
+      URL(string: "https://other.test/manifests/1")!, configuration: stubConfiguration())
+  }
+  await #expect(throws: MisoError.self) {
+    try await HTTPFile.homebrewBlob(
+      index, to: output, maximumBytes: 64, configuration: stubConfiguration())
+  }
+}
+
+@Test func homebrewRegistryRejectsAmbiguousPathsAndForeignRepositories() throws {
+  let hash = String(repeating: "a", count: 64)
+  let blob = "/blobs/sha256:" + hash
+  for name in ["portable-ruby", "node@24", "c++util"] {
+    let url = try HomebrewRegistry.blob(name: name, sha256: hash)
+    #expect(HomebrewRegistry.permits(url))
+    #expect(
+      HTTPData.RedirectPolicy.homebrewBlob.permits(
+        from: url,
+        to: URL(
+          string: "https://pkg-containers.githubusercontent.com/ghcrblobs12/blobs/sha256:" + hash)!
+      ))
+  }
+  for value in [
+    "https://ghcr.io/v2/other/core/node" + blob,
+    "https://ghcr.io/v2/homebrew/core/../node" + blob,
+    "https://ghcr.io/v2/homebrew/core/node/%2e%2e" + blob,
+    "https://ghcr.io/v2/homebrew/core/node%2f24" + blob,
+    "https://ghcr.io/v2/homebrew/core/node/24/extra" + blob,
+    "https://ghcr.io/v2/homebrew/core/node" + blob + "?token=unexpected",
+    "https://ghcr.io:443/v2/homebrew/core/node" + blob,
+    "https://user@ghcr.io/v2/homebrew/core/node" + blob,
+  ] {
+    #expect(!HomebrewRegistry.permits(URL(string: value)!))
+  }
 }
 
 @Test func nativePayloadPostPreservesBodyAndContentType() async throws {
@@ -263,6 +315,11 @@ private func stubConfiguration() -> URLSessionConfiguration {
   let valid = URL(
     string: "https://pkg-containers.githubusercontent.com" + path + "?signature=fixture")!
   #expect(HTTPData.RedirectPolicy.homebrewBlob.permits(from: source, to: valid))
+  #expect(
+    HTTPData.RedirectPolicy.homebrewBlob.permits(
+      from: source,
+      to: URL(string: "https://pkg-containers.githubusercontent.com/ghcr1/blobs/sha256:" + hash)!
+    ))
   for value in [
     "http://pkg-containers.githubusercontent.com" + path,
     "https://pkg-containers.githubusercontent.com.evil.test" + path,

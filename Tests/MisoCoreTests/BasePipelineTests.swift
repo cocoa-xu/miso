@@ -75,6 +75,70 @@ private func buildRecipe() -> BaseBuildRecipe {
   }
 }
 
+@Test @MainActor func baseRecipeRejectsMismatchedRuntimeAndAgentBindings() throws {
+  try BasePipeline.verifyBindings(
+    formulae: ["node@24", "python@3.14"], node: "node@24", python: "python@3.14",
+    agents: ["0.15.0"], configuredAgents: ["0.15.0", "0.15.0"])
+  for (formulae, agents, configured) in [
+    (["node@24"], ["0.15.0"], ["0.15.0", "0.15.0"]),
+    (["node@24", "python@3.14"], ["0.15.0"], ["0.10.0", "0.15.0"]),
+    (["node@24", "python@3.14"], ["0.15.0", "0.10.0"], ["0.15.0", "0.15.0"]),
+    (["node@24", "python@3.14"], [], ["0.15.0", "0.15.0"]),
+  ] {
+    #expect(throws: MisoError.self) {
+      try BasePipeline.verifyBindings(
+        formulae: formulae, node: "node@24", python: "python@3.14",
+        agents: agents, configuredAgents: configured)
+    }
+  }
+}
+
+@Test @MainActor func recipeAssemblyPreservesTargetInputsAndRebindsSoftware() throws {
+  let template = buildRecipe()
+  let file = ImageBundle.FileRecord(
+    path: "payload", bytes: 1, sha256: String(repeating: "a", count: 64))
+  let preparation = BaseSoftwarePreparation.Receipt(
+    schemaVersion: 1,
+    request: .init(
+      target: template.target, configuration: .init(), sources: .init(), bundlerVersion: nil,
+      jobs: 4),
+    coreRevision: String(repeating: "b", count: 40), versions: [:],
+    receipts: BaseSoftwarePreparation.receiptPaths.map {
+      .init(path: $0, bytes: file.bytes, sha256: file.sha256)
+    }, softwareInputsComplete: true, completeBaseInputs: false,
+    installationVerified: false, runtimeVerified: false)
+  let runner = BaseRunnerResolution.Receipt(
+    schemaVersion: 1, target: template.target, requestedVersion: nil, version: "2.337.0",
+    release: .init(path: "release.json", bytes: 1, sha256: file.sha256),
+    runner: .init(path: "runner.tar.gz", bytes: 1, sha256: file.sha256),
+    sourceURL: URL(
+      string: "https://github.com/actions/runner/releases/download/v2.337.0/runner.tar.gz")!,
+    executableMinimumMacOS: [:], installationVerified: false, runtimeVerified: false)
+  let recipe = try BaseRecipeAssembly.bind(
+    template: template, preparation: preparation, runner: runner,
+    formulae: ["node@24", "ruby-build", "rbenv"], prefix: "software")
+  #expect(recipe.username == template.username && recipe.target == template.target)
+  #expect(recipe.steps[0].files["known-hosts"] == template.steps[0].files["known-hosts"])
+  #expect(recipe.steps[0].files["runner"]?.path == "software/runner/runner.tar.gz")
+  #expect(recipe.steps[2].formulae == ["node@24", "ruby-build", "rbenv"])
+  #expect(recipe.steps[3].files["plan"]?.path == "software/ruby/plan.json")
+  #expect(
+    try JSON.encode(Array(recipe.steps.suffix(3))) == JSON.encode(Array(template.steps.suffix(3))))
+  #expect(throws: MisoError.self) {
+    try BaseRecipeAssembly.bind(
+      template: template, preparation: preparation, runner: runner, formulae: ["node@24"],
+      prefix: "../outside")
+  }
+  let different = BaseBuildRecipe(
+    schemaVersion: 1, target: RestoreProfile.supported[0].release, username: template.username,
+    steps: template.steps)
+  #expect(throws: MisoError.self) {
+    try BaseRecipeAssembly.bind(
+      template: different, preparation: preparation, runner: runner, formulae: ["node@24"],
+      prefix: "software")
+  }
+}
+
 @Test @MainActor func baseBuildRejectsBootedMismatchedAndPartialSources() throws {
   let target = MacOSRelease(version: "26.6.2", build: "25G83")
   let manifest: [String: Any] = [

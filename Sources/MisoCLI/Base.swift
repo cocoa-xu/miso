@@ -6,10 +6,11 @@ struct Base: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     abstract: "Prepare target-compatible Base inputs without starting a VM.",
     subcommands: [
-      Defaults.self, Resolve.self, Archive.self, Static.self, Bootstrap.self, Bottles.self,
+      Defaults.self, Prepare.self, Resolve.self, Archive.self, Static.self, Bootstrap.self,
+      Bottles.self,
       Ruby.self, Packages.self, Taps.self, GCM.self, Runner.self, Security.self, Settings.self,
       CA.self,
-      Cleanup.self, Build.self,
+      Cleanup.self, Recipe.self, Build.self,
     ])
 
   struct Build: AsyncParsableCommand {
@@ -28,6 +29,60 @@ struct Base: AsyncParsableCommand {
           source: fileURL(source), recipe: fileURL(recipe), inputs: fileURL(inputs),
           output: fileURL(output), keepIntermediates: keepIntermediates,
           cancellation: cancellation.token))
+    }
+  }
+
+  struct Prepare: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Resolve and archive Base software inputs without root or a VM.")
+    @Option var targetVersion: String
+    @Option var targetBuild: String
+    @Option var config: String?
+    @Option var sources: String?
+    @Option var bundlerVersion: String?
+    @Option var jobs: Int = 4
+    @Option var output: String
+    @Option(help: "Replay a complete preparation directory without any network requests.")
+    var cache: String?
+    @Option(help: "Import an existing formula resolution together with --resolved-bottles.")
+    var resolvedFormulae: String?
+    @Option var resolvedBottles: String?
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      let settings =
+        try config.map { try JSON.read(BaseConfiguration.self, from: fileURL($0)) }
+        ?? BaseConfiguration()
+      let repositories =
+        try sources.map {
+          try JSON.read(BaseSourceConfiguration.self, from: fileURL($0))
+        } ?? BaseSourceConfiguration()
+      try printJSON(
+        await BaseSoftwarePreparation.run(
+          target: .init(version: targetVersion, build: targetBuild), configuration: settings,
+          sources: repositories, bundlerVersion: bundlerVersion, jobs: jobs,
+          output: fileURL(output),
+          cache: cache.map(fileURL), resolvedFormulae: resolvedFormulae.map(fileURL),
+          resolvedBottles: resolvedBottles.map(fileURL), cancellation: cancellation.token))
+    }
+  }
+
+  struct Recipe: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Bind prepared software to an existing target-specific Base recipe.")
+    @Option var software: String
+    @Option var template: String
+    @Option var inputs: String
+    @Option var output: String
+
+    @MainActor func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        BaseRecipeAssembly.run(
+          software: fileURL(software), template: fileURL(template), inputs: fileURL(inputs),
+          output: fileURL(output), cancellation: cancellation.token))
     }
   }
 
@@ -261,7 +316,28 @@ struct Base: AsyncParsableCommand {
   struct Packages: ParsableCommand {
     static let configuration = CommandConfiguration(
       abstract: "Validate or install resolved local Bundler and npm packages.",
-      subcommands: [Resolve.self, Verify.self, Install.self])
+      subcommands: [Runtimes.self, Resolve.self, Verify.self, Install.self])
+
+    struct Runtimes: ParsableCommand {
+      static let configuration = CommandConfiguration(
+        abstract: "Inspect target runtime versions without executing software from the archives.")
+      @Option var resolution: String
+      @Option var bottles: String
+      @Option var nodeFormula: String
+      @Option var rubyPlan: String
+      @Option var rubyInputs: String
+      @Option var output: String
+
+      func run() throws {
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          BaseRuntimeInputs.run(
+            resolution: fileURL(resolution), bottles: fileURL(bottles), nodeFormula: nodeFormula,
+            rubyPlan: fileURL(rubyPlan), rubyInputs: fileURL(rubyInputs), output: fileURL(output),
+            cancellation: cancellation.token))
+      }
+    }
 
     struct Resolve: AsyncParsableCommand {
       static let configuration = CommandConfiguration(
@@ -395,8 +471,27 @@ struct Base: AsyncParsableCommand {
 
   struct Bottles: ParsableCommand {
     static let configuration = CommandConfiguration(
-      abstract: "Validate or install resolved local Homebrew bottles.",
-      subcommands: [Verify.self, Install.self])
+      abstract: "Download, validate or install resolved Homebrew bottles.",
+      subcommands: [Download.self, Verify.self, Install.self])
+
+    struct Download: AsyncParsableCommand {
+      @Option var resolution: String
+      @Option var formula: [String] = []
+      @Option var output: String
+      @Option(help: "Replay only these cached bottles and OCI indexes; never use the network.")
+      var cache: String?
+      @Option(help: "Reuse completed bottles from a stopped download of the same resolution.")
+      var reuse: String?
+
+      func run() async throws {
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          await HomebrewBottleDownload.run(
+            resolution: fileURL(resolution), names: formula, output: fileURL(output),
+            cache: cache.map(fileURL), reuse: reuse.map(fileURL), cancellation: cancellation.token))
+      }
+    }
 
     struct Inputs: ParsableArguments {
       @Option var resolution: String

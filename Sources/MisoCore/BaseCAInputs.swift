@@ -29,7 +29,10 @@ public enum BaseCAInputs {
   struct Target: Decodable {
     let version: String
     let build: String
-    enum CodingKeys: String, CodingKey { case version = "product_version", build = "product_build" }
+    enum CodingKeys: String, CodingKey {
+      case version = "product_version"
+      case build = "product_build"
+    }
     var release: MacOSRelease { .init(version: version, build: build) }
   }
 
@@ -63,7 +66,8 @@ public enum BaseCAInputs {
     let entries: [Entry]
     enum CodingKeys: String, CodingKey {
       case target, entries
-      case snapshotSHA256 = "snapshot_sha256", selectedCount = "selected_count"
+      case snapshotSHA256 = "snapshot_sha256"
+      case selectedCount = "selected_count"
     }
   }
 
