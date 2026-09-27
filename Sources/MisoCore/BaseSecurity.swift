@@ -197,7 +197,10 @@ public enum BaseSecurity {
       rows.append(
         try BaseTCC.seed(
           url, schema: schema, version: plan.tccSchemaVersion, grants: grants,
-          preservedRequirement: userOwned ? nil : plan.preservedScreenSharingRequirement))
+          preservedRequirement: userOwned
+            ? nil
+            : plan.preservedScreenSharingRequirement
+              ?? OfflineSessionState.screenSharingRequirement(for: plan.target)))
       guard chown(url.path, uid, gid) == 0, chmod(url.path, 0o600) == 0 else {
         throw MisoError.system("Set TCC database metadata", errno)
       }

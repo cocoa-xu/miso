@@ -163,6 +163,9 @@ enum OfflineAccount {
         values: ["autoLoginUser": configuration.username, "autoLoginUserUID": 501])
     }
     try configureRemote(data: data, configuration: configuration, user: identifier)
+    _ = try OfflineSessionState.apply(
+      system: system, data: data, target: profile.release,
+      username: configuration.username, screenSharing: configuration.screenSharing)
     if configuration.passwordlessSudo {
       try data.write(
         "private/etc/sudoers.d/ci-user",
