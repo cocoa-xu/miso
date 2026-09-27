@@ -89,6 +89,13 @@ enum BaseImageStage {
         JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]),
         to: bundle.appendingPathComponent("manifest.json"))
       try journal.measure("outputVerificationSeconds") { try ImageBundle.verify(bundle) }
+      if FileManager.default.fileExists(
+        atPath: output.appendingPathComponent("execution-root").path)
+      {
+        try journal.measure("executionCleanupSeconds") {
+          try BaseStageWorkspace.pruneExecutionView(output, journal: journal)
+        }
+      }
       return BaseStageReceipt(
         target: target, sourceManifest: sourceManifest, files: files,
         details: details, originalsUnchanged: true,

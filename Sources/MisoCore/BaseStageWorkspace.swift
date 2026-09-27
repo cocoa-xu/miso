@@ -11,6 +11,23 @@ enum BaseStageWorkspace {
     guard record.status == .complete, !record.vmStarted else {
       throw MisoError.invalid("Only completed offline stages can be pruned")
     }
+    try pruneExecutionView(stage, journal: journal)
+    if image {
+      let path = try volume.path("bundle/disk.img")
+      let info = try FileMetadata.inspect(path)
+      guard info.st_mode & S_IFMT == S_IFREG, info.st_nlink == 1, unlink(path.path) == 0 else {
+        throw MisoError.invalid("Cannot remove owned intermediate image")
+      }
+    }
+  }
+
+  static func pruneExecutionView(_ stage: URL, journal: ExecutionJournal) throws {
+    guard
+      stage.path == journal.output.path
+        || stage.deletingLastPathComponent().path == journal.output.path,
+      try FileMetadata.inspect(stage).st_uid == geteuid()
+    else { throw MisoError.invalid("Execution stage is not owned by this build") }
+    let volume = try GuestVolume(stage)
     try requireUnmounted(stage)
     try DiskImageSession(
       image: volume.path("bundle/disk.img"), readOnly: true, journal: journal
@@ -47,13 +64,6 @@ enum BaseStageWorkspace {
         throw MisoError.invalid("Execution view identity changed")
       }
       try FileManager.default.removeItem(at: root)
-    }
-    if image {
-      let path = try volume.path("bundle/disk.img")
-      let info = try FileMetadata.inspect(path)
-      guard info.st_mode & S_IFMT == S_IFREG, info.st_nlink == 1, unlink(path.path) == 0 else {
-        throw MisoError.invalid("Cannot remove owned intermediate image")
-      }
     }
   }
 
