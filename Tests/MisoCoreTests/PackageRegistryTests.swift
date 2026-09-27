@@ -195,7 +195,9 @@ func registryBytes(_ value: Any) throws -> Data {
       try HTTPFile.validate(URL(string: url)!, maximumBytes: 100)
     }
   }
-  for size: UInt64 in [0, (512 << 20) + 1] {
+  try HTTPFile.validate(
+    URL(string: "https://dl.google.com/android/ndk.zip")!, maximumBytes: 2 << 30)
+  for size: UInt64 in [0, (2 << 30) + 1] {
     #expect(throws: (any Error).self) {
       try HTTPFile.validate(URL(string: "https://example.test/file")!, maximumBytes: size)
     }

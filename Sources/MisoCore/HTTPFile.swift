@@ -43,7 +43,7 @@ enum HTTPFile {
     }
     guard url.scheme == "https", url.host != nil, url.user == nil, url.password == nil,
       url.fragment == nil, url.query == nil, url.port == nil || url.port == 443,
-      (1...(appleAsset ? 32 << 30 : 512 << 20)).contains(maximumBytes)
+      (1...(appleAsset ? 32 << 30 : 2 << 30)).contains(maximumBytes)
     else { throw MisoError.invalid("Invalid HTTPS payload request") }
   }
 
