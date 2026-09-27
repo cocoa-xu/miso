@@ -7,9 +7,12 @@ enum APFSPrivate {
     let host = try HostInfo.current()
     let path = URL(fileURLWithPath: "/System/Library/Filesystems/apfs.fs/Contents/Info.plist")
     let info = try RestoreInspection.plist(SafeFile.read(path, limit: 1 << 20))
+    return try validateHost(host, apfsVersion: info["CFBundleVersion"] as? String)
+  }
+
+  static func validateHost(_ host: HostInfo, apfsVersion: String?) throws -> String {
     guard host.architecture == "arm64", host.productVersion == "27.0",
-      host.productBuild == "26A5425a",
-      info["CFBundleVersion"] as? String == "3288.1.3"
+      ["26A5425a", "26A428"].contains(host.productBuild), apfsVersion == "3288.1.3"
     else {
       throw MisoError.unsupported("private APFS operations on this host build")
     }
