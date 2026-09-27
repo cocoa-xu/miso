@@ -205,6 +205,12 @@ public enum XcodeRuntime {
     }
     let path = prefix + "/" + name
     let runtime = try GuestVolume(volume.directory(path).url)
+    return (path, try inspectRuntimeBundle(runtime, requirement: requirement))
+  }
+
+  static func inspectRuntimeBundle(_ runtime: GuestVolume, requirement: Requirement) throws
+    -> String
+  {
     let info = try runtime.plist("Contents/Info.plist")
     let profile = try runtime.plist("Contents/Resources/profile.plist")
     let version = try runtime.plist(
@@ -217,6 +223,6 @@ public enum XcodeRuntime {
       version["ProductVersion"] as? String == requirement.version,
       version["ProductBuildVersion"] as? String == requirement.build
     else { throw MisoError.invalid("Mounted simulator runtime identity differs") }
-    return (path, identifier)
+    return identifier
   }
 }

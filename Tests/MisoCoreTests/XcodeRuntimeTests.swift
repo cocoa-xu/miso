@@ -110,3 +110,34 @@ private func runtimeCatalog() throws -> Data {
   #expect(authenticatedRawBytes <= asset.decryptionLimit)
   #expect(asset.decryptionLimit <= (64 << 30) + (1 << 20))
 }
+
+@Test func componentPayloadPreservesItsTreeAndRejectsExistingDestinations() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let source = temporary.url.appendingPathComponent("source")
+  let target = temporary.url.appendingPathComponent("target")
+  try SafeFile.makeDirectory(source, mode: 0o755)
+  try SafeFile.makeDirectory(target)
+  let nested = source.appendingPathComponent("nested")
+  try SafeFile.makeDirectory(nested, mode: 0o755)
+  try SafeFile.writeNew(Data("runtime payload".utf8), to: nested.appendingPathComponent("file"))
+  try FileManager.default.createSymbolicLink(
+    atPath: source.appendingPathComponent("link").path, withDestinationPath: "nested/file")
+  let journal = try ExecutionJournal(
+    output: temporary.url.appendingPathComponent("journal"), operation: "test-runtime-copy")
+  let receipt = try XcodeComponentPayload.copy(
+    source, to: GuestVolume(target), path: "Library/Developer/example.simruntime", journal: journal)
+  #expect(receipt.entries == 3)
+  #expect(receipt.regularFiles == 1)
+  #expect(receipt.logicalBytes == 15)
+  #expect(
+    try FileManager.default.destinationOfSymbolicLink(
+      atPath: target.appendingPathComponent("Library/Developer/example.simruntime/link").path)
+      == "nested/file")
+  #expect(throws: MisoError.self) {
+    try XcodeComponentPayload.copy(
+      source, to: GuestVolume(target), path: "Library/Developer/example.simruntime",
+      journal: journal)
+  }
+  try journal.finish(receipt)
+}

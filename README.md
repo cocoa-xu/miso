@@ -46,6 +46,13 @@ on a read-only mount. Pass `--catalog` and `--archive` for offline replay. The f
 asset digest binds the runtime contents, including bundles with legacy resource
 omission rules. Preparation never installs a host runtime or starts a simulator.
 
+`xcode install-runtime --source <xcode-bundle> --prepared <runtime> --output <stage>`
+replays the signed asset authentication offline and copies its runtime into a new
+image at `<stage>/image/bundle`. It verifies file contents, permissions, ownership,
+links, ACLs and extended attributes against the mounted input, then removes its
+temporary archive and disk image. Runtime discovery and simulator execution still
+require independent VM acceptance; this stage leaves Xcode completion false.
+
 `xcode prepare-packages --prepared <prepared-xcode> --output <packages>` verifies
 the four reviewed first-launch packages and records their payload inventories,
 relocation policies and unexecuted scripts. CoreTypes is restricted to its writable
