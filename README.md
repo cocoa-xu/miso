@@ -100,6 +100,12 @@ source file records, an OpenSSL formula (or vendored source), a default version 
 and no network access. Extension, default-shim and detached payload checks do not
 replace a VM boot test. Automatic Ruby version resolution remains pending.
 
+`base packages verify --plan packages.json --inputs source-directory` validates
+resolved Bundler/npm metadata and local payloads. `base packages install` adds
+`--source bundle --output new-stage`, requires root and a matching installed Ruby,
+and uses offline package-manager execution. It checks installed versions, yarn/pnpm
+offline controls and detached payloads. Package selection is explicit at this stage.
+
 Configuration defaults use `admin/admin`, disable FileVault, and request SSH/VNC.
 They are intended for isolated test systems; change credentials before exposing a
 guest to an untrusted network. Rosetta and ARM Linux translation are opt-in.

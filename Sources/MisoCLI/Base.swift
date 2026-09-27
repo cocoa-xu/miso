@@ -7,8 +7,47 @@ struct Base: AsyncParsableCommand {
     abstract: "Prepare target-compatible Base inputs without starting a VM.",
     subcommands: [
       Defaults.self, Resolve.self, Archive.self, Static.self, Bootstrap.self, Bottles.self,
-      Ruby.self,
+      Ruby.self, Packages.self,
     ])
+
+  struct Packages: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Validate or install resolved local Bundler and npm packages.",
+      subcommands: [Verify.self, Install.self])
+
+    struct Inputs: ParsableArguments {
+      @Option var plan: String
+      @Option var inputs: String
+    }
+
+    struct Verify: ParsableCommand {
+      @OptionGroup var inputs: Inputs
+      func run() throws {
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          BasePackageInputs.verify(
+            plan: fileURL(inputs.plan), inputs: fileURL(inputs.inputs),
+            cancellation: cancellation.token))
+      }
+    }
+
+    struct Install: ParsableCommand {
+      @OptionGroup var inputs: Inputs
+      @Option var source: String
+      @Option var output: String
+      @Option var username = "admin"
+      func run() throws {
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          BasePackages.run(
+            source: fileURL(source), plan: fileURL(inputs.plan),
+            inputs: fileURL(inputs.inputs), output: fileURL(output), username: username,
+            cancellation: cancellation.token))
+      }
+    }
+  }
 
   struct Ruby: ParsableCommand {
     static let configuration = CommandConfiguration(
