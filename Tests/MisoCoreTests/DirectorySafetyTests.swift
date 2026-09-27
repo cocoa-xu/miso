@@ -76,3 +76,22 @@ import Testing
   #expect(actual.st_dev == expected.st_dev && actual.st_ino == expected.st_ino)
   #expect(try GuestVolume(path).root == path)
 }
+
+@Test func commandLineToolsRejectInaccessibleParentsBeforeGuestInstallation() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let volume = try GuestVolume(temporary.url)
+  for directory in [
+    "Library/Developer/CommandLineTools/usr/bin", "Library/Apple/System/Library/Receipts",
+  ] {
+    try volume.makeDirectories(directory, uid: getuid(), gid: getgid())
+  }
+  try CommandLineTools.requireGuestAccess(volume)
+  for directory in ["Library/Developer", "Library/Apple/System/Library"] {
+    let path = try volume.path(directory)
+    #expect(chmod(path.path, 0o700) == 0)
+    #expect(throws: (any Error).self) { try CommandLineTools.requireGuestAccess(volume) }
+    #expect(chmod(path.path, 0o755) == 0)
+  }
+  try CommandLineTools.requireGuestAccess(volume)
+}

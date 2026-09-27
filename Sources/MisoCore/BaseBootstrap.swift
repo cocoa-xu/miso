@@ -78,6 +78,7 @@ public enum BaseBootstrap {
         image: image, root: root, username: username, journal: journal
       ) { guest in
         let data = guest.data
+        try CommandLineTools.requireGuestAccess(data)
         let account = guest.account
         accountIdentity = [account.uid, account.gid]
         let prefix = try data.path("opt/homebrew", createParents: true)

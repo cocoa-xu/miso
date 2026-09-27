@@ -2,6 +2,22 @@ import Darwin
 import Foundation
 
 enum CommandLineTools {
+  static func requireGuestAccess(_ data: GuestVolume) throws {
+    for relative in [
+      PackageInventory.root + "/usr/bin",
+      "Library/Apple/System/Library/Receipts",
+    ] {
+      var current = ""
+      for component in relative.split(separator: "/") {
+        current += (current.isEmpty ? "" : "/") + component
+        let info = try FileMetadata.inspect(data.directory(current).url)
+        guard info.st_mode & 0o005 == 0o005 else {
+          throw MisoError.invalid("CLT directory is not guest-readable: \(current)")
+        }
+      }
+    }
+  }
+
   struct Package: Codable, Sendable {
     let filename: String
     let identifier: String
@@ -251,6 +267,7 @@ enum CommandLineTools {
         throw MisoError.invalid("Installed CLT receipt lookup failed")
       }
     }
+    try requireGuestAccess(data)
     return Receipt(
       product: product, packages: records, entries: combined.count, regularFiles: files,
       compressedFiles: compressed,
