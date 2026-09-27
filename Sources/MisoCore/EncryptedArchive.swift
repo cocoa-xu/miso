@@ -34,10 +34,12 @@ public enum EncryptedArchive {
       throw MisoError.unsupported("AEA encryption profile")
     }
     try context.setSymmetricKey(key)
-    guard context.decryptAttributes(), context.rawSize > 0,
-      UInt64(context.rawSize) <= maximumOutputBytes
-    else {
-      throw MisoError.invalid("AEA authentication or output-size validation failed")
+    guard context.decryptAttributes() else {
+      throw MisoError.invalid("AEA attribute authentication failed")
+    }
+    guard context.rawSize > 0, UInt64(context.rawSize) <= maximumOutputBytes else {
+      throw MisoError.invalid(
+        "AEA output size \(context.rawSize) exceeds limit \(maximumOutputBytes)")
     }
     guard
       let decrypted = ArchiveByteStream.decryptionStream(

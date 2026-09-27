@@ -97,3 +97,16 @@ private func runtimeCatalog() throws -> Data {
     try XcodeRuntime.inspect(root, requirement: runtimeRequirement, cancellation: nil)
   }
 }
+
+@Test func simulatorAEALimitIncludesAuthenticatedArchiveFraming() throws {
+  let file = Bundle.module.url(
+    forResource: "tvos-24J360", withExtension: "jwt", subdirectory: "Fixtures")!
+  let payload = try AppleAssetCatalog.verify(
+    Data(contentsOf: file), at: Date(timeIntervalSince1970: 1_791_000_000))
+  let asset = try XcodeRuntime.select(
+    payload, requirement: .init(platform: .tvOS, version: "27.0", build: "24J360"))
+  let authenticatedRawBytes: UInt64 = 3_699_987_224
+  #expect(authenticatedRawBytes > asset.expandedBytes + (1 << 20))
+  #expect(authenticatedRawBytes <= asset.decryptionLimit)
+  #expect(asset.decryptionLimit <= (64 << 30) + (1 << 20))
+}

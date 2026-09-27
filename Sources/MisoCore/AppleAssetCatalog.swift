@@ -29,6 +29,7 @@ enum AppleAssetCatalog {
 
     var url: URL { baseURL.appendingPathComponent(relativePath) }
     var sha256: String { SafeFile.hex(measurement) }
+    var decryptionLimit: UInt64 { max(downloadBytes, expandedBytes) + (1 << 20) }
 
     func validate(assetType expectedType: String, build expectedBuild: String) throws {
       guard assetType == expectedType, build == expectedBuild,

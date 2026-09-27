@@ -100,7 +100,7 @@ public enum XcodeRuntime {
         let decoded = output.appendingPathComponent("decrypted.aar")
         let decrypted = try EncryptedArchive.decrypt(
           source: encrypted, output: decoded, key: SymmetricKey(data: key),
-          maximumOutputBytes: asset.expandedBytes + (1 << 20), cancellation: journal.cancellation)
+          maximumOutputBytes: asset.decryptionLimit, cancellation: journal.cancellation)
         let expanded = output.appendingPathComponent("expanded")
         try journal.run(
           "extract-simulator-asset",
