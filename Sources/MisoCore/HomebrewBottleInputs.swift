@@ -129,7 +129,8 @@ public enum HomebrewBottleInputs {
         SafeFile.read(indexURL, limit: 8 << 20), formula: formula, bytes: archive.bytes)
       try validateDependencies(
         tab, formulae: resolved.receipt.formulae, selected: selected,
-        compatibilityVersions: resolved.compatibilityVersions)
+        compatibilityVersions: resolved.compatibilityVersions,
+        directDependencies: Set(formula.dependencies))
       let entries: [TarPayload.Entry]
       do {
         entries = try TarPayload.inspect(
@@ -182,7 +183,7 @@ public enum HomebrewBottleInputs {
 
   static func validateDependencies(
     _ tab: JSONValue, formulae: [String: HomebrewResolution.Formula], selected: Set<String>,
-    compatibilityVersions: [String: Int] = [:]
+    compatibilityVersions: [String: Int] = [:], directDependencies: Set<String> = []
   ) throws {
     guard case .object(let object) = tab,
       case .array(let dependencies) = object["runtime_dependencies"]
@@ -195,11 +196,18 @@ public enum HomebrewBottleInputs {
         revision >= 0, formulae[name] != nil, selected.contains(name)
       else { throw MisoError.unsupported("Bottle runtime dependencies differ from resolution") }
       try PackageRequest(name: name, version: version).validate()
+      if let direct = fields["declared_directly"] {
+        guard case .bool = direct else {
+          throw MisoError.invalid("Invalid bottle dependency declaration")
+        }
+      }
       if let builtCompatibility = fields["compatibility_version"] {
         guard case .integer(let expected) = builtCompatibility, expected >= 0 else {
           throw MisoError.invalid("Invalid bottle dependency compatibility version")
         }
-        if let actual = compatibilityVersions[name], actual != expected {
+        if fields["declared_directly"] != .bool(false) || directDependencies.contains(name),
+          let actual = compatibilityVersions[name], actual != expected
+        {
           throw MisoError.unsupported(
             "Bottle requires \(name) compatibility \(expected), selected \(actual)")
         }

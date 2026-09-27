@@ -237,3 +237,33 @@ private func bottleIndex(annotations changes: [String: String] = [:], duplicate:
       Data("{\"compatibility_version\":-1}".utf8), target: target)
   }
 }
+
+@Test func bottleCompatibilityUsesEachSelectedDependencyOwnRequirements() throws {
+  func tab(_ direct: JSONValue) -> JSONValue {
+    .object([
+      "runtime_dependencies": .array([
+        .object([
+          "full_name": .string("example"), "version": .string("1.2.0"),
+          "revision": .integer(0), "compatibility_version": .integer(5),
+          "declared_directly": direct,
+        ])
+      ])
+    ])
+  }
+  let formulae = ["example": bottleFormula()]
+  try HomebrewBottleInputs.validateDependencies(
+    tab(.bool(false)), formulae: formulae, selected: ["example"],
+    compatibilityVersions: ["example": 6])
+  for declaration in [JSONValue.bool(true), .string("false")] {
+    #expect(throws: MisoError.self) {
+      try HomebrewBottleInputs.validateDependencies(
+        tab(declaration), formulae: formulae, selected: ["example"],
+        compatibilityVersions: ["example": 6])
+    }
+  }
+  #expect(throws: MisoError.self) {
+    try HomebrewBottleInputs.validateDependencies(
+      tab(.bool(false)), formulae: formulae, selected: ["example"],
+      compatibilityVersions: ["example": 6], directDependencies: ["example"])
+  }
+}
