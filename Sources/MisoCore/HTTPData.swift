@@ -59,6 +59,27 @@ enum HTTPData {
     redirects: RedirectPolicy = .reject,
     configuration: URLSessionConfiguration = .ephemeral
   ) async throws -> Data {
+    try await fetch(
+      url, method: "GET", body: nil, maximumBytes: maximumBytes,
+      cancellation: cancellation, redirects: redirects, configuration: configuration)
+  }
+
+  static func post(
+    _ url: URL, body: Data, maximumBytes: Int, cancellation: CancellationToken? = nil,
+    configuration: URLSessionConfiguration = .ephemeral
+  ) async throws -> Data {
+    guard !body.isEmpty, body.count <= 4 << 20 else {
+      throw MisoError.invalid("Invalid HTTPS request size")
+    }
+    return try await fetch(
+      url, method: "POST", body: body, maximumBytes: maximumBytes,
+      cancellation: cancellation, redirects: .reject, configuration: configuration)
+  }
+
+  private static func fetch(
+    _ url: URL, method: String, body: Data?, maximumBytes: Int, cancellation: CancellationToken?,
+    redirects: RedirectPolicy, configuration: URLSessionConfiguration
+  ) async throws -> Data {
     guard url.scheme == "https", url.host != nil, url.user == nil, url.password == nil,
       url.fragment == nil, maximumBytes > 0, maximumBytes <= 8 << 20
     else {
@@ -73,8 +94,11 @@ enum HTTPData {
     let session = URLSession(configuration: configuration)
     defer { session.invalidateAndCancel() }
     var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+    request.httpMethod = method
+    request.httpBody = body
+    if body != nil { request.setValue("text/xml", forHTTPHeaderField: "Content-Type") }
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
-    request.setValue("miso", forHTTPHeaderField: "User-Agent")
+    request.setValue(body == nil ? "miso" : "InetURL/1.0", forHTTPHeaderField: "User-Agent")
     return try await withThrowingTaskGroup(of: Data.self) { group in
       group.addTask { [request] in
         let (bytes, response) = try await session.bytes(

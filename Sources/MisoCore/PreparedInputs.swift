@@ -48,7 +48,7 @@ struct PreparedInputs {
     return try requireInput(path, cancellation: cancellation)
   }
 
-  private func requireInput(_ path: String, cancellation: CancellationToken?) throws -> URL {
+  func requireInput(_ path: String, cancellation: CancellationToken? = nil) throws -> URL {
     guard let record = receipt.inputs[path] else {
       throw MisoError.invalid("Missing prepared input")
     }
