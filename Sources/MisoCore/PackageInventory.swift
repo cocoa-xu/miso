@@ -18,6 +18,22 @@ struct PackageInventory {
   }
 
   static func parse(_ text: String) throws -> [String: Entry] {
+    try parse(text, roots: [root, temporaryMarker], linkRoot: "Library/Developer")
+  }
+
+  static func parse(_ text: String, roots: Set<String>, linkRoot: String) throws -> [String: Entry]
+  {
+    guard !roots.isEmpty else { throw MisoError.invalid("Missing package payload roots") }
+    _ = try SafeFile.relativePath(linkRoot)
+    var ancestors = Set<String>()
+    for root in roots {
+      _ = try SafeFile.relativePath(root)
+      var parent = (root as NSString).deletingLastPathComponent
+      while !parent.isEmpty {
+        ancestors.insert(parent)
+        parent = (parent as NSString).deletingLastPathComponent
+      }
+    }
     var entries: [String: Entry] = [:]
     for line in text.split(separator: "\n") {
       let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
@@ -27,8 +43,8 @@ struct PackageInventory {
       if fields[0] == "." { continue }
       let relative = try SafeFile.relativePath(String(fields[0].dropFirst(2)))
       guard
-        ancestors.contains(relative) || relative == root || relative.hasPrefix(root + "/")
-          || relative == temporaryMarker,
+        ancestors.contains(relative)
+          || roots.contains(where: { relative == $0 || relative.hasPrefix($0 + "/") }),
         let mode = mode_t(fields[1], radix: 8), let uid = uid_t(fields[2]),
         let gid = gid_t(fields[3]),
         [S_IFDIR, S_IFREG, S_IFLNK].contains(mode & S_IFMT), uid == 0, [0, 80].contains(gid),
@@ -40,10 +56,8 @@ struct PackageInventory {
         throw MisoError.invalid("Invalid package payload size")
       }
       if mode & S_IFMT == S_IFLNK {
-        let parent = (relative as NSString).deletingLastPathComponent
-        let resolved = URL(fileURLWithPath: "/" + parent + "/" + fields[5]).standardizedFileURL.path
-        guard !fields[5].isEmpty, !fields[5].hasPrefix("/"), !fields[5].contains("\0"),
-          resolved.hasPrefix("/Library/Developer/")
+        let resolved = try SafeFile.relativeLink(fields[5], at: relative)
+        guard resolved.hasPrefix(linkRoot + "/")
         else { throw MisoError.invalid("Unsafe package symbolic link") }
       } else if !fields[5].isEmpty {
         throw MisoError.invalid("Unexpected package link field")

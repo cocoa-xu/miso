@@ -39,6 +39,12 @@ For offline replay, pass the saved `catalog.jwt` and `asset.aar` using `--catalo
 and `--archive`. Both are required together. The receipt records input preparation
 separately from Xcode image construction and runtime acceptance.
 
+`xcode prepare-packages --prepared <prepared-xcode> --output <packages>` verifies
+the four reviewed first-launch packages and records their payload inventories,
+relocation policies and unexecuted scripts. CoreTypes is restricted to its writable
+firmlink subtree; MobileDevice payloads relocate under `/Library/Apple`. Package
+links are checked lexically without resolving paths through the host filesystem.
+
 ```sh
 miso xcode defaults > xcode.json
 miso xcode prepare-archive --archive Xcode_27.0_Apple_silicon.xip \
