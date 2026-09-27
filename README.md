@@ -90,6 +90,8 @@ minimum and its portable Ruby executable. Compatibility probes and payloads are
 preserved for replay; searches are bounded to 256 tags and eight distinct Ruby payloads.
 Source mappings change transport repositories, not upstream identities or versions.
 Forks need not advertise every tag: pinned objects are verified before checkout.
+`--core-revision` pins the core checkout when pairing it with preserved bottle
+inputs. A full Base recipe rejects mismatched formula sources before construction.
 Use `--cache bootstrap-inputs` with a new output directory for network-free replay.
 The resulting directory is accepted by `base bootstrap --archive`; input resolution
 does not prove installation or runtime compatibility.
@@ -158,7 +160,9 @@ resolved formula sources and local `<name>.tar.gz` / `<name>.tar.index.json` inp
 without administrator privileges. Add `--formula name` to select a dependency closure.
 `base bottles install` accepts the same inputs plus `--source bundle --output new-stage`
 and requires root. It installs local bottles with target Homebrew, denies network
-access, audits exact versions and verifies the detached payload. Post-install hooks
+access, audits exact versions and verifies the detached payload. The verified core
+snapshot is explicitly trusted inside the target, including when sourced from a fork.
+Post-install hooks
 are deferred unless `--post-install` is supplied. That experimental option invokes
 upstream hook methods under the same guest restrictions, then checks target tools,
 dependencies and linkage. This remains incomplete Base without VM runtime acceptance.

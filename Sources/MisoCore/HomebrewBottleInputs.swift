@@ -34,6 +34,20 @@ public enum HomebrewBottleInputs {
     let payloads: [Payload]
   }
 
+  static func verifyFormulaSources(
+    _ formulae: [HomebrewResolution.Formula], core: GuestVolume,
+    cancellation: CancellationToken? = nil
+  ) throws {
+    for formula in formulae {
+      try cancellation?.check()
+      let path = formula.sourceURL.pathComponents.dropFirst(4).joined(separator: "/")
+      guard try SafeFile.sha256(core.path(path)) == formula.sourceSHA256 else {
+        throw MisoError.invalid(
+          "Homebrew core source differs from bottle resolution: \(formula.name)")
+      }
+    }
+  }
+
   public static func load(
     resolution: URL, bottles: URL, names: [String], cancellation: CancellationToken?
   ) throws -> Selection {

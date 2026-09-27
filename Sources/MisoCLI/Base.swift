@@ -446,6 +446,7 @@ struct Base: AsyncParsableCommand {
       @Option var targetVersion: String
       @Option var targetBuild: String
       @Option var homebrewVersion: String?
+      @Option var coreRevision: String?
       @Option var sources: String?
       @Option var cache: String?
       @Option var output: String
@@ -459,7 +460,7 @@ struct Base: AsyncParsableCommand {
         try printJSON(
           await BaseBootstrapResolution.run(
             target: MacOSRelease(version: targetVersion, build: targetBuild),
-            version: homebrewVersion,
+            version: homebrewVersion, coreRevision: coreRevision,
             sources: settings, output: fileURL(output), cache: cache.map(fileURL),
             cancellation: cancellation.token))
       }

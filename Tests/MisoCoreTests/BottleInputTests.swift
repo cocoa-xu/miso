@@ -5,7 +5,8 @@ import Testing
 @testable import MisoCore
 
 private func bottleFormula(
-  name: String = "example", version: String = "1.2.3", revision: Int = 0, rebuild: Int = 0
+  name: String = "example", version: String = "1.2.3", revision: Int = 0, rebuild: Int = 0,
+  sourceSHA256: String = String(repeating: "b", count: 64)
 ) -> HomebrewResolution.Formula {
   HomebrewResolution.Formula(
     name: name, version: version, revision: revision,
@@ -14,10 +15,35 @@ private func bottleFormula(
       tag: "arm64_tahoe",
       url: URL(string: "https://ghcr.io/bottle")!, sha256: String(repeating: "a", count: 64),
       cellar: ":any", rebuild: rebuild),
-    sourceURL: URL(string: "https://example.org/Formula/e/example.rb")!,
-    sourceSHA256: String(repeating: "b", count: 64),
+    sourceURL: URL(
+      string:
+        "https://raw.githubusercontent.com/Homebrew/homebrew-core/\(String(repeating: "d", count: 40))/Formula/e/example.rb"
+    )!,
+    sourceSHA256: sourceSHA256,
     metadataSHA256: String(repeating: "c", count: 64),
     tapCommit: String(repeating: "d", count: 40), kegOnly: false, hasPostInstall: false)
+}
+
+@Test func bottleSourcesMustMatchBootstrapCoreBeforeInstallation() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let core = try GuestVolume(temporary.url)
+  let source = Data("class Example < Formula\nend\n".utf8)
+  try SafeFile.writeNew(
+    source, to: Artifacts.makeParents(for: "Formula/e/example.rb", under: temporary.url))
+  let formula = bottleFormula(sourceSHA256: SafeFile.sha256(source))
+  try HomebrewBottleInputs.verifyFormulaSources([formula], core: core)
+  try SafeFile.replace(Data("changed".utf8), at: core.path("Formula/e/example.rb"))
+  #expect(throws: MisoError.self) {
+    try HomebrewBottleInputs.verifyFormulaSources([formula], core: core)
+  }
+}
+
+@Test func mirroredCoreTrustControlChecksOnlyTheCoreTap() {
+  #expect(
+    BaseBottles.coreTrustControl.contains(
+      "Homebrew::Trust.trusted_tap?(Tap.fetch('homebrew/core'))"))
+  #expect(BaseBottles.coreTrustControl.contains("abort 'Untrusted core snapshot'"))
 }
 
 private func bottleIndex(annotations changes: [String: String] = [:], duplicate: Bool = false)

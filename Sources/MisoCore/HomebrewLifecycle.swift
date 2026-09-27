@@ -16,14 +16,17 @@ enum HomebrewLifecycle {
     formula.run_post_install
     """
 
-  static func run(_ formulae: [HomebrewResolution.Formula], guest: GuestExecution) throws
+  static func run(
+    _ formulae: [HomebrewResolution.Formula], guest: GuestExecution, execution: HomebrewExecution
+  ) throws
     -> [String: String]
   {
     for formula in formulae where formula.hasPostInstall {
       try guest.run(
         "formula-post-install",
         arguments: GuestExecution.brewArguments(
-          ["ruby", "-e", postInstallProgram, "--", formula.name], username: guest.account.username),
+          execution.rubyArguments(program: postInstallProgram, arguments: [formula.name]),
+          username: guest.account.username),
         capability: .brew, timeout: 180)
     }
     var results: [String: String] = [:]

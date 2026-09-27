@@ -10,6 +10,7 @@ public enum BaseBottles {
     let detachedPayloadVerified: Bool
     let executionControlsVerified: Bool
     let lifecycleProbes: [String: String]?
+    let coreTrustVerified: Bool?
   }
 
   public static func run(
@@ -31,6 +32,8 @@ public enum BaseBottles {
       var installed: [String: String] = [:]
       var accountIdentity: [UInt32] = []
       var lifecycleProbes: [String: String]?
+      let trustPath = "Users/\(username)/.homebrew"
+      var trustPayload: [BaseInputArchive.Entry] = []
       let payload = try GuestExecution.withSession(
         image: image, root: root, username: username, journal: journal
       ) { guest in
@@ -49,14 +52,30 @@ public enum BaseBottles {
         }
         let stagingIdentity = try FileMetadata.inspect(staging)
         var expected = before
+        try HomebrewBottleInputs.verifyFormulaSources(
+          selection.payloads.map(\.formula),
+          core: GuestVolume(
+            guest.data.directory("opt/homebrew/Library/Taps/homebrew/homebrew-core").url),
+          cancellation: journal.cancellation)
+        try guest.data.makeDirectories(trustPath, uid: guest.account.uid, gid: guest.account.gid)
+        try guest.run(
+          "trust-core",
+          arguments: GuestExecution.brewArguments(["trust", "homebrew/core"], username: username),
+          capability: .base)
+        guard
+          try guest.run(
+            "verify-core-trust",
+            arguments: GuestExecution.brewArguments(
+              ["ruby", "-e", Self.coreTrustControl], username: username),
+            capability: .base) == "core trusted"
+        else {
+          throw MisoError.invalid("Homebrew core trust verification failed")
+        }
+        let execution = try HomebrewExecution(guest: guest)
+        defer { try? execution.remove() }
+        try execution.verify()
         for payload in selection.payloads {
           let formula = payload.formula
-          let sourcePath = formula.sourceURL.pathComponents.dropFirst(4).joined(separator: "/")
-          let tapPath = "opt/homebrew/Library/Taps/homebrew/homebrew-core/" + sourcePath
-          guard try SafeFile.sha256(guest.data.path(tapPath)) == formula.sourceSHA256 else {
-            throw MisoError.invalid(
-              "Installed formula source differs from resolution: \(formula.name)")
-          }
           if let current = before[formula.name] {
             guard current == formula.kegVersion else {
               throw MisoError.invalid(
@@ -79,16 +98,18 @@ public enum BaseBottles {
           try guest.data.write(
             relative + "/" + payload.sidecarName,
             data: JSON.encode(payload.sidecar), mode: 0o444)
+          let install = try HomebrewExecution.installProgram(
+            arguments: ["--skip-post-install", "/" + relative + "/" + payload.filename])
           try guest.run(
             "install-bottle",
             arguments: GuestExecution.brewArguments(
-              ["install", "--skip-post-install", "/" + relative + "/" + payload.filename],
+              execution.rubyArguments(program: install),
               username: username), capability: .brew, timeout: 600)
           expected[formula.name] = formula.kegVersion
         }
         if postInstall {
           lifecycleProbes = try HomebrewLifecycle.run(
-            selection.payloads.map(\.formula), guest: guest)
+            selection.payloads.map(\.formula), guest: guest, execution: execution)
         }
         installed = try installedVersions(
           guest.run(
@@ -123,10 +144,18 @@ public enum BaseBottles {
         try BaseFileTree.requireOwnership(
           prefix, entries: inventory,
           uid: guest.account.uid, gid: guest.account.gid)
+        trustPayload = try BaseFileTree.inventory(
+          guest.data, path: trustPath, cancellation: journal.cancellation)
+        try BaseFileTree.requireOwnership(
+          guest.data.path(trustPath), entries: trustPayload,
+          uid: guest.account.uid, gid: guest.account.gid)
+        try execution.remove()
         return inventory
       }
       try SafeFile.writeNew(
         JSON.encode(payload), to: output.appendingPathComponent("bottle-payload.json"))
+      try SafeFile.writeNew(
+        JSON.encode(trustPayload), to: output.appendingPathComponent("bottle-trust-payload.json"))
       let audit = try DiskImageSession(image: image, readOnly: true, journal: journal)
       try audit.withAttachment { session in
         let container = try BaseImageStage.mainContainer(session)
@@ -147,6 +176,14 @@ public enum BaseBottles {
         try BaseFileTree.requireOwnership(
           data.path("opt/homebrew"), entries: payload,
           uid: account.uid, gid: account.gid)
+        guard
+          try BaseFileTree.inventory(data, path: trustPath, cancellation: journal.cancellation)
+            == trustPayload
+        else {
+          throw MisoError.invalid("Detached core trust verification failed")
+        }
+        try BaseFileTree.requireOwnership(
+          data.path(trustPath), entries: trustPayload, uid: account.uid, gid: account.gid)
       }
       for payload in selection.payloads {
         _ = try Artifacts.resolve(
@@ -165,10 +202,16 @@ public enum BaseBottles {
           .map {
             $0.formula.name
           },
-        payloadEntries: payload.count, detachedPayloadVerified: true,
-        executionControlsVerified: true, lifecycleProbes: lifecycleProbes)
+        payloadEntries: payload.count + trustPayload.count, detachedPayloadVerified: true,
+        executionControlsVerified: true, lifecycleProbes: lifecycleProbes, coreTrustVerified: true)
     }
   }
+
+  static let coreTrustControl = """
+    require 'tap'; require 'trust'
+    abort 'Untrusted core snapshot' unless Homebrew::Trust.trusted_tap?(Tap.fetch('homebrew/core'))
+    puts 'core trusted'
+    """
 
   static func installedVersions(_ text: String) throws -> [String: String] {
     var result: [String: String] = [:]

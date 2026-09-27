@@ -11,6 +11,7 @@ public enum BaseBootstrapResolution {
     let schemaVersion: Int
     let target: MacOSRelease
     let requestedVersion: String?
+    let requestedCoreRevision: String?
     let sources: BaseSourceConfiguration
     let version: String
     let brew: GitSnapshot.Receipt
@@ -69,18 +70,21 @@ public enum BaseBootstrapResolution {
   }
 
   public static func run(
-    target: MacOSRelease, version: String? = nil, sources: BaseSourceConfiguration = .init(),
+    target: MacOSRelease, version: String? = nil, coreRevision: String? = nil,
+    sources: BaseSourceConfiguration = .init(),
     output: URL, cache: URL? = nil, cancellation: CancellationToken? = nil
   ) async throws -> Receipt {
     _ = try RestoreProfile.select(target)
     try sources.validate()
     if let version { _ = try StableVersion(version) }
+    if let coreRevision { _ = try GitRemote.objectID(coreRevision) }
     let previous = try cache.map {
       try JSON.read(Receipt.self, from: GuestVolume($0).path("resolution.json"))
     }
     if let previous {
       guard previous.schemaVersion == 1, previous.target == target,
         previous.requestedVersion == version,
+        previous.requestedCoreRevision == coreRevision,
         previous.sources == sources, previous.compatibility.count <= 256,
         (previous.rubyProbes?.count ?? 0) <= 256
       else { throw MisoError.invalid("Homebrew bootstrap cache differs from request") }
@@ -148,13 +152,19 @@ public enum BaseBootstrapResolution {
         expectedCommit: selected.1.commitID, pinned: selected.1,
         output: output.appendingPathComponent("brew"),
         cache: cache?.appendingPathComponent("brew"), cancellation: journal.cancellation)
-      let coreRefs = try await GitReferences.run(
-        repository: "Homebrew/homebrew-core", prefix: "HEAD",
-        output: output.appendingPathComponent("core-catalog"),
-        cache: cache?.appendingPathComponent("core-catalog"), cancellation: journal.cancellation)
+      let coreSelection: GitRemote.Selection
+      if let coreRevision {
+        coreSelection = .init(reference: "HEAD", objectID: coreRevision, commitID: coreRevision)
+      } else {
+        let coreRefs = try await GitReferences.run(
+          repository: "Homebrew/homebrew-core", prefix: "HEAD",
+          output: output.appendingPathComponent("core-catalog"),
+          cache: cache?.appendingPathComponent("core-catalog"), cancellation: journal.cancellation)
+        coreSelection = try coreRefs.select(nil)
+      }
       let core = try await GitSnapshot.run(
         repository: sources.repository("Homebrew/homebrew-core"),
-        expectedCommit: coreRefs.select(nil).commitID, pinned: coreRefs.select(nil),
+        expectedCommit: coreSelection.commitID, pinned: coreSelection,
         output: output.appendingPathComponent("core"), cache: cache?.appendingPathComponent("core"),
         cancellation: journal.cancellation)
       let resources = output.appendingPathComponent("resources")
@@ -212,7 +222,8 @@ public enum BaseBootstrapResolution {
       try SafeFile.writeNew(archive, to: output.appendingPathComponent("archive.json"))
       _ = try BaseInputArchive.verify(output, cancellation: journal.cancellation)
       let receipt = Receipt(
-        schemaVersion: 1, target: target, requestedVersion: version, sources: sources,
+        schemaVersion: 1, target: target, requestedVersion: version,
+        requestedCoreRevision: coreRevision, sources: sources,
         version: selected.0,
         brew: brew, core: core, compatibility: scripts, rubyProbes: rubyProbes,
         portableRuby: rubyRecord,

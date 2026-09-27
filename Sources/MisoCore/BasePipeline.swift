@@ -173,6 +173,7 @@ public enum BasePipeline {
     var ruby: BaseRuby.Plan?
     var packages: BasePackageInputs.Plan?
     var ca: BaseCAInputs.Plan?
+    var core: GuestVolume?
     for step in recipe.steps {
       for record in step.files.values {
         _ = try Artifacts.resolve(record, under: inputs.root, cancellation: cancellation)
@@ -185,15 +186,18 @@ public enum BasePipeline {
       switch step.stage {
       case .static: break
       case .bootstrap:
-        _ = try BaseInputArchive.verify(
-          file("archive").deletingLastPathComponent(), cancellation: cancellation)
+        let archive = try file("archive").deletingLastPathComponent()
+        _ = try BaseInputArchive.verify(archive, cancellation: cancellation)
+        core = try GuestVolume(
+          GuestVolume(archive).directory("resources/homebrew-sources/core").url)
       case .bottles:
-        releases.append(
-          try HomebrewBottleInputs.load(
-            resolution: file("resolution").deletingLastPathComponent(),
-            bottles: directory("bottles"), names: step.formulae!,
-            cancellation: cancellation
-          ).target)
+        let bottles = try HomebrewBottleInputs.load(
+          resolution: file("resolution").deletingLastPathComponent(),
+          bottles: directory("bottles"), names: step.formulae!, cancellation: cancellation)
+        guard let core else { throw MisoError.invalid("Missing bootstrap core snapshot") }
+        try HomebrewBottleInputs.verifyFormulaSources(
+          bottles.payloads.map(\.formula), core: core, cancellation: cancellation)
+        releases.append(bottles.target)
       case .ruby:
         ruby = try BaseRuby.verify(
           plan: file("plan"), inputs: directory("inputs"), cancellation: cancellation)
