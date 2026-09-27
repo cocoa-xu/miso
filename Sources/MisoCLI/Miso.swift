@@ -11,7 +11,7 @@ struct Miso: AsyncParsableCommand {
     subcommands: [
       Profiles.self, Configuration.self, IPSW.self, Disk.self, Decode.self, Identity.self,
       Bundle.self, Upgrade.self, Prepare.self, Personalize.self, Restore.self, Base.self,
-      GuestExecute.self, SecurityProbe.self,
+      Xcode.self, GuestExecute.self, SecurityProbe.self,
     ]
   )
 }

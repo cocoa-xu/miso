@@ -13,6 +13,25 @@ uses Apple's `pkgutil`, `lsbom`, `ditto` and `makewhatis`; CLT package scripts a
 executed. Base provisioning uses the target's package-manager runtime, not a host
 Homebrew installation. This is not a fully static binary.
 
+`xcode prepare-archive` verifies a checksum-bound XIP with Apple's `xip`, checks
+the extracted application signature, and records its exact version, build,
+minimum macOS version and configured SDKs. Expansion has a bounded execution
+time and a separate working directory. The default standard configuration
+selects Xcode 27.0 (27A266a), all four arm64 simulator platforms and MetalToolchain;
+it never selects the host's Xcode version.
+
+```sh
+miso xcode defaults > xcode.json
+miso xcode prepare-archive --archive Xcode_27.0_Apple_silicon.xip \
+  --sha256 <archive-sha256> --target-version 27.0.1 --target-build 26A434 \
+  --config xcode.json --output prepared-xcode
+```
+
+This command prepares the application archive only. Simulator and component
+installation, offline Xcode image construction and independent guest acceptance
+remain incomplete. Its receipt explicitly leaves image completion and runtime
+verification false. Preparation does not start a VM or install Xcode on the host.
+
 This is an in-progress native migration. The commands below work without starting
 a virtual machine. The experimental `restore` and `base build` commands have
 single-command offline acceptance on macOS 15.6.1 (24G90), 26.6.2 (25G83) and
