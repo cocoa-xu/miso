@@ -7,8 +7,116 @@ struct Base: AsyncParsableCommand {
     abstract: "Prepare target-compatible Base inputs without starting a VM.",
     subcommands: [
       Defaults.self, Resolve.self, Archive.self, Static.self, Bootstrap.self, Bottles.self,
-      Ruby.self, Packages.self, Taps.self, GCM.self,
+      Ruby.self, Packages.self, Taps.self, GCM.self, Security.self, Settings.self, CA.self,
+      Cleanup.self, Build.self,
     ])
+
+  struct Build: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Build an offline Base bundle from verified replay inputs.")
+    @Option var source: String
+    @Option var recipe: String
+    @Option var inputs: String
+    @Option var output: String
+    @Flag var keepIntermediates = false
+    @MainActor func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        BasePipeline.run(
+          source: fileURL(source), recipe: fileURL(recipe), inputs: fileURL(inputs),
+          output: fileURL(output), keepIntermediates: keepIntermediates,
+          cancellation: cancellation.token))
+    }
+  }
+
+  struct Cleanup: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Remove build caches and audit offline Base functionality.")
+    @Option var source: String
+    @Option var plan: String
+    @Option var output: String
+    @Option var username = "admin"
+    func run() throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        BaseCleanup.run(
+          source: fileURL(source), plan: fileURL(plan), output: fileURL(output),
+          username: username, cancellation: cancellation.token))
+    }
+  }
+
+  struct CA: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "ca", abstract: "Verify or install target-derived certificate bundles.",
+      subcommands: [Verify.self, Install.self])
+    struct Inputs: ParsableArguments {
+      @Option var plan: String
+      @Option var inputs: String
+    }
+    struct Verify: ParsableCommand {
+      @OptionGroup var inputs: Inputs
+      func run() throws {
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          BaseCAInputs.verify(
+            plan: fileURL(inputs.plan), inputs: fileURL(inputs.inputs),
+            cancellation: cancellation.token))
+      }
+    }
+    struct Install: ParsableCommand {
+      @OptionGroup var inputs: Inputs
+      @Option var source: String
+      @Option var output: String
+      @Option var username = "admin"
+      func run() throws {
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          BaseCertificates.run(
+            source: fileURL(source), plan: fileURL(inputs.plan), inputs: fileURL(inputs.inputs),
+            output: fileURL(output), username: username, cancellation: cancellation.token))
+      }
+    }
+  }
+
+  struct Settings: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Install offline guest-agent and Spotlight settings.")
+    @Option var source: String
+    @Option var plan: String
+    @Option var output: String
+    func run() throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        BaseSystemSettings.run(
+          source: fileURL(source), plan: fileURL(plan),
+          output: fileURL(output), cancellation: cancellation.token))
+    }
+  }
+
+  struct Security: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Apply explicit offline Base security and automation settings.")
+    @Option var source: String
+    @Option var plan: String
+    @Option var boot: String
+    @Option var material: String
+    @Option var output: String
+    @Option var username = "admin"
+    @MainActor func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        BaseSecurity.run(
+          source: fileURL(source), plan: fileURL(plan), boot: fileURL(boot),
+          material: fileURL(material), output: fileURL(output), username: username,
+          cancellation: cancellation.token))
+    }
+  }
 
   struct GCM: ParsableCommand {
     static let configuration = CommandConfiguration(

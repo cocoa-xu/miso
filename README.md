@@ -16,8 +16,8 @@ Homebrew installation. This is not a fully static binary.
 This is an in-progress native migration. The commands below work without starting
 a virtual machine. The experimental `restore` command connects the native vanilla
 stages, with single-command offline acceptance on macOS 26.6.2. Base currently
-exposes input preparation, its static layer, bootstrap, and experimental bottle/lifecycle
-stages, not a complete build. Upgrade execution is not yet exposed. A recognized profile is not a claim of
+exposes native provisioning stages and an experimental replay build; fresh full-build
+acceptance is still in progress. Upgrade execution is not yet exposed. A recognized profile is not a claim of
 native end-to-end validation. Write stages fail closed on unvalidated host ABIs.
 
 ```sh
@@ -67,6 +67,29 @@ Archives copy the actual inputs and preserve modes, relative links and digests;
 verification is network-free and works after moving the archive. An archive of
 selected software inputs is not a complete macOS/Base reconstruction kit.
 Keep private input archives separately from disposable build intermediates.
+
+`base build` replays a verified recipe from a fresh, never-booted Vanilla bundle.
+It runs bounded native stages, retains journals, validates each candidate, and
+removes successful execution views and superseded images unless
+`--keep-intermediates` is set. Failed stages are not resumed. Runtime and boot
+validation remain separate from offline completion.
+
+```sh
+sudo miso base build --source vanilla/bundle --recipe base-recipe.json \
+  --inputs /path/to/inputs --output new-base
+```
+
+Recipes contain `schemaVersion: 1`, `target`, `username`, and ordered `steps`:
+`static`, `bootstrap`, `bottles`, `ruby`, `packages`, `taps`, `gcm`, `security`,
+`settings`, `certificates`. Each step binds `files` with relative paths, byte counts
+and SHA-256 hashes, and `directories` relative to `--inputs`. Bottle steps also
+select `formulae`. Archive and resolution records name `archive.json` and
+`resolution.json`. Final cleanup is derived from the verified package and CA plans.
+This replay interface does not yet select the latest non-core packages for you.
+
+The explicit Base security stage reduces SIP protections and configures automation
+permissions. It is not applied by the Vanilla restore command. Security, settings,
+CA installation and cleanup are also exposed as individual `base` subcommands.
 
 `base static` requires a completed never-booted bundle, the Actions Runner release
 metadata and matching arm64 archive, and a GitHub known-hosts file. It clones the

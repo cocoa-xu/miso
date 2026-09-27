@@ -160,6 +160,9 @@ public enum BaseStaticLayer {
       }
       manifest["files"] = try JSONSerialization.jsonObject(with: JSON.encode(files))
       manifest["base_complete"] = false
+      var stages = manifest["base_stages"] as? [String] ?? []
+      stages.append("base-static")
+      manifest["base_stages"] = stages
       manifest["runtime_verified"] = false
       manifest["cross_mac_verified"] = false
       try SafeFile.writeNew(
