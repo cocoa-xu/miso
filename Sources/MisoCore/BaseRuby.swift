@@ -116,114 +116,115 @@ public enum BaseRuby {
       var probes: [Probe] = []
       var definitions: [String: String] = [:]
       var identity: [UInt32] = []
-      let payload = try GuestExecution.withSession(
-        image: image, root: root, username: username, journal: journal
-      ) { guest in
-        identity = [guest.account.uid, guest.account.gid]
-        try guest.verifyControls(target: target)
-        for relative in [
-          rbenv, rbenv + "/versions", rbenv + "/shims", "opt/homebrew/var/ruby-cache",
-        ] {
-          let path = try guest.data.path(relative)
-          if !(try guest.data.contains(relative)) { try SafeFile.makeDirectory(path) }
-          _ = try guest.data.directory(relative)
-          guard chown(path.path, guest.account.uid, guest.account.gid) == 0,
-            chmod(path.path, 0o755) == 0
-          else { throw MisoError.system("Set Ruby directory ownership", errno) }
-        }
-        try controls(guest, rbenv: rbenv)
-        let sdk = try guest.run("ruby-sdk", arguments: ["/usr/bin/xcrun", "--show-sdk-path"])
-        guard sdk.hasPrefix("/Library/Developer/CommandLineTools/SDKs/"),
-          sdk.range(of: #"\A/[A-Za-z0-9/._-]+\.sdk\z"#, options: .regularExpression) != nil
-        else { throw MisoError.invalid("Unexpected target SDK path") }
-        let environment = environment(guest: guest, sdk: sdk, toolchain: toolchain, jobs: plan.jobs)
-        let compile =
-          #"printf '#include <stdio.h>\nint main(void){puts("offline-target");return 0;}\n' > /private/tmp/miso-compile.c && $CC /private/tmp/miso-compile.c -o /private/tmp/miso-compile && /private/tmp/miso-compile && /bin/rm /private/tmp/miso-compile.c /private/tmp/miso-compile"#
-        guard
-          try guest.run(
-            "ruby-compile-control", arguments: environment + ["/bin/sh", "-c", compile],
-            capability: .ruby) == "offline-target"
-        else { throw MisoError.invalid("Target compiler control failed") }
-        for build in plan.builds {
-          guard !(try guest.data.contains(rbenv + "/versions/" + build.version)) else {
-            throw MisoError.invalid("Requested Ruby is already installed")
+      let payload = try ArchiveToolAdapter.withView(root, target: target, journal: journal) {
+        try GuestExecution.withSession(
+          image: image, root: root, username: username, journal: journal
+        ) { guest in
+          identity = [guest.account.uid, guest.account.gid]
+          try guest.verifyControls(target: target)
+          for relative in [
+            rbenv, rbenv + "/versions", rbenv + "/shims", "opt/homebrew/var/ruby-cache",
+          ] {
+            let path = try guest.data.path(relative)
+            if !(try guest.data.contains(relative)) { try SafeFile.makeDirectory(path) }
+            _ = try guest.data.directory(relative)
+            guard chown(path.path, guest.account.uid, guest.account.gid) == 0,
+              chmod(path.path, 0o755) == 0
+            else { throw MisoError.system("Set Ruby directory ownership", errno) }
           }
-          let definition = try guest.run(
-            "ruby-build-definition",
-            arguments: [
-              "/bin/cat", "/opt/homebrew/share/ruby-build/" + build.version,
-            ])
-          for archive in build.sources {
-            guard definition.contains(archive.sha256) else {
-              throw MisoError.invalid("Ruby build definition differs from source digest")
-            }
-            let origin = try Artifacts.resolve(
-              archive, under: inputs, cancellation: journal.cancellation)
-            let relative = "opt/homebrew/var/ruby-cache/" + archive.path
-            if try guest.data.contains(relative) {
-              guard try SafeFile.sha256(guest.data.path(relative)) == archive.sha256 else {
-                throw MisoError.invalid("Ruby source cache conflicts with plan")
-              }
-            } else {
-              let destination = try guest.data.path(relative)
-              try Artifacts.copy(
-                origin, to: destination, maximumBytes: archive.bytes,
-                cancellation: journal.cancellation)
-              guard try SafeFile.sha256(destination) == archive.sha256,
-                chown(destination.path, guest.account.uid, guest.account.gid) == 0,
-                chmod(destination.path, 0o444) == 0
-              else { throw MisoError.invalid("Staged Ruby source differs from input") }
-            }
-          }
-          let record = output.appendingPathComponent("ruby-definition-" + build.version + ".txt")
-          try SafeFile.writeNew(Data(definition.utf8), to: record)
-          definitions[build.version] = try SafeFile.sha256(record)
-          var configure =
-            "--build=\(toolchain.triplet) --host=\(toolchain.triplet) --disable-install-doc --with-libyaml-dir=/opt/homebrew/opt/libyaml"
-          var options: [String] = []
-          if let formula = build.opensslFormula {
-            configure +=
-              " --with-openssl-dir=/opt/homebrew/opt/\(formula) --with-baseruby=/opt/homebrew/Library/Homebrew/vendor/portable-ruby/current/bin/ruby"
-          } else {
-            options.append("RUBY_BUILD_VENDOR_OPENSSL=1")
-          }
-          options.append("RUBY_CONFIGURE_OPTS=" + configure)
-          try journal.measure("rubyBuild-" + build.version + "Seconds") {
+          try controls(guest, rbenv: rbenv)
+          let sdk = try guest.run("ruby-sdk", arguments: ["/usr/bin/xcrun", "--show-sdk-path"])
+          guard sdk.hasPrefix("/Library/Developer/CommandLineTools/SDKs/"),
+            sdk.range(of: #"\A/[A-Za-z0-9/._-]+\.sdk\z"#, options: .regularExpression) != nil
+          else { throw MisoError.invalid("Unexpected target SDK path") }
+          let environment = environment(
+            guest: guest, sdk: sdk, toolchain: toolchain, jobs: plan.jobs)
+          guard
             try guest.run(
-              "ruby-build",
-              arguments: environment + options + [
-                "/opt/homebrew/bin/rbenv", "install", "-v", build.version,
-              ], capability: .ruby, timeout: 1800)
+              "ruby-compile-control", arguments: environment + ["/bin/sh", "-c", compileControl],
+              capability: .ruby) == "offline-target"
+          else { throw MisoError.invalid("Target compiler control failed") }
+          for build in plan.builds {
+            guard !(try guest.data.contains(rbenv + "/versions/" + build.version)) else {
+              throw MisoError.invalid("Requested Ruby is already installed")
+            }
+            let definition = try guest.run(
+              "ruby-build-definition",
+              arguments: [
+                "/bin/cat", "/opt/homebrew/share/ruby-build/" + build.version,
+              ])
+            for archive in build.sources {
+              guard definition.contains(archive.sha256) else {
+                throw MisoError.invalid("Ruby build definition differs from source digest")
+              }
+              let origin = try Artifacts.resolve(
+                archive, under: inputs, cancellation: journal.cancellation)
+              let relative = "opt/homebrew/var/ruby-cache/" + archive.path
+              if try guest.data.contains(relative) {
+                guard try SafeFile.sha256(guest.data.path(relative)) == archive.sha256 else {
+                  throw MisoError.invalid("Ruby source cache conflicts with plan")
+                }
+              } else {
+                let destination = try guest.data.path(relative)
+                try Artifacts.copy(
+                  origin, to: destination, maximumBytes: archive.bytes,
+                  cancellation: journal.cancellation)
+                guard try SafeFile.sha256(destination) == archive.sha256,
+                  chown(destination.path, guest.account.uid, guest.account.gid) == 0,
+                  chmod(destination.path, 0o444) == 0
+                else { throw MisoError.invalid("Staged Ruby source differs from input") }
+              }
+            }
+            let record = output.appendingPathComponent("ruby-definition-" + build.version + ".txt")
+            try SafeFile.writeNew(Data(definition.utf8), to: record)
+            definitions[build.version] = try SafeFile.sha256(record)
+            var configure =
+              "--build=\(toolchain.triplet) --host=\(toolchain.triplet) --disable-install-doc --with-libyaml-dir=/opt/homebrew/opt/libyaml"
+            var options: [String] = []
+            if let formula = build.opensslFormula {
+              configure +=
+                " --with-openssl-dir=/opt/homebrew/opt/\(formula) --with-baseruby=/opt/homebrew/Library/Homebrew/vendor/portable-ruby/current/bin/ruby"
+            } else {
+              options.append("RUBY_BUILD_VENDOR_OPENSSL=1")
+            }
+            options.append("RUBY_CONFIGURE_OPTS=" + configure)
+            try journal.measure("rubyBuild-" + build.version + "Seconds") {
+              try guest.run(
+                "ruby-build",
+                arguments: environment + options + [
+                  "/opt/homebrew/bin/rbenv", "install", "-v", build.version,
+                ], capability: .ruby, timeout: 1800)
+            }
+            let probe = try guest.run(
+              "ruby-extensions",
+              arguments: [
+                "/" + rbenv + "/versions/" + build.version + "/bin/ruby", "-e", probeProgram,
+              ], capability: .ruby)
+            try journal.setMetadata("rubyProbe-" + build.version, value: probe)
+            probes.append(try validateProbe(probe, build: build, toolchain: toolchain))
           }
-          let probe = try guest.run(
-            "ruby-extensions",
-            arguments: [
-              "/" + rbenv + "/versions/" + build.version + "/bin/ruby", "-e", probeProgram,
-            ], capability: .ruby)
-          try journal.setMetadata("rubyProbe-" + build.version, value: probe)
-          probes.append(try validateProbe(probe, build: build, toolchain: toolchain))
-        }
-        try guest.run(
-          "ruby-global",
-          arguments: environment + [
-            "/opt/homebrew/bin/rbenv", "global", plan.defaultVersion,
-          ], capability: .ruby)
-        try guest.run(
-          "ruby-rehash", arguments: environment + ["/opt/homebrew/bin/rbenv", "rehash"],
-          capability: .ruby)
-        guard
           try guest.run(
-            "ruby-default",
+            "ruby-global",
             arguments: environment + [
-              "/" + rbenv + "/shims/ruby", "-e", "print RUBY_VERSION",
-            ], capability: .ruby) == plan.defaultVersion
-        else { throw MisoError.invalid("Default Ruby shim differs from plan") }
-        let entries = try BaseFileTree.inventory(
-          guest.data, path: rbenv, cancellation: journal.cancellation)
-        try BaseFileTree.requireOwnership(
-          guest.data.path(rbenv), entries: entries,
-          uid: guest.account.uid, gid: guest.account.gid)
-        return entries
+              "/opt/homebrew/bin/rbenv", "global", plan.defaultVersion,
+            ], capability: .ruby)
+          try guest.run(
+            "ruby-rehash", arguments: environment + ["/opt/homebrew/bin/rbenv", "rehash"],
+            capability: .ruby)
+          guard
+            try guest.run(
+              "ruby-default",
+              arguments: environment + [
+                "/" + rbenv + "/shims/ruby", "-e", "print RUBY_VERSION",
+              ], capability: .ruby) == plan.defaultVersion
+          else { throw MisoError.invalid("Default Ruby shim differs from plan") }
+          let entries = try BaseFileTree.inventory(
+            guest.data, path: rbenv, cancellation: journal.cancellation)
+          try BaseFileTree.requireOwnership(
+            guest.data.path(rbenv), entries: entries,
+            uid: guest.account.uid, gid: guest.account.gid)
+          return entries
+        }
       }
       try SafeFile.writeNew(
         JSON.encode(payload), to: output.appendingPathComponent("ruby-payload.json"))
@@ -290,6 +291,24 @@ public enum BaseRuby {
       ], capability: .ruby, expectedExitCodes: [1])
     try FileManager.default.removeItem(at: guest.data.path(rbenv + "/.miso-control"))
   }
+
+  static let compileControl = #"""
+    set -eu
+    work=$(/usr/bin/mktemp -d /private/tmp/miso-compile.XXXXXX)
+    tools=/Library/Developer/CommandLineTools/usr/bin
+    trap '/bin/rm -f "$work/main.c" "$work/main.o" "$work/ar.a" "$work/libtool.a" "$work/program"; /bin/rmdir "$work"' EXIT
+    printf '#include <stdio.h>\nint main(void){puts("offline-target");return 0;}\n' > "$work/main.c"
+    $CC -c "$work/main.c" -o "$work/main.o"
+    for iteration in 1 2 3 4 5 6 7 8 9 10; do
+      "$tools/ar" crs "$work/ar.a" "$work/main.o"
+      "$tools/libtool" -static -o "$work/libtool.a" "$work/main.o"
+      "$tools/ranlib" "$work/libtool.a"
+    done
+    $CC "$work/ar.a" -o "$work/program"
+    "$work/program" > /dev/null
+    $CC "$work/libtool.a" -o "$work/program"
+    "$work/program"
+    """#
 
   static let probeProgram =
     #"require 'json'; require 'openssl'; require 'psych'; require 'zlib'; require 'rbconfig'; puts JSON.generate(version: RUBY_VERSION, platform: RUBY_PLATFORM, host: RbConfig::CONFIG['host'], openssl: OpenSSL::OPENSSL_VERSION, psych: Psych::LIBYAML_VERSION, zlib: Zlib::ZLIB_VERSION)"#
