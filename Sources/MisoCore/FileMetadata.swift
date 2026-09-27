@@ -109,19 +109,24 @@ enum FileMetadata {
     }
   }
 
-  static func copyTree(_ source: URL, to destination: URL, cancellation: CancellationToken? = nil)
+  static func copyTree(
+    _ source: GuestDirectory, to destination: GuestDirectory, cancellation: CancellationToken? = nil
+  )
     throws
   {
-    let sourceInfo = try inspect(source)
-    let destinationInfo = try inspect(destination)
-    guard sourceInfo.st_mode & S_IFMT == S_IFDIR, destinationInfo.st_mode & S_IFMT == S_IFDIR,
-      source.path == source.resolvingSymlinksInPath().path,
-      destination.path == destination.resolvingSymlinksInPath().path,
-      !destination.path.hasPrefix(source.path + "/"), source.path != destination.path
+    let origin = source.url.resolvingSymlinksInPath().path
+    let target = destination.url.resolvingSymlinksInPath().path
+    let sourceInfo = try inspect(source.url)
+    let destinationInfo = try inspect(destination.url)
+    guard !target.hasPrefix(origin + "/"), origin != target,
+      sourceInfo.st_mode & S_IFMT == S_IFDIR, destinationInfo.st_mode & S_IFMT == S_IFDIR,
+      sourceInfo.st_dev == source.device, sourceInfo.st_ino == source.inode,
+      destinationInfo.st_dev == destination.device, destinationInfo.st_ino == destination.inode,
+      sourceInfo.st_dev != destinationInfo.st_dev || sourceInfo.st_ino != destinationInfo.st_ino
     else {
       throw MisoError.invalid("Invalid template copy roots")
     }
-    let status = miso_copy_tree(source.path + "/", destination.path, cancellation?.storage)
+    let status = miso_copy_tree(source.url.path + "/", destination.url.path, cancellation?.storage)
     guard status == 0 else { throw MisoError.system("Copy template tree", status) }
     try cancellation?.check()
   }

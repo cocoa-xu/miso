@@ -115,7 +115,8 @@ enum OfflineAccount {
     guard mkdir(home.path, 0o700) == 0 else { throw MisoError.system("Create guest home", errno) }
     for template in ["Non_localized", "English.lproj"] {
       try FileMetadata.copyTree(
-        data.path("Library/User Template/" + template), to: home, cancellation: cancellation)
+        data.directory("Library/User Template/" + template), to: data.directory(homePath),
+        cancellation: cancellation)
     }
     try FileMetadata.walk(home) { relative, _ in
       try cancellation.check()

@@ -1,6 +1,18 @@
 import Darwin
 import Foundation
 
+struct GuestDirectory {
+  let url: URL
+  let device: dev_t
+  let inode: ino_t
+
+  fileprivate init(_ url: URL, info: stat) {
+    self.url = url
+    device = info.st_dev
+    inode = info.st_ino
+  }
+}
+
 struct GuestVolume {
   let root: URL
   let device: dev_t
@@ -12,6 +24,15 @@ struct GuestVolume {
     }
     self.root = root
     device = info.st_dev
+  }
+
+  func directory(_ relative: String? = nil) throws -> GuestDirectory {
+    let url = try relative.map { try path($0) } ?? root
+    let info = try FileMetadata.inspect(url)
+    guard info.st_mode & S_IFMT == S_IFDIR, info.st_dev == device else {
+      throw MisoError.invalid("Directory is outside its guest volume")
+    }
+    return GuestDirectory(url, info: info)
   }
 
   func path(_ relative: String, createParents: Bool = false, allowLeafLink: Bool = false) throws

@@ -35,7 +35,9 @@ enum DataTemplate {
         info.st_dev == data.device
       else { throw MisoError.invalid("Data volume is not fresh") }
     }
-    try FileMetadata.copyTree(source, to: data.root, cancellation: cancellation)
+    try FileMetadata.copyTree(
+      system.directory("System/Library/Templates/Data"), to: data.directory(),
+      cancellation: cancellation)
     let audit = try audit(source: source, destination: data, cancellation: cancellation)
     try data.mergePlist(
       receiptPath + ".plist",

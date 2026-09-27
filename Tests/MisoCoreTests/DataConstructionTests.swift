@@ -4,6 +4,21 @@ import Testing
 
 @testable import MisoCore
 
+@Test func guestDirectoryChecksRejectSymlinksWithinTheirVolume() throws {
+  let directory = try TemporaryDirectory()
+  defer { directory.remove() }
+  let target = directory.url.appendingPathComponent("physical")
+  try SafeFile.makeDirectory(target)
+  let link = directory.url.appendingPathComponent("alias")
+  try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+  let volume = try GuestVolume(directory.url)
+  _ = try volume.directory("physical")
+  #expect(throws: (any Error).self) { try volume.directory("alias") }
+  #expect(throws: (any Error).self) {
+    try volume.directory("alias/child")
+  }
+}
+
 @Test func mountValidationUsesImageEntitiesWithoutAssumingAPFSMountPoints() throws {
   let volume = APFSTopology.Volume(
     device: "disk987s4", identifier: UUID(), roles: ["System"], name: nil, mountPoint: nil)
@@ -47,7 +62,9 @@ import Testing
     atPath: source.appendingPathComponent("absolute").path,
     withDestinationPath: "/nonexistent/miso-test")
   let cancellation = try CancellationToken()
-  try FileMetadata.copyTree(source, to: destination, cancellation: cancellation)
+  try FileMetadata.copyTree(
+    GuestVolume(source).directory(), to: GuestVolume(destination).directory(),
+    cancellation: cancellation)
   #expect(
     !FileManager.default.fileExists(atPath: destination.appendingPathComponent("source").path))
   let result = try DataTemplate.audit(
@@ -82,7 +99,8 @@ import Testing
   let target = directory.url.appendingPathComponent("target")
   try SafeFile.makeDirectory(target)
   #expect(throws: (any Error).self) {
-    try FileMetadata.copyTree(directory.url, to: target, cancellation: cancelled)
+    try FileMetadata.copyTree(
+      guest.directory(), to: guest.directory("target"), cancellation: cancelled)
   }
 }
 
