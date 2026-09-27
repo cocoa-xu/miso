@@ -92,6 +92,14 @@ are deferred unless `--post-install` is supplied. That experimental option invok
 upstream hook methods under the same guest restrictions, then checks target tools,
 dependencies and linkage. This remains incomplete Base without VM runtime acceptance.
 
+`base ruby verify --plan ruby.json --inputs source-directory` verifies a resolved
+Ruby build plan and local source digests. `base ruby install` adds `--source bundle
+--output new-stage` and requires root. The plan selects exact Ruby versions,
+source file records, an OpenSSL formula (or vendored source), a default version and
+1–8 compilation jobs. Builds use the target CLT/SDK with explicit target parameters
+and no network access. Extension, default-shim and detached payload checks do not
+replace a VM boot test. Automatic Ruby version resolution remains pending.
+
 Configuration defaults use `admin/admin`, disable FileVault, and request SSH/VNC.
 They are intended for isolated test systems; change credentials before exposing a
 guest to an untrusted network. Rosetta and ARM Linux translation are opt-in.
