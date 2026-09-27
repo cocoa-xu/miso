@@ -9,21 +9,54 @@ enum TarPayload {
     let mode: UInt16
     let bytes: Int64
     let link: String?
+    let hardlink: String?
+
+    init(
+      path: String, kind: UInt16, mode: UInt16, bytes: Int64, link: String?, hardlink: String? = nil
+    ) {
+      self.path = path
+      self.kind = kind
+      self.mode = mode
+      self.bytes = bytes
+      self.link = link
+      self.hardlink = hardlink
+    }
   }
 
-  static func inspect(_ source: URL, cancellation: CancellationToken? = nil) throws -> [Entry] {
+  static func inspect(
+    _ source: URL, pathPrefix: String? = nil, cancellation: CancellationToken? = nil
+  ) throws -> [Entry] {
     var entries: [Entry] = []
     try read(source, cancellation: cancellation) { entry, _ in entries.append(entry) }
-    try validate(entries)
+    try validate(entries, pathPrefix: pathPrefix)
     return entries
   }
 
-  static func validate(_ entries: [Entry]) throws {
+  static func validate(_ entries: [Entry], pathPrefix: String? = nil) throws {
+    if let pathPrefix {
+      _ = try SafeFile.relativePath(pathPrefix)
+      return try validate(
+        entries.map {
+          Entry(
+            path: pathPrefix + "/" + $0.path, kind: $0.kind, mode: $0.mode,
+            bytes: $0.bytes, link: $0.link, hardlink: $0.hardlink.map { pathPrefix + "/" + $0 })
+        })
+    }
     guard !entries.isEmpty, entries.count <= 100_000,
       Set(entries.map(\.path)).count == entries.count
     else { throw MisoError.invalid("Empty, duplicate or excessive tar entries") }
     let byPath = Dictionary(uniqueKeysWithValues: entries.map { ($0.path, $0) })
     for entry in entries {
+      _ = try SafeFile.relativePath(entry.path)
+      if let hardlink = entry.hardlink {
+        _ = try SafeFile.relativePath(hardlink)
+        guard entry.kind == S_IFREG, entry.bytes == 0, entry.link == nil,
+          let target = byPath[hardlink], target.kind == S_IFREG, target.link == nil,
+          target.hardlink == nil, target.mode == entry.mode
+        else {
+          throw MisoError.invalid("Invalid tar hardlink: \(entry.path)")
+        }
+      }
       var parents = entry.path.split(separator: "/").dropLast()
       while !parents.isEmpty {
         if let parent = byPath[parents.joined(separator: "/")], parent.kind != S_IFDIR {
@@ -40,7 +73,8 @@ enum TarPayload {
           if part == "." { continue }
           if part == ".." {
             guard !resolved.isEmpty else {
-              throw MisoError.invalid("Tar symlink chain escapes its root")
+              throw MisoError.invalid(
+                "Tar symlink chain escapes its root: \(entry.path) -> \(link)")
             }
             resolved.removeLast()
           } else if let target = byPath[(resolved + [part]).joined(separator: "/")]?.link {
@@ -83,7 +117,7 @@ enum TarPayload {
       }
       index += 1
       let path = try volume.path(entry.path)
-      if entry.kind == S_IFREG {
+      if entry.kind == S_IFREG && entry.hardlink == nil {
         let file = try SafeFile.create(path)
         defer { try? file.close() }
         var remaining = entry.bytes
@@ -104,6 +138,14 @@ enum TarPayload {
       }
     }
     guard index == entries.count else { throw MisoError.invalid("Incomplete tar payload") }
+    for entry in entries {
+      if let hardlink = entry.hardlink {
+        guard Darwin.link(try volume.path(hardlink).path, try volume.path(entry.path).path) == 0
+        else {
+          throw MisoError.system("Create tar hardlink", errno)
+        }
+      }
+    }
     for entry in entries where entry.kind == S_IFLNK {
       let path = try volume.path(entry.path)
       guard let link = entry.link, symlink(link, path.path) == 0, lchown(path.path, uid, gid) == 0,
@@ -143,9 +185,15 @@ enum TarPayload {
       let status = archive_read_next_header(reader, &header)
       if status == ARCHIVE_EOF { break }
       guard status == ARCHIVE_OK, let header, let rawPath = archive_entry_pathname(header),
-        let original = String(validatingCString: rawPath), archive_entry_hardlink(header) == nil
+        let original = String(validatingCString: rawPath)
       else { throw MisoError.invalid("Unsupported tar header") }
-      let kind = UInt16(archive_entry_filetype(header))
+      var hardlink = archive_entry_hardlink(header).flatMap { String(validatingCString: $0) }
+      if hardlink?.hasPrefix("./") == true { hardlink?.removeFirst(2) }
+      let rawKind = UInt16(archive_entry_filetype(header))
+      guard hardlink == nil || rawKind == 0 || rawKind == S_IFREG else {
+        throw MisoError.invalid("Invalid hardlink file type")
+      }
+      let kind = hardlink == nil ? rawKind : UInt16(S_IFREG)
       var path = original
       if path.hasPrefix("./") { path.removeFirst(2) }
       if path.hasSuffix("/") { path.removeLast() }
@@ -163,7 +211,9 @@ enum TarPayload {
       guard (kind == S_IFLNK) == (link != nil) else {
         throw MisoError.invalid("Missing tar symlink target")
       }
-      try body(Entry(path: path, kind: kind, mode: mode, bytes: size, link: link), reader)
+      try body(
+        Entry(path: path, kind: kind, mode: mode, bytes: size, link: link, hardlink: hardlink),
+        reader)
       guard archive_read_data_skip(reader) == ARCHIVE_OK else {
         throw MisoError.invalid("Truncated tar entry")
       }

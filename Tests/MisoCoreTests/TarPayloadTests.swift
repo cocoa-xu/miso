@@ -35,16 +35,21 @@ private func tarEntry(
   let content = Data(repeating: 42, count: (1 << 20) + 101)
   let bytes =
     tarEntry(path: "bin/tool", content: content)
-    + tarEntry(path: "tool", type: 50, link: "bin/tool") + Data(repeating: 0, count: 1024)
+    + tarEntry(path: "tool", type: 50, link: "bin/tool")
+    + tarEntry(path: "bin/alias", type: 49, link: "bin/tool") + Data(repeating: 0, count: 1024)
   try SafeFile.writeNew(bytes, to: source)
   let entries = try TarPayload.inspect(source)
-  #expect(entries.count == 2)
+  #expect(entries.count == 3)
   let output = directory.url.appendingPathComponent("out")
   try SafeFile.makeDirectory(output)
   try TarPayload.extract(source, into: output, entries: entries, uid: getuid(), gid: getgid())
   #expect(try SafeFile.read(output.appendingPathComponent("bin/tool"), limit: 2 << 20) == content)
   #expect(
     try FileMetadata.inspect(output.appendingPathComponent("bin/tool")).st_mode & 0o777 == 0o755)
+  #expect(
+    try FileMetadata.inspect(output.appendingPathComponent("bin/tool")).st_ino
+      == FileMetadata.inspect(output.appendingPathComponent("bin/alias")).st_ino)
+  #expect(try SafeFile.read(output.appendingPathComponent("bin/alias"), limit: 2 << 20) == content)
   #expect(
     try FileManager.default.destinationOfSymbolicLink(
       atPath: output.appendingPathComponent("tool").path) == "bin/tool")
