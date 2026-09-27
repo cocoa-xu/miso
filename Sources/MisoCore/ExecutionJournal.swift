@@ -10,6 +10,7 @@ public final class ExecutionJournal {
     public let startedAt: Date
     public let stdout: String
     public let stderr: String
+    public let expectedExitCodes: [Int32]?
     public var finishedAt: Date?
     public var result: ProcessReceipt?
     public var error: String?
@@ -63,9 +64,14 @@ public final class ExecutionJournal {
 
   @discardableResult
   public func run(
-    _ name: String, _ command: NativeCommand, cleanup: Bool = false, output: URL? = nil
+    _ name: String, _ command: NativeCommand, cleanup: Bool = false, output: URL? = nil,
+    expectedExitCodes: Set<Int32> = [0]
   ) throws -> URL {
     try Self.validateName(name)
+    guard !expectedExitCodes.isEmpty, expectedExitCodes.allSatisfy({ (0...255).contains($0) })
+    else {
+      throw MisoError.invalid("Invalid expected command exit codes")
+    }
     guard record.status == .running else {
       throw MisoError.invalid("Operation is already finalized")
     }
@@ -85,7 +91,8 @@ public final class ExecutionJournal {
     record.commands.append(
       CommandRecord(
         name: name, arguments: command.recordedArguments,
-        startedAt: Date(), stdout: outName, stderr: errName))
+        startedAt: Date(), stdout: outName, stderr: errName,
+        expectedExitCodes: expectedExitCodes.sorted()))
     try save()
     do {
       let result = try NativeProcess.run(
@@ -96,7 +103,9 @@ public final class ExecutionJournal {
       try stdout.synchronize()
       try stderr.synchronize()
       try save()
-      guard result.succeeded else {
+      guard expectedExitCodes.contains(result.exitCode), result.signal == 0,
+        !result.timedOut, !result.cancelled
+      else {
         throw MisoError.invalid(
           "Command \(name) failed (exit \(result.exitCode), signal \(result.signal), timeout \(result.timedOut), cancelled \(result.cancelled)); see \(errName)"
         )

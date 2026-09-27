@@ -198,10 +198,13 @@ public final class DiskImageSession {
   }
 
   public func withAttachment<T>(
-    requireGPT: Bool = true, mountPoint: URL? = nil, _ body: (DiskImageSession) throws -> T
+    requireGPT: Bool = true, mountPoint: URL? = nil, existingEmptyMountPoint: Bool = false,
+    _ body: (DiskImageSession) throws -> T
   ) throws -> T {
     do {
-      try attach(requireGPT: requireGPT, mountPoint: mountPoint)
+      try attach(
+        requireGPT: requireGPT, mountPoint: mountPoint,
+        existingEmptyMountPoint: existingEmptyMountPoint)
       let result = try body(self)
       try detach()
       return result
@@ -235,7 +238,7 @@ public final class DiskImageSession {
     return info.images.filter { $0.path == image.path }
   }
 
-  private func attach(requireGPT: Bool, mountPoint: URL?) throws {
+  private func attach(requireGPT: Bool, mountPoint: URL?, existingEmptyMountPoint: Bool) throws {
     guard !attachmentAttempted, whole == nil, try matchingImages().isEmpty else {
       throw MisoError.invalid("Image is already attached or this session was used")
     }
@@ -248,7 +251,14 @@ public final class DiskImageSession {
         throw MisoError.invalid(
           "Automatic mounts require a read-only image and an owned mount point")
       }
-      try SafeFile.makeDirectory(mountPoint)
+      if existingEmptyMountPoint {
+        _ = try GuestVolume(mountPoint)
+        guard try FileManager.default.contentsOfDirectory(atPath: mountPoint.path).isEmpty else {
+          throw MisoError.invalid("Existing image mount point must be empty")
+        }
+      } else {
+        try SafeFile.makeDirectory(mountPoint)
+      }
       arguments += ["-mountpoint", mountPoint.path]
     } else {
       arguments += ["-nomount"]

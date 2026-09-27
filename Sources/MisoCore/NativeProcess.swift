@@ -29,6 +29,10 @@ public struct NativeCommand: Sendable {
     case bom = "/usr/bin/lsbom"
     case copy = "/usr/bin/ditto"
     case manualIndex = "/usr/libexec/makewhatis"
+    case mountAPFS = "/sbin/mount_apfs"
+    case mount = "/sbin/mount"
+    case unmount = "/sbin/umount"
+    case codesign = "/usr/bin/codesign"
   }
 
   public let executable: URL

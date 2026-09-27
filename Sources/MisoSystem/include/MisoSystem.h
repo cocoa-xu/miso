@@ -3,6 +3,13 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
+
+int miso_guest_policy(const char *root, const char *username, const char *capability,
+                      char *buffer, size_t capacity);
+_Noreturn void miso_guest_exec(const char *root, uint32_t uid, uint32_t gid,
+                              const char *username, const char *capability,
+                              char *const arguments[]);
 
 typedef struct miso_cancellation miso_cancellation;
 

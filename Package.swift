@@ -19,7 +19,7 @@ let package = Package(
     .executableTarget(
       name: "MisoCLI",
       dependencies: [
-        "MisoCore", .product(name: "ArgumentParser", package: "swift-argument-parser"),
+        "MisoCore", "MisoSystem", .product(name: "ArgumentParser", package: "swift-argument-parser"),
       ]),
     .testTarget(name: "MisoCoreTests", dependencies: ["MisoCore", "ZIPFoundation"]),
   ]
