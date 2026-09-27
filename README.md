@@ -46,10 +46,14 @@ miso xcode prepare-archive --archive Xcode_27.0_Apple_silicon.xip \
   --config xcode.json --output prepared-xcode
 ```
 
-This command prepares the application archive only. Simulator and component
-installation, offline Xcode image construction and independent guest acceptance
-remain incomplete. Its receipt explicitly leaves image completion and runtime
-verification false. Preparation does not start a VM or install Xcode on the host.
+`xcode install-application --source <base-bundle> --prepared <prepared-xcode>
+--output <stage>` clones a completed, never-booted Base bundle, verifies and copies
+the signed application with filesystem compression, audits every file and selects
+the target developer directory. Its manifest preserves Base completion and records
+Xcode stages separately, with Xcode completion and runtime verification still false.
+First-launch packages, simulator and component installation, complete Xcode image
+construction and independent guest acceptance remain incomplete. These commands
+do not start a VM or install Xcode on the host.
 
 This is an in-progress native migration. The commands below work without starting
 a virtual machine. The experimental `restore` and `base build` commands have

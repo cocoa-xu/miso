@@ -2,6 +2,8 @@ import Darwin
 import Foundation
 
 enum BaseImageStage {
+  enum Layer { case base, xcode }
+
   struct Account: Sendable {
     let username: String
     let uid: UInt32
@@ -24,7 +26,8 @@ enum BaseImageStage {
   }
 
   static func run<T: Encodable>(
-    source: URL, output: URL, operation: String, cancellation: CancellationToken?,
+    source: URL, output: URL, operation: String, layer: Layer = .base,
+    cancellation: CancellationToken?,
     body: (URL, MacOSRelease, ExecutionJournal) throws -> T
   ) throws -> BaseStageReceipt<T> {
     guard geteuid() == 0 else {
@@ -42,6 +45,7 @@ enum BaseImageStage {
       let targetFields = manifest["target"] as? [String: String],
       let version = targetFields["version"], let build = targetFields["build"]
     else { throw MisoError.invalid("A never-booted native source bundle is required") }
+    try advanceManifest(&manifest, operation: operation, layer: layer)
     let target = try RestoreProfile.select(.init(version: version, build: build)).release
     let verificationStarted = ProcessInfo.processInfo.systemUptime
     let original = try ImageBundle.verify(source)
@@ -79,21 +83,44 @@ enum BaseImageStage {
         }
       }
       manifest["files"] = try JSONSerialization.jsonObject(with: JSON.encode(files))
-      manifest["base_complete"] = false
       manifest["runtime_verified"] = false
       manifest["cross_mac_verified"] = false
-      var stages = manifest["base_stages"] as? [String] ?? []
-      stages.append(operation)
-      manifest["base_stages"] = stages
       try SafeFile.writeNew(
         JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]),
         to: bundle.appendingPathComponent("manifest.json"))
       try journal.measure("outputVerificationSeconds") { try ImageBundle.verify(bundle) }
       return BaseStageReceipt(
         target: target, sourceManifest: sourceManifest, files: files,
-        details: details, originalsUnchanged: true, baseComplete: false,
+        details: details, originalsUnchanged: true,
+        baseComplete: manifest["base_complete"] as? Bool == true,
         runtimeVerified: false, vmStarted: false)
     }
+  }
+
+  static func advanceManifest(
+    _ manifest: inout [String: Any], operation: String, layer: Layer
+  ) throws {
+    let key: String
+    switch layer {
+    case .base:
+      guard manifest["xcode_stages"] == nil else {
+        throw MisoError.invalid("Base stages cannot replace an Xcode layer")
+      }
+      manifest["base_complete"] = false
+      key = "base_stages"
+    case .xcode:
+      guard manifest["base_complete"] as? Bool == true,
+        manifest["xcode_complete"] as? Bool != true, operation.hasPrefix("xcode-")
+      else { throw MisoError.invalid("Xcode construction requires a complete Base source") }
+      manifest["xcode_complete"] = false
+      key = "xcode_stages"
+    }
+    var stages = manifest[key] as? [String] ?? []
+    guard !stages.contains(operation) else {
+      throw MisoError.invalid("Image stage was already applied: \(operation)")
+    }
+    stages.append(operation)
+    manifest[key] = stages
   }
 
   static func mainContainer(_ session: DiskImageSession) throws -> APFSTopology.Container {

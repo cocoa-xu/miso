@@ -5,7 +5,25 @@ import MisoCore
 struct Xcode: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     abstract: "Prepare exact-version Xcode inputs without starting a VM.",
-    subcommands: [Defaults.self, PrepareArchive.self, PrepareMetal.self])
+    subcommands: [Defaults.self, PrepareArchive.self, PrepareMetal.self, InstallApplication.self])
+
+  struct InstallApplication: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "install-application",
+      abstract: "Install verified Xcode into a never-booted Base clone.")
+    @Option var source: String
+    @Option var prepared: String
+    @Option var output: String
+
+    func run() throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        XcodeApplication.install(
+          source: fileURL(source), prepared: fileURL(prepared), output: fileURL(output),
+          cancellation: cancellation.token))
+    }
+  }
 
   struct PrepareMetal: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
