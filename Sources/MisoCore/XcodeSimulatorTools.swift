@@ -28,9 +28,10 @@ public enum XcodeSimulatorTools {
   public struct Details: Encodable {
     let inputs: Inputs
     let installed: [String: String]
-    let version: String
+    let executableSHA256: String
     let detachedPayloadVerified: Bool
     let executionControlsVerified: Bool
+    let runtimeVerified = false
   }
 
   static func parse(_ data: Data) throws -> Formula {
@@ -161,7 +162,6 @@ public enum XcodeSimulatorTools {
       let image = bundle.appendingPathComponent("disk.img")
       let root = try BaseExecutionView.prepare(image: image, target: target, journal: journal)
       var installed: [String: String] = [:]
-      var version = ""
       let payload = try GuestExecution.withSession(
         image: image, root: root, username: username, journal: journal
       ) { guest in
@@ -225,15 +225,14 @@ public enum XcodeSimulatorTools {
           throw MisoError.invalid("Simulator tool registry differs")
         }
         _ = try brew("simulator-tool-linkage", ["linkage", "--test", fullName])
-        version = try guest.run(
-          "simulator-tool-version", arguments: ["/opt/homebrew/bin/applesimutils", "--version"],
-          timeout: 60)
-        guard version.contains(inputs.formula.version) else {
-          throw MisoError.invalid("Simulator tool version differs")
+        let executable = try guest.data.path(
+          "opt/homebrew/Cellar/applesimutils/" + inputs.formula.version + "/bin/applesimutils")
+        guard try SafeFile.sha256(executable) == inputs.executableSHA256 else {
+          throw MisoError.invalid("Installed simulator tool differs from its signed input")
         }
-        _ = try guest.run(
-          "simulator-tool-help", arguments: ["/opt/homebrew/bin/applesimutils", "--help"],
-          timeout: 60)
+        try journal.run(
+          "verify-installed-simulator-tool-signature",
+          NativeCommand(.codesign, arguments: ["--verify", "--strict", executable.path]))
         try execution.remove()
         let payload = try BaseFileTree.inventory(
           guest.data, path: "opt/homebrew", cancellation: journal.cancellation)
@@ -258,7 +257,8 @@ public enum XcodeSimulatorTools {
         }
       }
       return Details(
-        inputs: inputs, installed: installed, version: version, detachedPayloadVerified: true,
+        inputs: inputs, installed: installed, executableSHA256: inputs.executableSHA256,
+        detachedPayloadVerified: true,
         executionControlsVerified: true)
     }
   }
