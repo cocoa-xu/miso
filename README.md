@@ -14,12 +14,12 @@ executed. Base provisioning uses the target's package-manager runtime, not a hos
 Homebrew installation. This is not a fully static binary.
 
 This is an in-progress native migration. The commands below work without starting
-a virtual machine. The experimental `restore` command connects the native vanilla
-stages, with single-command offline acceptance on macOS 26.6.2. Base currently
-exposes native provisioning stages and an experimental replay build, with fresh
-single-command offline acceptance on macOS 26.6.2. Its Base output has also passed
-separate automated boot, SSH, Safari automation and VNC input checks on a disposable
-copy; construction still never starts a VM. Upgrade execution is not yet exposed.
+a virtual machine. The experimental `restore` and `base build` commands have
+single-command offline acceptance on macOS 15.6.1 (24G90), 26.6.2 (25G83) and
+27.0 (26A428). Their Base outputs also passed separate automated boot, SSH,
+Safari automation and VNC input checks on disposable copies; construction still
+never starts a VM. The 15.6.1 acceptance retains reviewed first-boot diagnostic
+warnings; it is not a zero-diagnostics claim. Upgrade execution is not yet exposed.
 A recognized profile is not a claim of native end-to-end validation. Write stages
 fail closed on unvalidated host ABIs.
 
