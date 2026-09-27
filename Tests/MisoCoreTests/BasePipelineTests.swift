@@ -115,3 +115,35 @@ private func buildRecipe() -> BaseBuildRecipe {
   }
   #expect(journal.record.commands.count == 11)
 }
+
+@Test func completedStagePruningPreservesEvidenceAndDoesNotFollowLinks() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let outer = try ExecutionJournal(
+    output: temporary.url.appendingPathComponent("build"), operation: "base-build")
+  let stage = outer.output.appendingPathComponent("01-static")
+  let child = try ExecutionJournal(output: stage, operation: "base-static")
+  let volume = try GuestVolume(stage)
+  try volume.makeDirectories("bundle", uid: getuid(), gid: getgid())
+  try volume.write("bundle/disk.img", data: Data("fixture".utf8), uid: getuid(), gid: getgid())
+  try volume.makeDirectories("execution-root/nested", uid: getuid(), gid: getgid())
+  let sentinel = temporary.url.appendingPathComponent("preserved")
+  try SafeFile.writeNew(Data("keep".utf8), to: sentinel)
+  #expect(symlink(sentinel.path, try volume.path("execution-root/link").path) == 0)
+  #expect(throws: (any Error).self) {
+    try BaseStageWorkspace.prune(stage, image: true, journal: outer)
+  }
+  #expect(try volume.contains("bundle/disk.img"))
+  try child.finish(["accepted": true])
+  try BaseStageWorkspace.prune(stage, image: false, journal: outer)
+  #expect(try !volume.contains("execution-root"))
+  #expect(try volume.contains("bundle/disk.img"))
+  #expect(try SafeFile.read(sentinel, limit: 8) == Data("keep".utf8))
+  try BaseStageWorkspace.prune(stage, image: true, journal: outer)
+  #expect(try !volume.contains("bundle/disk.img"))
+  #expect(try volume.contains("journal.json"))
+  #expect(try SafeFile.read(sentinel, limit: 8) == Data("keep".utf8))
+  #expect(throws: (any Error).self) {
+    try BaseStageWorkspace.prune(temporary.url, image: true, journal: outer)
+  }
+}
