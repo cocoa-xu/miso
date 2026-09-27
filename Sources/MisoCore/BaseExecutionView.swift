@@ -6,10 +6,13 @@ enum BaseExecutionView {
     case mountedSystem
     case copiedTools
 
-    static func select(_ target: MacOSRelease) throws -> Self {
+    static func select(_ target: MacOSRelease, hostBuild: String? = nil) throws -> Self {
       switch try RestoreProfile.select(target).family {
-      case .sequoia, .goldenGate: .mountedSystem
-      case .tahoe: .copiedTools
+      case .sequoia: return .mountedSystem
+      case .tahoe: return .copiedTools
+      case .goldenGate:
+        let host = try hostBuild ?? HostInfo.current().productBuild
+        return target.build == "26A434" && host == "26A428" ? .copiedTools : .mountedSystem
       }
     }
   }
@@ -57,7 +60,7 @@ enum BaseExecutionView {
     guard chmod(root.path, 0o700) == 0 else {
       throw MisoError.system("Restrict execution root", errno)
     }
-    try Artifacts.requireSpace(12 << 30, at: journal.output)
+    try Artifacts.requireSpace((target.build == "26A434" ? 20 : 12) << 30, at: journal.output)
     let session = try DiskImageSession(image: image, readOnly: true, journal: journal)
     return try session.withAttachment { session in
       let main = try BaseImageStage.mainContainer(session)
@@ -82,8 +85,8 @@ enum BaseExecutionView {
       }
       let bindings = try firmlinks(firmlinkText)
       var originals: [(String, String)] = []
-      let resign = target.build == "25G83"
-      if try MacOSVersion(target.version).major == 26 && !resign {
+      let resign = ["25G83", "26A434"].contains(target.build)
+      if !resign {
         throw MisoError.unsupported("Base execution view for target build \(target.build)")
       }
       func copy(_ source: URL, _ relative: String, device: dev_t) throws {
@@ -137,6 +140,7 @@ enum BaseExecutionView {
             try isExecutable(destination)
           {
             let digest = try SafeFile.sha256(source)
+            try AppleCode.validate(source)
             guard try SafeFile.sha256(destination) == digest else {
               throw MisoError.invalid("Execution copy hash mismatch")
             }
@@ -169,14 +173,21 @@ enum BaseExecutionView {
       for offset in stride(from: 0, to: originals.count, by: 48) {
         let group = originals[offset..<min(offset + 48, originals.count)]
         try journal.run(
+          "remove-execution-signatures",
+          NativeCommand(
+            .codesign,
+            arguments: ["--remove-signature"]
+              + group.map { root.appendingPathComponent($0.0).path }, timeout: 180))
+        try journal.run(
           "sign-execution-tools",
           NativeCommand(
             .codesign,
-            arguments: ["--force", "--sign", "-"]
+            arguments: ["--sign", "-", "--timestamp=none"]
               + group.map { root.appendingPathComponent($0.0).path }, timeout: 180))
       }
       let executableRecords = try originals.map {
-        Executable(
+        try AppleCode.validateLocalTool(root.appendingPathComponent($0.0))
+        return Executable(
           path: $0.0, originalSHA256: $0.1,
           executionSHA256: try SafeFile.sha256(root.appendingPathComponent($0.0)))
       }

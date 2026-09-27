@@ -242,6 +242,11 @@ volumes are suitable for input archives, not working images.
 `base bootstrap --source bundle --archive archived-inputs --output new-stage`
 installs the archive's `homebrew-sources` resource on a clone. It requires root and
 includes bounded guest execution controls and detached payload verification.
+On the validated 26A428 host, the 26A434 target also uses a temporary copied
+execution view because launching its original System executables is rejected.
+Each copied executable is authenticated against its Apple signature before its
+signature is replaced locally without entitlements; both hashes are recorded.
+The image's original executables and the host security settings remain unchanged.
 The temporary execution view is not part of the exported bundle. This experimental
 stage does not install the complete Base package set or prove VM bootability.
 Use only trusted package inputs; a chroot is not a virtual-machine security boundary.
