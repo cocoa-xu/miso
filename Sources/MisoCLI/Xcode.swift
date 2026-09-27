@@ -11,7 +11,46 @@ struct Xcode: AsyncParsableCommand {
       InstallApplication.self, InstallPackages.self, InstallBottles.self, InstallRuntime.self,
       InstallMetal.self, PrepareGems.self, InstallGems.self, PrepareCasks.self, InstallCasks.self,
       PrepareSimulatorTools.self, InstallSimulatorTools.self,
+      PrepareTuist.self, InstallTuist.self,
     ])
+
+  struct InstallTuist: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "install-tuist",
+      abstract: "Register and pin the prepared Tuist CLI with mise in an offline clone.")
+    @Option var source: String
+    @Option var prepared: String
+    @Option var output: String
+    @Option var username = "admin"
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        await XcodeTuistInstallation.install(
+          source: fileURL(source), prepared: fileURL(prepared), output: fileURL(output),
+          username: username, cancellation: cancellation.token))
+    }
+  }
+
+  struct PrepareTuist: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "prepare-tuist",
+      abstract: "Resolve and verify the stable Tuist CLI from its pinned official tap.")
+    @Option var targetVersion: String
+    @Option var targetBuild: String
+    @Option var cache: String?
+    @Option var output: String
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        await XcodeTuistInputs.prepare(
+          target: .init(version: targetVersion, build: targetBuild), output: fileURL(output),
+          cache: cache.map(fileURL), cancellation: cancellation.token))
+    }
+  }
 
   struct PrepareSimulatorTools: AsyncParsableCommand {
     static let configuration = CommandConfiguration(

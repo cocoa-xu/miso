@@ -73,8 +73,9 @@ int miso_guest_policy(const char *root, const char *username, const char *capabi
     bool ruby = strcmp(capability, "ruby") == 0;
     bool git = strcmp(capability, "git") == 0;
     bool cask = strcmp(capability, "cask") == 0;
+    bool mise = strcmp(capability, "mise") == 0;
     bool brew = strcmp(capability, "brew") == 0 || cask;
-    if (!readonly && !ruby && !git && !brew && strcmp(capability, "base")) return EINVAL;
+    if (!readonly && !ruby && !git && !brew && !mise && strcmp(capability, "base")) return EINVAL;
     policy_buffer policy = {buffer, capacity, 0, 0};
     append(&policy, "(version 1)(allow default)(deny file-write*)(deny network*)"
                     "(deny mach-lookup)(deny process-info* (target others))"
@@ -96,6 +97,13 @@ int miso_guest_policy(const char *root, const char *username, const char *capabi
         aliases(&policy, root, "subpath", "/private/tmp");
         aliases(&policy, root, "subpath", home);
         if (cask) aliases(&policy, root, "subpath", "/Applications/Kiro CLI.app");
+        if (mise) {
+            const char *directories[] = {".config/mise", ".local/share/mise", ".local/state/mise"};
+            for (size_t i = 0; i < 3; i++) {
+                snprintf(home, sizeof(home), "/Users/%s/%s", username, directories[i]);
+                aliases(&policy, root, "subpath", home);
+            }
+        }
         snprintf(home, sizeof(home), "/Users/%s/.homebrew", username);
         aliases(&policy, root, "subpath", home);
         if (ruby) {

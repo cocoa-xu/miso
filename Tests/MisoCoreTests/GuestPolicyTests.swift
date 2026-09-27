@@ -53,4 +53,14 @@ import Testing
     #expect(!cask.1.contains("(subpath \"/Applications\")"))
     #expect(!policy(capability: "brew").1.contains("/Applications/"))
   }
+
+  @Test func miseCannotWriteUnrelatedHomeConfiguration() {
+    let value = policy(capability: "mise")
+    #expect(value.0 == 0)
+    #expect(value.1.contains("(deny network*)"))
+    #expect(value.1.contains("(subpath \"/Users/admin/.config/mise\")"))
+    #expect(value.1.contains("(subpath \"/Users/admin/.local/share/mise\")"))
+    #expect(!value.1.contains("(subpath \"/Users/admin/.config\")"))
+    #expect(!value.1.contains("(subpath \"/Users/admin/.local\")"))
+  }
 }
