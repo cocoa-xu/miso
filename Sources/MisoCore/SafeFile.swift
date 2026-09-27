@@ -155,7 +155,13 @@ public enum SafeFile {
   }
 
   public static func hex(_ bytes: some Sequence<UInt8>) -> String {
-    bytes.map { String(format: "%02x", $0) }.joined()
+    let digits = Array("0123456789abcdef".utf8)
+    var output: [UInt8] = []
+    for byte in bytes {
+      output.append(digits[Int(byte >> 4)])
+      output.append(digits[Int(byte & 15)])
+    }
+    return String(decoding: output, as: UTF8.self)
   }
 
   public static func validateSHA256(_ value: String) throws {
