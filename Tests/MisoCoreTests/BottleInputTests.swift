@@ -211,3 +211,29 @@ private func bottleIndex(annotations changes: [String: String] = [:], duplicate:
     try HomebrewLifecycle.probes([bottleFormula(name: "python@3.13", version: "3.13-rc1")])
   }
 }
+
+@Test func bottleCompatibilityRejectsAnIncompatibleNewerDependency() throws {
+  let dependency: JSONValue = .object([
+    "full_name": .string("example"), "version": .string("1.2.0"),
+    "revision": .integer(0), "compatibility_version": .integer(5),
+  ])
+  let tab: JSONValue = .object(["runtime_dependencies": .array([dependency])])
+  let formulae = ["example": bottleFormula()]
+  try HomebrewBottleInputs.validateDependencies(
+    tab, formulae: formulae, selected: ["example"], compatibilityVersions: ["example": 5])
+  #expect(throws: MisoError.self) {
+    try HomebrewBottleInputs.validateDependencies(
+      tab, formulae: formulae, selected: ["example"], compatibilityVersions: ["example": 6])
+  }
+  let target = RestoreProfile.supported[0].release
+  #expect(
+    try HomebrewResolution.compatibilityVersion(
+      Data("{\"compatibility_version\":6}".utf8), target: target) == 6)
+  #expect(
+    try HomebrewResolution.compatibilityVersion(
+      Data("{\"compatibility_version\":null}".utf8), target: target) == nil)
+  #expect(throws: MisoError.self) {
+    try HomebrewResolution.compatibilityVersion(
+      Data("{\"compatibility_version\":-1}".utf8), target: target)
+  }
+}

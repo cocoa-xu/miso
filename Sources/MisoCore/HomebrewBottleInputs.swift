@@ -53,6 +53,7 @@ public enum HomebrewBottleInputs {
     let receipt: HomebrewResolution.Receipt
     let sha256: String
     let formulae: [HomebrewResolution.Formula]
+    let compatibilityVersions: [String: Int]
   }
 
   static func resolve(
@@ -75,6 +76,7 @@ public enum HomebrewBottleInputs {
       }
       _ = try Artifacts.resolve(record, under: resolution, cancellation: cancellation)
     }
+    var compatibilityVersions: [String: Int] = [:]
     for (name, formula) in receipt.formulae {
       let data = try SafeFile.read(documents.path("metadata/\(name).json"), limit: 8 << 20)
       guard
@@ -82,6 +84,8 @@ public enum HomebrewBottleInputs {
           == formula,
         try SafeFile.sha256(documents.path("metadata/\(name).rb")) == formula.sourceSHA256
       else { throw MisoError.invalid("Formula differs from resolution: \(name)") }
+      compatibilityVersions[name] = try HomebrewResolution.compatibilityVersion(
+        data, target: receipt.target)
     }
     guard Set(names).count == names.count else {
       throw MisoError.invalid("Duplicate bottle selection")
@@ -100,7 +104,8 @@ public enum HomebrewBottleInputs {
     }
     return Resolved(
       receipt: receipt, sha256: resolutionHash,
-      formulae: receipt.installOrder.filter { selected.contains($0) }.map { receipt.formulae[$0]! })
+      formulae: receipt.installOrder.filter { selected.contains($0) }.map { receipt.formulae[$0]! },
+      compatibilityVersions: compatibilityVersions)
   }
 
   public static func load(
@@ -122,7 +127,9 @@ public enum HomebrewBottleInputs {
       let index = try Artifacts.record(indexURL, relativeTo: bottles)
       let tab = try parseIndex(
         SafeFile.read(indexURL, limit: 8 << 20), formula: formula, bytes: archive.bytes)
-      try validateDependencies(tab, formulae: resolved.receipt.formulae, selected: selected)
+      try validateDependencies(
+        tab, formulae: resolved.receipt.formulae, selected: selected,
+        compatibilityVersions: resolved.compatibilityVersions)
       let entries: [TarPayload.Entry]
       do {
         entries = try TarPayload.inspect(
@@ -174,7 +181,8 @@ public enum HomebrewBottleInputs {
   }
 
   static func validateDependencies(
-    _ tab: JSONValue, formulae: [String: HomebrewResolution.Formula], selected: Set<String>
+    _ tab: JSONValue, formulae: [String: HomebrewResolution.Formula], selected: Set<String>,
+    compatibilityVersions: [String: Int] = [:]
   ) throws {
     guard case .object(let object) = tab,
       case .array(let dependencies) = object["runtime_dependencies"]
@@ -187,6 +195,15 @@ public enum HomebrewBottleInputs {
         revision >= 0, formulae[name] != nil, selected.contains(name)
       else { throw MisoError.unsupported("Bottle runtime dependencies differ from resolution") }
       try PackageRequest(name: name, version: version).validate()
+      if let builtCompatibility = fields["compatibility_version"] {
+        guard case .integer(let expected) = builtCompatibility, expected >= 0 else {
+          throw MisoError.invalid("Invalid bottle dependency compatibility version")
+        }
+        if let actual = compatibilityVersions[name], actual != expected {
+          throw MisoError.unsupported(
+            "Bottle requires \(name) compatibility \(expected), selected \(actual)")
+        }
+      }
     }
   }
 }

@@ -165,6 +165,18 @@ public enum HomebrewResolution {
     return value
   }
 
+  static func compatibilityVersion(_ data: Data, target: MacOSRelease) throws -> Int? {
+    let original = try object(data)
+    let tag = try tag(for: target)
+    let variation = (original["variations"] as? [String: [String: Any]])?[tag] ?? [:]
+    let value = original.merging(variation) { _, new in new }
+    guard let field = value["compatibility_version"], !(field is NSNull) else { return nil }
+    guard let version = field as? Int, version >= 0 else {
+      throw MisoError.invalid("Invalid formula compatibility version")
+    }
+    return version
+  }
+
   static func compatible(
     _ requirements: [[String: Any]], target: MacOSRelease, xcode: XcodeConfiguration? = nil
   ) throws {

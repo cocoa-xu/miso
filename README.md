@@ -262,6 +262,8 @@ Use only trusted package inputs; a chroot is not a virtual-machine security boun
 
 `base bottles download --resolution resolved --output bottle-directory` downloads
 the resolved dependency closure and verifies its digests, OCI indexes and layouts.
+Explicit dependency compatibility versions must match the selected formula metadata;
+an incompatible newer library is rejected before image installation.
 `--cache bottle-directory` is strict offline replay. `--reuse stopped-download`
 reuses verified completed files from the same resolution and downloads missing pairs;
 it does not modify the previous output. Add `--formula name` to select a closure.
