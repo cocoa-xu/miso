@@ -238,6 +238,7 @@ public enum HomebrewResolution {
       let directory = journal.output.appendingPathComponent("metadata")
       try SafeFile.makeDirectory(directory)
       var documents: [String: Data] = [:]
+      var catalog: HomebrewFormulaCatalog?
       func document(_ name: String) async throws -> Data {
         try PackageRequest(name: name).validate()
         if let data = documents[name] { return data }
@@ -249,9 +250,18 @@ public enum HomebrewResolution {
         if let metadata {
           data = try SafeFile.read(try GuestVolume(metadata).path(name + ".json"), limit: 8 << 20)
         } else {
-          data = try await HTTPData.get(
-            URL(string: "https://formulae.brew.sh/api/formula/\(name).json")!,
-            maximumBytes: 8 << 20, cancellation: journal.cancellation)
+          if catalog == nil {
+            let bytes = try await HTTPData.get(
+              URL(string: "https://formulae.brew.sh/api/formula.json")!,
+              maximumBytes: HomebrewFormulaCatalog.maximumBytes, cancellation: journal.cancellation)
+            let snapshot = try HomebrewFormulaCatalog(bytes)
+            try journal.setMetadata("catalogSHA256", value: SafeFile.sha256(bytes))
+            try journal.setMetadata("catalogRevision", value: snapshot.revision)
+            try journal.setMetadata("catalogFormulaCount", value: snapshot.count)
+            catalog = snapshot
+          }
+          guard let catalog else { throw MisoError.invalid("Missing formula catalog") }
+          data = try catalog.document(name)
         }
         try SafeFile.writeNew(data, to: directory.appendingPathComponent(name + ".json"))
         documents[name] = data
