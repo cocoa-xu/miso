@@ -1,0 +1,78 @@
+import Darwin
+import Foundation
+
+@MainActor
+public enum RestorePipeline {
+  public struct Receipt: Encodable, Sendable {
+    public let profile: RestoreProfile
+    public let bundle: String
+    public let files: [ImageBundle.FileRecord]
+    public let configuration: VirtualHardware.ValidationReceipt
+  }
+
+  public static func run(
+    ipsw: URL, configuration: ImageConfiguration, packages: URL, output: URL,
+    diskBytes: UInt64 = 40 << 30, cancellation: CancellationToken? = nil
+  ) async throws -> Receipt {
+    guard geteuid() == 0 else {
+      throw MisoError.invalid("Offline restore requires administrator privileges")
+    }
+    try configuration.validate()
+    _ = try APFSPrivate.requireHost()
+    _ = try GuestVolume(packages)
+    let journal = try ExecutionJournal(
+      output: output, operation: "restore-vanilla", cancellation: cancellation)
+    let prepared = journal.output.appendingPathComponent("prepared")
+    let system = journal.output.appendingPathComponent("system")
+    let volumes = journal.output.appendingPathComponent("volumes")
+    let data = journal.output.appendingPathComponent("data")
+    let tools = journal.output.appendingPathComponent("tools")
+    let material = journal.output.appendingPathComponent("policy-material")
+    let boot = journal.output.appendingPathComponent("boot")
+    let assembled = journal.output.appendingPathComponent("assembled")
+    do {
+      try journal.setMetadata("stage", value: "prepare")
+      let inputs = try await RestorePreparation.run(
+        ipsw: ipsw, configuration: configuration, output: prepared,
+        cancellation: journal.cancellation)
+      try journal.setMetadata("target", value: inputs.profile.release)
+      try journal.setMetadata("stage", value: "seal-system")
+      _ = try SystemConstruction.run(
+        prepared: prepared, output: system, diskBytes: diskBytes, cancellation: journal.cancellation
+      )
+      try journal.setMetadata("stage", value: "create-volumes")
+      _ = try VolumeConstruction.run(
+        prepared: prepared, systemStage: system, output: volumes, cancellation: journal.cancellation
+      )
+      try journal.setMetadata("stage", value: "populate-data")
+      _ = try DataConstruction.run(
+        prepared: prepared, volumeStage: volumes, output: data, cancellation: journal.cancellation)
+      try journal.setMetadata("stage", value: "install-clt")
+      _ = try ToolsConstruction.run(
+        prepared: prepared, dataStage: data, packages: packages, output: tools,
+        cancellation: journal.cancellation)
+      try journal.setMetadata("stage", value: "prepare-policy-material")
+      _ = try KernelCollection.prepare(
+        prepared: prepared, output: material, cancellation: journal.cancellation)
+      try journal.setMetadata("stage", value: "personalize-boot")
+      _ = try await BootPersonalization.run(
+        prepared: prepared, toolsStage: tools, materialStage: material, output: boot,
+        cancellation: journal.cancellation)
+      try journal.setMetadata("stage", value: "assemble-bundle")
+      let assembly = try BundleAssembly.run(
+        prepared: prepared, toolsStage: tools, bootStage: boot, output: assembled,
+        cancellation: journal.cancellation)
+      try journal.setMetadata("stage", value: "validate-configuration")
+      let validation = try VirtualHardware.validateBundle(
+        assembled.appendingPathComponent("bundle"))
+      let result = Receipt(
+        profile: inputs.profile, bundle: "assembled/bundle", files: assembly.files,
+        configuration: validation)
+      try journal.finish(result)
+      return result
+    } catch {
+      try journal.fail(error)
+      throw error
+    }
+  }
+}

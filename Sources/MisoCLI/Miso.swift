@@ -10,7 +10,7 @@ struct Miso: AsyncParsableCommand {
     version: "0.1.0-dev",
     subcommands: [
       Profiles.self, Configuration.self, IPSW.self, Disk.self, Decode.self, Identity.self,
-      Bundle.self, Upgrade.self, Prepare.self,
+      Bundle.self, Upgrade.self, Prepare.self, Personalize.self, Restore.self,
     ]
   )
 }

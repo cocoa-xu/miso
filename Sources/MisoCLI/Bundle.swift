@@ -5,7 +5,25 @@ import MisoCore
 struct Bundle: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     abstract: "Check bundle integrity or validate a VM configuration without creating a VM.",
-    subcommands: [Verify.self, Validate.self])
+    subcommands: [Verify.self, Validate.self, Assemble.self])
+
+  struct Assemble: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Install personalized boot payloads and audit a new image bundle offline.")
+    @Option var prepared: String
+    @Option var toolsStage: String
+    @Option var bootStage: String
+    @Option var output: String
+
+    @MainActor func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        BundleAssembly.run(
+          prepared: fileURL(prepared), toolsStage: fileURL(toolsStage),
+          bootStage: fileURL(bootStage), output: fileURL(output), cancellation: cancellation.token))
+    }
+  }
 
   struct Verify: ParsableCommand {
     static let configuration = CommandConfiguration(

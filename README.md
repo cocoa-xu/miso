@@ -7,13 +7,16 @@ or separately installed command-line helpers. ArgumentParser and ZIPFoundation
 are pinned source dependencies compiled into the executable. Cryptography,
 compression and encrypted archives use macOS libraries directly; HTTPS uses
 URLSession. System image attachment and APFS administration currently use
-`hdiutil` and `diskutil` at fixed system paths. This is not a fully static binary
-or a claim that all future pipeline stages are already self-contained.
+`hdiutil`, `diskutil` and Apple's APFS checker at fixed system paths. Restore APFS
+tools come from the verified IPSW and require valid Apple signatures. CLT staging
+uses Apple's `pkgutil`, `lsbom`, `ditto` and `makewhatis`; package scripts are never
+executed. This is not a fully static binary.
 
 This is an in-progress native migration. The commands below work without starting
-a virtual machine. Complete restore, Base provisioning and upgrade execution are
-not yet exposed by this package. A recognized profile is not a claim of native
-end-to-end validation.
+a virtual machine. The experimental `restore` command connects the native vanilla
+stages; its end-to-end acceptance is still in progress. Base provisioning and
+upgrade execution are not yet exposed. A recognized profile is not a claim of
+native end-to-end validation. Write stages fail closed on unvalidated host ABIs.
 
 ```sh
 make build
@@ -35,6 +38,23 @@ Configuration defaults use `admin/admin`, disable FileVault, and request SSH/VNC
 They are intended for isolated test systems; change credentials before exposing a
 guest to an untrusted network. Rosetta and ARM Linux translation are opt-in.
 Validating a configuration does not apply it to an image.
+
+```sh
+sudo .build/out/Products/Release/miso restore restore.ipsw \
+  --packages /path/to/pinned-clt-packages --config image.json --output new-build
+```
+
+Outputs must be new directories. Stages retain private journals, host/target
+versions, receipts and failure diagnostics. `prepare`, `disk seal`, `disk volumes`,
+`disk populate`, `disk tools`, `personalize material`, `personalize boot` and
+`bundle assemble` expose the same stages individually. Completed inputs are
+digest-bound; failed stages are not resumable inputs. Disk mutations operate on
+new, owned images or clones, not supplied device numbers. Keep intermediate
+artifacts private: they contain configuration credentials and identity material.
+
+The final bundle is under `assembled/bundle`. Offline validation is distinct from
+runtime and cross-Mac acceptance; manifests do not mark either as verified.
+Network access is required for Apple archive keys and personalization tickets.
 
 `disk layout` calculates a GPT layout. `disk seed` copies a digest-checked raw APFS
 System container into a new sparse GPT image with reserved iSC and Recovery
