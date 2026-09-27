@@ -60,14 +60,25 @@ struct BootTree {
     )
   }
 
-  static func hash384(_ file: URL) throws -> Data {
+  static func hash384(_ file: URL, cancellation: CancellationToken? = nil) throws -> Data {
     let handle = try SafeFile.openRegular(file)
     defer { try? handle.close() }
+    let expectedSize = try SafeFile.size(handle)
     var hash = SHA384()
-    while true {
-      let data = try handle.read(upToCount: 8 << 20) ?? Data()
-      if data.isEmpty { break }
-      hash.update(data: data)
+    var consumed: UInt64 = 0
+    while consumed < expectedSize {
+      try autoreleasepool {
+        try cancellation?.check()
+        let data = try handle.readExactly(Int(min(8 << 20, expectedSize - consumed)))
+        hash.update(data: data)
+        consumed += UInt64(data.count)
+      }
+    }
+    guard
+      try (handle.read(upToCount: 1) ?? Data()).isEmpty,
+      try SafeFile.size(handle) == expectedSize
+    else {
+      throw MisoError.invalid("Input size changed while hashing")
     }
     return Data(hash.finalize())
   }

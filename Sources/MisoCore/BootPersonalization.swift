@@ -154,7 +154,7 @@ public enum BootPersonalization {
           try name == "SystemOS"
           ? cryptexSystem : componentPath("Cryptex1," + name, identity: macos, inputs: inputs)
         guard
-          try BootTree.hash384(origin)
+          try BootTree.hash384(origin, cancellation: journal.cancellation)
             == Image4.manifestValue(cryptexTicket, section: type, name: "DGST")
         else {
           throw MisoError.invalid("Cryptex signed digest mismatch")
