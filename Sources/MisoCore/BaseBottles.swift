@@ -68,15 +68,8 @@ public enum BaseBottles {
           let app = try guest.data.directory(configuration.applicationPath).url
           _ = try XcodeArchive.inspect(app, target: target, configuration: configuration)
           try AppleCode.validate(app)
-          let selected = try guest.data.path(
-            "private/var/db/xcode_select_link", allowLeafLink: true)
-          guard
-            try FileManager.default.destinationOfSymbolicLink(atPath: selected.path)
-              == "/" + configuration.applicationPath + "/Contents/Developer"
-          else {
-            throw MisoError.invalid(
-              "Installed developer selection differs from bottle requirements")
-          }
+          try XcodeApplication.requireSelection(
+            "/" + configuration.applicationPath + "/Contents/Developer", data: guest.data)
         }
         let before = try installedVersions(
           guest.run(

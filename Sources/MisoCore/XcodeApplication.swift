@@ -115,8 +115,26 @@ public enum XcodeApplication {
     } else if errno != ENOENT {
       throw MisoError.system("Inspect developer selection", errno)
     }
-    guard symlink(developerDirectory, selection.path) == 0, lchown(selection.path, 0, 0) == 0 else {
+    guard symlink(developerDirectory, selection.path) == 0, lchown(selection.path, 0, 0) == 0,
+      lchmod(selection.path, 0o755) == 0
+    else {
       throw MisoError.system("Select guest Xcode", errno)
     }
+    try requireSelection(developerDirectory, data: data)
+  }
+
+  static func requireSelection(_ developerDirectory: String, data: GuestVolume) throws {
+    let selection = try data.path("private/var/db/xcode_select_link", allowLeafLink: true)
+    try validateSelectionMetadata(FileMetadata.inspect(selection))
+    guard
+      try FileManager.default.destinationOfSymbolicLink(atPath: selection.path)
+        == developerDirectory
+    else { throw MisoError.invalid("Installed Xcode developer selection differs") }
+  }
+
+  static func validateSelectionMetadata(_ info: stat) throws {
+    guard info.st_mode & S_IFMT == S_IFLNK, info.st_mode & 0o7777 == 0o755,
+      info.st_uid == 0, info.st_gid == 0
+    else { throw MisoError.invalid("Xcode developer selection must be a root-owned 0755 symlink") }
   }
 }

@@ -109,11 +109,8 @@ public enum XcodeCompletion {
   }
 
   static func validateSelection(_ data: GuestVolume, configuration: XcodeConfiguration) throws {
-    let selection = try data.path("private/var/db/xcode_select_link", allowLeafLink: true)
-    guard
-      try FileManager.default.destinationOfSymbolicLink(atPath: selection.path)
-        == "/" + configuration.applicationPath + "/Contents/Developer"
-    else { throw MisoError.invalid("Final Xcode developer selection differs") }
+    try XcodeApplication.requireSelection(
+      "/" + configuration.applicationPath + "/Contents/Developer", data: data)
     let license = try data.plist("Library/Preferences/com.apple.dt.Xcode.plist")
     guard license["IDELastGMLicenseAgreedTo"] as? String == "EA2002",
       license["IDEXcodeVersionForAgreedToGMLicense"] as? String == configuration.version

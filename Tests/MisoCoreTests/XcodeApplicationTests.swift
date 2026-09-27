@@ -1,7 +1,24 @@
+import Darwin
 import Foundation
 import Testing
 
 @testable import MisoCore
+
+@Test func xcodeSelectionRequiresReadableRootOwnedLink() throws {
+  var info = stat()
+  info.st_mode = S_IFLNK | 0o755
+  try XcodeApplication.validateSelectionMetadata(info)
+  for mode: mode_t in [S_IFLNK | 0o700, S_IFLNK | 0o777, S_IFLNK | 0o644, S_IFREG | 0o755] {
+    var invalid = info
+    invalid.st_mode = mode
+    #expect(throws: MisoError.self) { try XcodeApplication.validateSelectionMetadata(invalid) }
+  }
+  info.st_uid = 501
+  #expect(throws: MisoError.self) { try XcodeApplication.validateSelectionMetadata(info) }
+  info.st_uid = 0
+  info.st_gid = 20
+  #expect(throws: MisoError.self) { try XcodeApplication.validateSelectionMetadata(info) }
+}
 
 @Test func xcodeStagesPreserveBaseCompletionWithoutCompletingXcode() throws {
   let baseStages = ["base-static", "base-cleanup"]
