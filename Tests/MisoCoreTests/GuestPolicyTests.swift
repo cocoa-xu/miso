@@ -42,4 +42,15 @@ import Testing
     var buffer = [CChar](repeating: 0, count: 8)
     #expect(miso_guest_policy("/tmp/guest", "admin", "base", &buffer, buffer.count) == EOVERFLOW)
   }
+
+  @Test func casksCanWriteOnlyTheirReviewedApplication() {
+    let cask = policy(capability: "cask")
+    #expect(cask.0 == 0)
+    #expect(cask.1.contains("(deny network*)"))
+    #expect(cask.1.contains("(deny mach-lookup)"))
+    #expect(cask.1.contains("(subpath \"/Applications/Kiro CLI.app\")"))
+    #expect(cask.1.contains("/private/tmp/guest/System/Volumes/Data/Applications/Kiro CLI.app"))
+    #expect(!cask.1.contains("(subpath \"/Applications\")"))
+    #expect(!policy(capability: "brew").1.contains("/Applications/"))
+  }
 }

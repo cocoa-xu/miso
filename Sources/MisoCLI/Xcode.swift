@@ -9,8 +9,46 @@ struct Xcode: AsyncParsableCommand {
       Defaults.self, PrepareArchive.self, PrepareMetal.self, PreparePackages.self,
       PrepareRuntime.self,
       InstallApplication.self, InstallPackages.self, InstallBottles.self, InstallRuntime.self,
-      InstallMetal.self, PrepareGems.self, InstallGems.self,
+      InstallMetal.self, PrepareGems.self, InstallGems.self, PrepareCasks.self, InstallCasks.self,
     ])
+
+  struct InstallCasks: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "install-casks",
+      abstract: "Install prepared developer casks into an offline image clone.")
+    @Option var source: String
+    @Option var prepared: String
+    @Option var output: String
+    @Option var username = "admin"
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        await XcodeCaskInstallation.install(
+          source: fileURL(source), prepared: fileURL(prepared), output: fileURL(output),
+          username: username, cancellation: cancellation.token))
+    }
+  }
+
+  struct PrepareCasks: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "prepare-casks",
+      abstract: "Verify and expand the standard developer casks without installing them.")
+    @Option var targetVersion: String
+    @Option var targetBuild: String
+    @Option var cache: String?
+    @Option var output: String
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        await XcodeCaskInputs.prepare(
+          target: .init(version: targetVersion, build: targetBuild), output: fileURL(output),
+          cache: cache.map(fileURL), cancellation: cancellation.token))
+    }
+  }
 
   struct PrepareGems: AsyncParsableCommand {
     static let configuration = CommandConfiguration(

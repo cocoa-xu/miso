@@ -4,7 +4,7 @@ import Foundation
 final class GuestExecution {
   enum Capability: String {
     case readOnly = "read-only"
-    case base, ruby, git, brew
+    case base, ruby, git, brew, cask
   }
   let root: URL
   let data: GuestVolume

@@ -72,7 +72,8 @@ int miso_guest_policy(const char *root, const char *username, const char *capabi
     bool readonly = strcmp(capability, "read-only") == 0;
     bool ruby = strcmp(capability, "ruby") == 0;
     bool git = strcmp(capability, "git") == 0;
-    bool brew = strcmp(capability, "brew") == 0;
+    bool cask = strcmp(capability, "cask") == 0;
+    bool brew = strcmp(capability, "brew") == 0 || cask;
     if (!readonly && !ruby && !git && !brew && strcmp(capability, "base")) return EINVAL;
     policy_buffer policy = {buffer, capacity, 0, 0};
     append(&policy, "(version 1)(allow default)(deny file-write*)(deny network*)"
@@ -94,6 +95,7 @@ int miso_guest_policy(const char *root, const char *username, const char *capabi
         aliases(&policy, root, "subpath", "/opt/homebrew");
         aliases(&policy, root, "subpath", "/private/tmp");
         aliases(&policy, root, "subpath", home);
+        if (cask) aliases(&policy, root, "subpath", "/Applications/Kiro CLI.app");
         snprintf(home, sizeof(home), "/Users/%s/.homebrew", username);
         aliases(&policy, root, "subpath", home);
         if (ruby) {
