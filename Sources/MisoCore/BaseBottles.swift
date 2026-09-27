@@ -118,7 +118,8 @@ public enum BaseBottles {
         }
         try FileManager.default.removeItem(at: staging)
         let prefix = try guest.data.path("opt/homebrew")
-        let inventory = try BaseInputArchive.inventory(prefix, cancellation: journal.cancellation)
+        let inventory = try BaseFileTree.inventory(
+          guest.data, path: "opt/homebrew", cancellation: journal.cancellation)
         try BaseFileTree.requireOwnership(
           prefix, entries: inventory,
           uid: guest.account.uid, gid: guest.account.gid)
@@ -137,8 +138,8 @@ public enum BaseBottles {
           throw MisoError.invalid("Target account changed during bottle installation")
         }
         guard
-          try BaseInputArchive.inventory(
-            data.path("opt/homebrew"),
+          try BaseFileTree.inventory(
+            data, path: "opt/homebrew",
             cancellation: journal.cancellation) == payload
         else {
           throw MisoError.invalid("Detached bottle payload verification failed")

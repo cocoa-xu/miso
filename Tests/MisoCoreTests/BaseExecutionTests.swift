@@ -113,3 +113,20 @@ import Testing
   #expect(journal.record.metadata["failureSeconds"] != nil)
   #expect(journal.record.status == .running)
 }
+
+@Test func guestInventoryDoesNotResolveAbsoluteLinksOnTheHost() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let volume = try GuestVolume(temporary.url)
+  let prefix = try volume.path("opt/homebrew", createParents: true)
+  try SafeFile.makeDirectory(prefix)
+  let absolute = "/opt/homebrew/etc/ca-certificates/cert.pem"
+  #expect(symlink(absolute, prefix.appendingPathComponent("absolute").path) == 0)
+  #expect(symlink("../../Library/SDK", prefix.appendingPathComponent("relative").path) == 0)
+  let inventory = try BaseFileTree.inventory(volume, path: "opt/homebrew")
+  #expect(inventory.first { $0.path == "absolute" }?.link == absolute)
+  #expect(inventory.first { $0.path == "relative" }?.link == "../../Library/SDK")
+  #expect(throws: (any Error).self) { try BaseInputArchive.inventory(prefix) }
+  #expect(symlink("../../../outside", prefix.appendingPathComponent("escape").path) == 0)
+  #expect(throws: (any Error).self) { try BaseFileTree.inventory(volume, path: "opt/homebrew") }
+}

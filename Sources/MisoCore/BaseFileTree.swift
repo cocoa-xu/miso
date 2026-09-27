@@ -2,6 +2,14 @@ import Darwin
 import Foundation
 
 enum BaseFileTree {
+  static func inventory(
+    _ volume: GuestVolume, path: String, cancellation: CancellationToken? = nil
+  ) throws -> [BaseInputArchive.Entry] {
+    try BaseInputArchive.inventory(
+      volume.directory(path).url, guestPath: path,
+      cancellation: cancellation)
+  }
+
   static func requireOwnership(
     _ root: URL, entries: [BaseInputArchive.Entry], uid: uid_t, gid: gid_t
   ) throws {

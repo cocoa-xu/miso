@@ -47,7 +47,10 @@ public enum BaseInputArchive {
     public let vmStarted: Bool
   }
 
-  static func inventory(_ source: URL, cancellation: CancellationToken? = nil) throws -> [Entry] {
+  static func inventory(
+    _ source: URL, guestPath: String? = nil, cancellation: CancellationToken? = nil
+  ) throws -> [Entry] {
+    if let guestPath { _ = try SafeFile.relativePath(guestPath) }
     guard source.path == source.resolvingSymlinksInPath().path else {
       throw MisoError.invalid("Input resource root must be canonical")
     }
@@ -80,10 +83,22 @@ public enum BaseInputArchive {
             sha256: try SafeFile.sha256(input, cancellation: cancellation), link: nil))
       case S_IFLNK:
         let link = try FileManager.default.destinationOfSymbolicLink(atPath: url.path)
-        _ = try SafeFile.relativeLink(link, at: relative)
-        guard !link.hasPrefix("/"), !link.contains("\\"), !link.contains("\0"),
-          url.resolvingSymlinksInPath().path.hasPrefix(source.path + "/")
-        else { throw MisoError.invalid("Input symlink escapes resource") }
+        do {
+          if let guestPath {
+            if link.hasPrefix("/") {
+              _ = try SafeFile.relativePath(String(link.dropFirst()))
+            } else {
+              _ = try SafeFile.relativeLink(link, at: guestPath + "/" + relative)
+            }
+          } else {
+            _ = try SafeFile.relativeLink(link, at: relative)
+            guard url.resolvingSymlinksInPath().path.hasPrefix(source.path + "/") else {
+              throw MisoError.invalid("Input symlink escapes resource")
+            }
+          }
+        } catch {
+          throw MisoError.invalid("Invalid symbolic link: \(relative) -> \(link)")
+        }
         entries.append(
           Entry(path: relative, kind: "symlink", mode: mode, bytes: nil, sha256: nil, link: link))
       default: throw MisoError.invalid("Unsupported input resource file type")
