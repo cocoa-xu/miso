@@ -63,11 +63,9 @@ public enum SystemConstruction {
       let root = try inputs.component("SystemVolume", cancellation: journal.cancellation)
       let remap = try inputs.file("timestamp-remap", cancellation: journal.cancellation)
       let signedRoot = try inputs.file("signed-system-root", cancellation: journal.cancellation)
-      let sealTool = try inputs.file("apfs_sealvolume", cancellation: journal.cancellation)
-      let fsck = try inputs.file("fsck_apfs", cancellation: journal.cancellation)
-      guard let sourceRecord = inputs.receipt.derived["OS"],
-        let sealRecord = inputs.receipt.tools["apfs_sealvolume"],
-        let fsckRecord = inputs.receipt.tools["fsck_apfs"]
+      let sealTool = try RestoreTool.prepare("apfs_sealvolume", inputs: inputs, journal: journal)
+      let fsck = try RestoreTool.prepare("fsck_apfs", inputs: inputs, journal: journal)
+      guard let sourceRecord = inputs.receipt.derived["OS"]
       else {
         throw MisoError.invalid("Missing System source or tool record")
       }
@@ -99,8 +97,7 @@ public enum SystemConstruction {
         try journal.setMetadata("stage", value: "seal-system")
         try journal.run(
           "seal-system",
-          NativeCommand.restoreTool(
-            sealTool, sha256: sealRecord.sha256,
+          sealTool.command(
             arguments: [
               "-T", "-H", "sha256", "-I", root.path, "-P", "-R", remap.path, "-y", "-r", "-s",
               inputs.receipt.snapshotName, "/dev/" + system.device,
@@ -112,8 +109,7 @@ public enum SystemConstruction {
             .checkSeal, arguments: ["-I", signedRoot.path, "/dev/" + system.device], timeout: 3600))
         try journal.run(
           "check-system-apfs",
-          NativeCommand.restoreTool(
-            fsck, sha256: fsckRecord.sha256, arguments: ["-n", "/dev/r" + container.device]))
+          fsck.command(arguments: ["-n", "/dev/r" + container.device]))
         let updated = try systemVolume(in: session.containers(), container: container.identifier)
         guard updated.device == system.device else {
           throw MisoError.invalid("System device changed during sealing")

@@ -87,11 +87,8 @@ enum ImageChecks {
     _ session: DiskImageSession, volumes: VolumeConstruction.Receipt, inputs: PreparedInputs,
     journal: ExecutionJournal
   ) throws {
-    let fsck = try inputs.file("fsck_apfs", cancellation: journal.cancellation)
+    let fsck = try RestoreTool.prepare("fsck_apfs", inputs: inputs, journal: journal)
     let signedRoot = try inputs.file("signed-system-root", cancellation: journal.cancellation)
-    guard let checker = inputs.receipt.tools["fsck_apfs"] else {
-      throw MisoError.invalid("Missing APFS checker")
-    }
     try session.withAttachment { session in
       let state = try layout(session, volumes: volumes, journal: journal)
       for kind in VolumeConstruction.Kind.allCases {
@@ -99,8 +96,7 @@ enum ImageChecks {
         try session.verifyOwnership()
         try journal.run(
           "check-" + kind.rawValue,
-          NativeCommand.restoreTool(
-            fsck, sha256: checker.sha256, arguments: ["-n", "/dev/r" + container.device]))
+          fsck.command(arguments: ["-n", "/dev/r" + container.device]))
       }
       guard let main = state[.main] else { throw MisoError.invalid("Missing main container") }
       try journal.run(

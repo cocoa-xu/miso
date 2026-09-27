@@ -98,14 +98,9 @@ public enum VolumeConstruction {
         throw MisoError.invalid("System clone digest mismatch")
       }
       let session = try DiskImageSession(image: destination, readOnly: false, journal: journal)
-      let newfs = try inputs.file("newfs_apfs", cancellation: journal.cancellation)
-      let fsck = try inputs.file("fsck_apfs", cancellation: journal.cancellation)
+      let newfs = try RestoreTool.prepare("newfs_apfs", inputs: inputs, journal: journal)
+      let fsck = try RestoreTool.prepare("fsck_apfs", inputs: inputs, journal: journal)
       let signedRoot = try inputs.file("signed-system-root", cancellation: journal.cancellation)
-      guard let newfsRecord = inputs.receipt.tools["newfs_apfs"],
-        let fsckRecord = inputs.receipt.tools["fsck_apfs"]
-      else {
-        throw MisoError.invalid("Missing prepared APFS tools")
-      }
       for kind in [Kind.isc, .recovery] {
         try session.withAttachment { session in
           let device = try emptyPartition(
@@ -113,9 +108,7 @@ public enum VolumeConstruction {
           try session.verifyOwnership()
           try journal.run(
             "format-" + kind.rawValue,
-            NativeCommand.restoreTool(
-              newfs, sha256: newfsRecord.sha256,
-              arguments: ["-C", "-o", "maxfs=100", device]))
+            newfs.command(arguments: ["-C", "-o", "maxfs=100", device]))
         }
       }
       let identifiers = try session.withAttachment { session in
@@ -193,9 +186,7 @@ public enum VolumeConstruction {
           try session.verifyOwnership()
           try journal.run(
             "check-" + kind.rawValue,
-            NativeCommand.restoreTool(
-              fsck, sha256: fsckRecord.sha256,
-              arguments: ["-n", "/dev/r" + container.device]))
+            fsck.command(arguments: ["-n", "/dev/r" + container.device]))
         }
         guard let main = state[.main], main.identifier == system.system.container else {
           throw MisoError.invalid("System container identity changed")

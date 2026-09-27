@@ -44,6 +44,16 @@ public struct NativeCommand: Sendable {
   public let workingDirectory: URL?
   public let redactedArguments: Set<Int>
   private(set) var appleToolSHA256: String?
+  private(set) var localToolSHA256: String?
+
+  static func localRestoreTool(
+    _ url: URL, sha256: String, arguments: [String], timeout: TimeInterval = 3600
+  ) throws -> Self {
+    try SafeFile.validateSHA256(sha256)
+    var command = try Self(url.path, arguments: arguments, timeout: timeout)
+    command.localToolSHA256 = sha256
+    return command
+  }
 
   static func restoreTool(
     _ url: URL, sha256: String, arguments: [String], timeout: TimeInterval = 3600
@@ -111,11 +121,15 @@ public enum NativeProcess {
     _ command: NativeCommand, stdout: FileHandle, stderr: FileHandle,
     cancellation: CancellationToken? = nil
   ) throws -> ProcessReceipt {
-    if let expected = command.appleToolSHA256 {
-      guard command.executable.path == command.executable.resolvingSymlinksInPath().path,
-        try SafeFile.sha256(command.executable) == expected
+    if let expected = command.appleToolSHA256 ?? command.localToolSHA256 {
+      try SafeFile.requireNoSymlinks(command.executable)
+      guard try SafeFile.sha256(command.executable) == expected
       else { throw MisoError.invalid("Restore executable changed") }
-      try AppleCode.validate(command.executable)
+      if command.appleToolSHA256 != nil {
+        try AppleCode.validate(command.executable)
+      } else {
+        try AppleCode.validateLocalTool(command.executable)
+      }
     }
     let input: FileHandle
     if let url = command.input {

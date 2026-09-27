@@ -8,7 +8,12 @@ are pinned source dependencies compiled into the executable. Cryptography,
 compression and encrypted archives use macOS libraries directly; HTTPS uses
 URLSession. System image attachment and APFS administration currently use
 `hdiutil`, `diskutil` and Apple's APFS checker at fixed system paths. Restore APFS
-tools come from the verified IPSW and require valid Apple signatures. CLT staging
+tools come from the verified IPSW and require valid Apple signatures before use.
+Each construction stage creates locally signed copies without private entitlements
+so OS launch constraints do not require executing the tools from a protected system
+location. Journals retain the original and derived hashes; execution rechecks the
+derived hash and signature. Original inputs and host security settings are unchanged.
+CLT staging
 uses Apple's `pkgutil`, `lsbom`, `ditto` and `makewhatis`; CLT package scripts are not
 executed. Base provisioning uses the target's package-manager runtime, not a host
 Homebrew installation. This is not a fully static binary.
