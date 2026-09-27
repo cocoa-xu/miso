@@ -90,6 +90,10 @@ This replay interface does not yet select the latest non-core packages for you.
 The explicit Base security stage reduces SIP protections and configures automation
 permissions. It is not applied by the Vanilla restore command. Security, settings,
 CA installation and cleanup are also exposed as individual `base` subcommands.
+On macOS 26, a security plan may include `captureReminder` with `schemaVersion: 1`,
+the target `replaydSHA256`, and an ISO-8601 `expiresAt`. This defers capture reminders
+for the already-authorized SSH client until that date; it does not grant access.
+Other macOS families require separate validation before using this policy.
 
 `base static` requires a completed never-booted bundle, the Actions Runner release
 metadata and matching arm64 archive, and a GitHub known-hosts file. It clones the

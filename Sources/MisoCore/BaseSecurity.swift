@@ -12,6 +12,7 @@ public enum BaseSecurity {
     let tccSchemaVersion: Int
     let tartVersion: String
     let preservedScreenSharingRequirement: Data?
+    let captureReminder: BaseCaptureReminder.Policy?
 
     var agent: String { "opt/homebrew/Cellar/tart-guest-agent/\(tartVersion)/bin/tart-guest-agent" }
 
@@ -26,6 +27,7 @@ public enum BaseSecurity {
       for hash in [csrutilSHA256, tccdSHA256, tccSchemaSHA256] { try SafeFile.validateSHA256(hash) }
       try PackageRequest(name: "tart-guest-agent", version: tartVersion).validate()
       _ = try BaseTCC.grants(agent: agent)
+      try captureReminder?.validate(target: target)
     }
   }
 
@@ -116,6 +118,9 @@ public enum BaseSecurity {
       else {
         throw MisoError.invalid("Target security implementation differs from plan")
       }
+      if let reminder = plan.captureReminder {
+        try reminder.verifyImplementation(system.path("usr/libexec/replayd"))
+      }
       return try BaseTCC.schema(
         in: SafeFile.read(tccd, limit: 64 << 20),
         version: plan.tccSchemaVersion, sha256: plan.tccSchemaSHA256)
@@ -198,6 +203,12 @@ public enum BaseSecurity {
       }
       files.append(path)
     }
+    if let reminder = plan.captureReminder {
+      files.append(
+        try BaseCaptureReminder.seed(
+          reminder, data: guest.data, home: home, uid: guest.account.uid,
+          gid: guest.account.gid, grants: grants))
+    }
     let cookie = "private/var/db/com.apple.dt.automationmode/no-auth-required"
     guard !(try guest.data.contains(cookie)) else {
       throw MisoError.invalid("Automation cookie already exists")
@@ -239,6 +250,10 @@ public enum BaseSecurity {
   private static func verifyMetadata(
     _ url: URL, account: BaseImageStage.Account, userOwned: Bool, database: Bool
   ) throws {
+    if url.lastPathComponent == BaseCaptureReminder.filename {
+      try BaseCaptureReminder.verify(url, uid: account.uid, gid: account.gid)
+      return
+    }
     if database {
       try BaseTCC.verifyDirectory(
         url.deletingLastPathComponent(), uid: userOwned ? account.uid : 0,
