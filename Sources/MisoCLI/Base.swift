@@ -122,7 +122,26 @@ struct Base: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
       commandName: "gcm",
       abstract: "Install a verified credential manager package and offline Git configuration.",
-      subcommands: [Verify.self, Inspect.self, Install.self])
+      subcommands: [Resolve.self, Verify.self, Inspect.self, Install.self])
+
+    struct Resolve: AsyncParsableCommand {
+      static let configuration = CommandConfiguration(
+        abstract: "Resolve the target-compatible credential manager cask snapshot.")
+      @Option var targetVersion: String
+      @Option var targetBuild: String
+      @Option var packageVersion: String?
+      @Option var output: String
+      @Option var cache: String?
+
+      func run() async throws {
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          await BaseGCMResolution.run(
+            target: .init(version: targetVersion, build: targetBuild), version: packageVersion,
+            output: fileURL(output), cache: cache.map(fileURL), cancellation: cancellation.token))
+      }
+    }
 
     struct Inputs: ParsableArguments {
       @Option var plan: String

@@ -77,7 +77,7 @@ with `base packages install --plan resolved-packages/plan.json --inputs resolved
 and the usual `--source` and `--output` options; installation checks actual target
 runtime versions before invoking package managers.
 
-Homebrew bootstrap and other third-party release selection still require supplied
+Homebrew bootstrap and tap-backed release selection still require supplied
 plans. `additionalRubyVersions`
 is an explicit compatibility list and can be changed or emptied.
 Versioned formula names such as `node@24` constrain the release line; use `node`
@@ -163,6 +163,15 @@ resolved Bundler/npm metadata and local payloads. `base packages install` adds
 `--source bundle --output new-stage`, requires root and a matching installed Ruby,
 and uses offline package-manager execution. It checks installed versions, yarn/pnpm
 offline controls and detached payloads. Package selection is explicit at this stage.
+
+`base gcm resolve --target-version 27.0 --target-build 26A428 --output gcm-sources`
+downloads the current ARM64 credential manager cask snapshot, immutable recipe and
+checksum-bound package. Declared macOS minimums are checked; unknown requirements
+fail closed. `--package-version` must match the snapshot; `--cache gcm-sources`
+replays a retained snapshot offline, including an older release. This does not
+discover arbitrary historical versions or prove runtime compatibility. Use
+`base gcm inspect --plan gcm-sources/plan.json --inputs gcm-sources --output inspection`
+for package/binary signature and payload checks without executing package scripts.
 
 Configuration defaults use `admin/admin`, disable FileVault, and request SSH/VNC.
 They are intended for isolated test systems; change credentials before exposing a
