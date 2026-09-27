@@ -7,6 +7,7 @@ struct Xcode: AsyncParsableCommand {
     abstract: "Prepare exact-version Xcode inputs without starting a VM.",
     subcommands: [
       Defaults.self, PrepareArchive.self, PrepareMetal.self, PreparePackages.self,
+      PrepareRuntime.self,
       InstallApplication.self, InstallPackages.self,
     ])
 
@@ -25,6 +26,36 @@ struct Xcode: AsyncParsableCommand {
         XcodePackageInstallation.install(
           source: fileURL(source), preparedArchive: fileURL(prepared),
           output: fileURL(output), cancellation: cancellation.token))
+    }
+  }
+
+  struct PrepareRuntime: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "prepare-runtime",
+      abstract: "Authenticate an arm64 simulator asset without installing it on the host.")
+    @Option var platform: String
+    @Option var runtimeVersion: String
+    @Option var runtimeBuild: String
+    @Option var config: String?
+    @Option var catalog: String?
+    @Option var archive: String?
+    @Option var output: String
+
+    func run() async throws {
+      guard let platform = XcodeConfiguration.Platform(rawValue: platform) else {
+        throw ValidationError("Expected iOS, watchOS, tvOS or visionOS")
+      }
+      let settings =
+        try config.map { try JSON.read(XcodeConfiguration.self, from: fileURL($0)) }
+        ?? XcodeConfiguration()
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        await XcodeRuntime.prepare(
+          requirement: .init(platform: platform, version: runtimeVersion, build: runtimeBuild),
+          configuration: settings,
+          catalog: catalog.map(fileURL), archive: archive.map(fileURL), output: fileURL(output),
+          cancellation: cancellation.token))
     }
   }
 

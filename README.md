@@ -39,6 +39,13 @@ For offline replay, pass the saved `catalog.jwt` and `asset.aar` using `--catalo
 and `--archive`. Both are required together. The receipt records input preparation
 separately from Xcode image construction and runtime acceptance.
 
+`xcode prepare-runtime --platform iOS --runtime-version 27.0 --runtime-build 24A434
+--output <runtime>` authenticates the exact arm64 simulator asset, decrypts it,
+checks the restore image digest and inspects the runtime's platform and OS identity
+on a read-only mount. Pass `--catalog` and `--archive` for offline replay. The full
+asset digest binds the runtime contents, including bundles with legacy resource
+omission rules. Preparation never installs a host runtime or starts a simulator.
+
 `xcode prepare-packages --prepared <prepared-xcode> --output <packages>` verifies
 the four reviewed first-launch packages and records their payload inventories,
 relocation policies and unexecuted scripts. CoreTypes is restricted to its writable

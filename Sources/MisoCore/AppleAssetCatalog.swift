@@ -118,10 +118,22 @@ enum AppleAssetCatalog {
   static func fetchMetal(
     build: String, journal: ExecutionJournal
   ) async throws -> Asset {
+    try await fetch(
+      assetType: "com.apple.MobileAsset.MetalToolchain", build: build, journal: journal)
+  }
+
+  static func fetch(assetType type: String, build: String, journal: ExecutionJournal) async throws
+    -> Asset
+  {
     var configuration = XcodeConfiguration()
     configuration.build = build
     try configuration.validate()
-    let type = "com.apple.MobileAsset.MetalToolchain"
+    guard
+      type == "com.apple.MobileAsset.MetalToolchain"
+        || XcodeConfiguration.Platform.allCases.contains(where: { $0.assetType == type })
+    else {
+      throw MisoError.invalid("Unsupported Apple developer asset type")
+    }
     let host = journal.record.host
     let body = try JSONSerialization.data(withJSONObject: [
       "ClientVersion": 2, "AssetType": type, "AssetAudience": audience, "RequestedBuild": build,

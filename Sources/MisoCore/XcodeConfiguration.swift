@@ -4,6 +4,28 @@ public struct XcodeConfiguration: Codable, Equatable, Sendable {
   public enum Platform: String, Codable, CaseIterable, Sendable {
     case iOS, watchOS, tvOS, visionOS
 
+    var assetType: String {
+      let name: String
+      switch self {
+      case .iOS: name = "iOS"
+      case .watchOS: name = "watchOS"
+      case .tvOS: name = "appleTVOS"
+      case .visionOS: name = "xrOS"
+      }
+      return "com.apple.MobileAsset." + name + "SimulatorRuntime"
+    }
+
+    var simulatorIdentifier: String {
+      let name: String
+      switch self {
+      case .iOS: name = "iphonesimulator"
+      case .watchOS: name = "watchsimulator"
+      case .tvOS: name = "appletvsimulator"
+      case .visionOS: name = "xrsimulator"
+      }
+      return "com.apple.platform." + name
+    }
+
     var sdkNames: [String: String] {
       switch self {
       case .iOS: ["iPhoneOS": "iphoneos", "iPhoneSimulator": "iphonesimulator"]
