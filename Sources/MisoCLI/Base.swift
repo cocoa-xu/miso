@@ -7,8 +7,61 @@ struct Base: AsyncParsableCommand {
     abstract: "Prepare target-compatible Base inputs without starting a VM.",
     subcommands: [
       Defaults.self, Resolve.self, Archive.self, Static.self, Bootstrap.self, Bottles.self,
-      Ruby.self, Packages.self, Taps.self,
+      Ruby.self, Packages.self, Taps.self, GCM.self,
     ])
+
+  struct GCM: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "gcm",
+      abstract: "Install a verified credential manager package and offline Git configuration.",
+      subcommands: [Verify.self, Inspect.self, Install.self])
+
+    struct Inputs: ParsableArguments {
+      @Option var plan: String
+      @Option var inputs: String
+    }
+
+    struct Verify: ParsableCommand {
+      @OptionGroup var inputs: Inputs
+      func run() throws {
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          BaseGCMInputs.verify(
+            plan: fileURL(inputs.plan), inputs: fileURL(inputs.inputs),
+            cancellation: cancellation.token))
+      }
+    }
+
+    struct Inspect: ParsableCommand {
+      @OptionGroup var inputs: Inputs
+      @Option var output: String
+      func run() throws {
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          BaseGCMInputs.inspect(
+            plan: fileURL(inputs.plan), inputs: fileURL(inputs.inputs),
+            output: fileURL(output), cancellation: cancellation.token))
+      }
+    }
+
+    struct Install: ParsableCommand {
+      @OptionGroup var inputs: Inputs
+      @Option var source: String
+      @Option var output: String
+      @Option var username = "admin"
+      func run() throws {
+        let cancellation = try CancellationScope()
+        defer { withExtendedLifetime(cancellation) {} }
+        try printJSON(
+          BaseGCM.run(
+            source: fileURL(source), plan: fileURL(inputs.plan),
+            inputs: fileURL(inputs.inputs), output: fileURL(output), username: username,
+            cancellation: cancellation.token))
+      }
+    }
+  }
 
   struct Taps: ParsableCommand {
     static let configuration = CommandConfiguration(
