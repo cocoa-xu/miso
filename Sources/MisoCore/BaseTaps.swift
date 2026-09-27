@@ -43,6 +43,34 @@ public enum BaseTaps {
             name, arguments: GuestExecution.brewArguments(arguments, username: username),
             capability: capability, timeout: timeout)
         }
+        let adapterDirectory = "private/tmp/miso-brew-" + UUID().uuidString
+        let adapterRoot = try guest.data.path(adapterDirectory)
+        try SafeFile.makeDirectory(adapterRoot, mode: 0o755)
+        let adapterPath = "/" + adapterDirectory + "/isolation.rb"
+        let adapter = adapterRoot.appendingPathComponent("isolation.rb")
+        try SafeFile.writeNew(
+          Data(try isolationProgram(uid: guest.account.uid, gid: guest.account.gid).utf8),
+          to: adapter)
+        guard chmod(adapter.path, 0o444) == 0 else {
+          throw MisoError.system("Protect Homebrew execution adapter", errno)
+        }
+        defer { try? FileManager.default.removeItem(at: adapterRoot) }
+        let childControl =
+          "require 'sandbox'; require 'socket'; raise 'Nested sandbox enabled' if Sandbox.available?; "
+          + networkControl
+        let controlLiteral = String(decoding: try JSON.encode(childControl), as: UTF8.self)
+        let control = """
+          output = IO.popen([*HOMEBREW_RUBY_EXEC_ARGS, '-I', $LOAD_PATH.join(File::PATH_SEPARATOR), '-e', \(controlLiteral)], &:read)
+          raise 'Child isolation control failed' unless $?.success?
+          print output
+          """
+        guard
+          try brew(
+            "tap-child-isolation", ["ruby", "-r", adapterPath, "-e", control], capability: .brew)
+            == "IP denied"
+        else {
+          throw MisoError.invalid("Homebrew child execution isolation differs")
+        }
         guard
           try brew(
             "tap-network-denial", ["ruby", "-rsocket", "-e", networkControl], capability: .brew)
@@ -105,7 +133,7 @@ public enum BaseTaps {
             _ = try brew(
               "tap-install",
               [
-                "ruby", "-e",
+                "ruby", "-r", adapterPath, "-e",
                 installProgram(fullName: fullName, uid: guest.account.uid, gid: guest.account.gid),
               ], capability: .brew, timeout: 300)
             expected[formula.name] = formula.kegVersion
@@ -116,7 +144,7 @@ public enum BaseTaps {
         guard installed == expected else {
           throw MisoError.invalid("Installed tap formula versions differ from plan")
         }
-        return try Dictionary(
+        let inventory = try Dictionary(
           uniqueKeysWithValues: paths.map { path in
             let inventory = try BaseFileTree.inventory(
               guest.data, path: path, cancellation: journal.cancellation)
@@ -125,6 +153,8 @@ public enum BaseTaps {
               gid: guest.account.gid)
             return (path, inventory)
           })
+        try FileManager.default.removeItem(at: adapterRoot)
+        return inventory
       }
       try SafeFile.writeNew(
         JSON.encode(payload), to: output.appendingPathComponent("tap-payload.json"))
@@ -191,7 +221,19 @@ public enum BaseTaps {
     else { throw MisoError.invalid("Invalid tap execution identity") }
     try PackageRequest(name: String(parts[2])).validate()
     return """
-      require 'sandbox'; require 'fiddle'; require 'cmd/install'
+      \(try isolationProgram(uid: uid, gid: gid, propagate: false))
+      require 'cmd/install'
+      Homebrew::Cmd::InstallCmd.new(['\(fullName)']).run
+      exit(Homebrew.failed? ? 1 : 0)
+      """
+  }
+
+  static func isolationProgram(uid: UInt32, gid: UInt32, propagate: Bool = true) throws -> String {
+    guard (501...60_000).contains(uid), (20...60_000).contains(gid) else {
+      throw MisoError.invalid("Invalid Homebrew execution identity")
+    }
+    return """
+      require 'global'; require 'sandbox'; require 'fiddle'
       native = Fiddle.dlopen(nil)
       check = Fiddle::Function.new(native['sandbox_check'], [Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT], Fiddle::TYPE_INT)
       groups = Fiddle::Function.new(native['getgroups'], [Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP], Fiddle::TYPE_INT)
@@ -200,8 +242,12 @@ public enum BaseTaps {
       ids = count < 0 ? nil : buffer[0, count * 4].unpack('I*')
       raise 'Missing outer isolation' unless Process.euid == \(uid) && [[], [\(gid)]].include?(ids) && check.call(Process.pid, nil, 0) == 1
       Sandbox.singleton_class.prepend(Module.new { def available?; false; end })
-      Homebrew::Cmd::InstallCmd.new(['\(fullName)']).run
-      exit(Homebrew.failed? ? 1 : 0)
+      \(propagate ? """
+      args = HOMEBREW_RUBY_EXEC_ARGS.dup
+      args.concat(['-r', __FILE__])
+      Object.send(:remove_const, :HOMEBREW_RUBY_EXEC_ARGS)
+      Object.const_set(:HOMEBREW_RUBY_EXEC_ARGS, args.freeze)
+      """ : "")
       """
   }
 }

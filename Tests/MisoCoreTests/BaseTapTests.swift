@@ -76,6 +76,10 @@ private func tapFixture(
   let guardRange = try #require(program.range(of: "raise 'Missing outer isolation'"))
   let adapterRange = try #require(program.range(of: "Sandbox.singleton_class.prepend"))
   #expect(guardRange.lowerBound < adapterRange.lowerBound)
+  let child = try BaseTaps.isolationProgram(uid: 501, gid: 20)
+  #expect(child.contains("args.concat(['-r', __FILE__])"))
+  #expect(child.contains("Object.const_set(:HOMEBREW_RUBY_EXEC_ARGS, args.freeze)"))
+  #expect(!program.contains("args.concat"))
   for name in ["vendor/tools/name'; abort 'injected", "vendor/../name", "vendor/tools/name/extra"] {
     #expect(throws: (any Error).self) {
       try BaseTaps.installProgram(fullName: name, uid: 501, gid: 20)
