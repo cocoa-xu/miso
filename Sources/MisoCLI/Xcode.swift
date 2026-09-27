@@ -9,6 +9,7 @@ struct Xcode: AsyncParsableCommand {
       Defaults.self, PrepareArchive.self, PrepareMetal.self, PreparePackages.self,
       PrepareRuntime.self,
       InstallApplication.self, InstallPackages.self, InstallBottles.self, InstallRuntime.self,
+      InstallMetal.self,
     ])
 
   struct InstallPackages: ParsableCommand {
@@ -48,6 +49,29 @@ struct Xcode: AsyncParsableCommand {
         await XcodeRuntimeInstallation.install(
           source: fileURL(source), prepared: fileURL(prepared), configuration: settings,
           output: fileURL(output), cancellation: cancellation.token))
+    }
+  }
+
+  struct InstallMetal: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "install-metal",
+      abstract: "Install an authenticated Metal toolchain without modifying the Xcode application.")
+    @Option var source: String
+    @Option var prepared: String
+    @Option var config: String?
+    @Option var username = "admin"
+    @Option var output: String
+
+    func run() async throws {
+      let settings =
+        try config.map { try JSON.read(XcodeConfiguration.self, from: fileURL($0)) }
+        ?? XcodeConfiguration()
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        await XcodeMetalInstallation.install(
+          source: fileURL(source), prepared: fileURL(prepared), configuration: settings,
+          username: username, output: fileURL(output), cancellation: cancellation.token))
     }
   }
 

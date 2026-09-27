@@ -53,6 +53,13 @@ links, ACLs and extended attributes against the mounted input, then removes its
 temporary archive and disk image. Runtime discovery and simulator execution still
 require independent VM acceptance; this stage leaves Xcode completion false.
 
+`xcode install-metal --source <xcode-bundle> --prepared <metal> --output <stage>`
+authenticates and installs the original Metal payload outside the signed Xcode
+application. A separate external toolchain registration selects that payload using
+`TOOLCHAINS`, with other tools falling back to the selected Xcode. The account's
+shell profiles and an Aqua login agent set this environment. The output is
+`<stage>/image/bundle`; full guest acceptance remains separate.
+
 `xcode prepare-packages --prepared <prepared-xcode> --output <packages>` verifies
 the four reviewed first-launch packages and records their payload inventories,
 relocation policies and unexecuted scripts. CoreTypes is restricted to its writable

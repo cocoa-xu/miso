@@ -141,3 +141,20 @@ private func runtimeCatalog() throws -> Data {
   }
   try journal.finish(receipt)
 }
+
+@Test func metalEnvironmentPreservesProfilesAndRejectsConflictingSelection() throws {
+  let identifier = try XcodeMetalInstallation.identifier(.init())
+  let original = Data("export EXAMPLE=value".utf8)
+  let expected = "export EXAMPLE=value\nexport TOOLCHAINS='moe.uwucocoa.miso.metal.27A266a'\n"
+  #expect(
+    try XcodeMetalInstallation.shellProfile(original, identifier: identifier) == Data(expected.utf8)
+  )
+  for previous in [Data("export TOOLCHAINS=custom\n".utf8), Data([0xFF])] {
+    #expect(throws: MisoError.self) {
+      try XcodeMetalInstallation.shellProfile(previous, identifier: identifier)
+    }
+  }
+  #expect(throws: MisoError.self) {
+    try XcodeMetalInstallation.shellProfile(Data(), identifier: "invalid'\ncommand")
+  }
+}
