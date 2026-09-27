@@ -9,8 +9,48 @@ struct Xcode: AsyncParsableCommand {
       Defaults.self, PrepareArchive.self, PrepareMetal.self, PreparePackages.self,
       PrepareRuntime.self,
       InstallApplication.self, InstallPackages.self, InstallBottles.self, InstallRuntime.self,
-      InstallMetal.self,
+      InstallMetal.self, PrepareGems.self, InstallGems.self,
     ])
+
+  struct PrepareGems: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "prepare-gems",
+      abstract: "Resolve and checksum the mobile Ruby tool dependency graph.")
+    @Option var rubyVersion: String
+    @Option var rubygemsVersion: String
+    @Option var bundlerVersion: String
+    @Option var cache: String?
+    @Option var output: String
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        await XcodeGemInputs.prepare(
+          rubyVersion: rubyVersion, rubygemsVersion: rubygemsVersion,
+          bundlerVersion: bundlerVersion,
+          output: fileURL(output), cache: cache.map(fileURL), cancellation: cancellation.token))
+    }
+  }
+
+  struct InstallGems: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "install-gems",
+      abstract: "Install prepared mobile Ruby tools without network or VM startup.")
+    @Option var source: String
+    @Option var prepared: String
+    @Option var output: String
+    @Option var username = "admin"
+
+    func run() throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        XcodeGemInstallation.install(
+          source: fileURL(source), prepared: fileURL(prepared), output: fileURL(output),
+          username: username, cancellation: cancellation.token))
+    }
+  }
 
   struct InstallPackages: ParsableCommand {
     static let configuration = CommandConfiguration(

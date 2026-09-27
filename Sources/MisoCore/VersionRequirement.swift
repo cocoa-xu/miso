@@ -98,7 +98,28 @@ struct VersionRequirement {
       ? [">=", "<=", ">", "<", "=", "~", "^"]
       : ["~>", ">=", "<=", "!=", ">", "<", "="]
     var operation = operations.first(where: { token.hasPrefix($0) }) ?? ""
-    let values = try parts(String(token.dropFirst(operation.count)), syntax: syntax)
+    let value = String(token.dropFirst(operation.count))
+    if syntax == .gem,
+      value.range(
+        of: #"\A[0-9]+(?:\.[0-9]+){0,3}\.[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)*\z"#,
+        options: .regularExpression) != nil,
+      let suffix = value.range(of: #"\.[A-Za-z]"#, options: .regularExpression)
+    {
+      let values = try parts(String(value[..<suffix.lowerBound]), syntax: syntax)
+      let release = try version(values)
+      switch operation {
+      case "<", "<=": return [Bound(operation: "<", version: release)]
+      case ">", ">=": return [Bound(operation: ">=", version: release)]
+      case "!=": return [Bound(operation: ">=", version: try version([0]))]
+      case "~>":
+        return [
+          Bound(operation: ">=", version: release),
+          Bound(operation: "<", version: try next(values, max(0, values.count - 2))),
+        ]
+      default: return [Bound(operation: "<", version: try version([0]))]
+      }
+    }
+    let values = try parts(value, syntax: syntax)
     let lower = try version(values)
     func bound(_ operation: String, _ value: StableVersion) -> Bound {
       Bound(operation: operation, version: value)
