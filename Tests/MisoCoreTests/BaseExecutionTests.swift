@@ -96,6 +96,25 @@ import Testing
   #expect(try !BaseExecutionView.isExecutable(file))
 }
 
+@Test func signedExecutionRenewalPreservesBytesAndRejectsSharedFiles() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let file = temporary.url.appendingPathComponent("tool")
+  let bytes = Data("signed execution fixture".utf8)
+  try SafeFile.writeNew(bytes, to: file)
+  #expect(chmod(file.path, 0o755) == 0)
+  let original = try FileMetadata.inspect(file)
+  try BaseExecutionView.renewSignedExecutable(file)
+  let renewed = try FileMetadata.inspect(file)
+  #expect(renewed.st_ino != original.st_ino)
+  #expect(renewed.st_mode == original.st_mode)
+  #expect(try SafeFile.read(file, limit: 100) == bytes)
+  let alias = temporary.url.appendingPathComponent("alias")
+  #expect(link(file.path, alias.path) == 0)
+  #expect(throws: MisoError.self) { try BaseExecutionView.renewSignedExecutable(file) }
+  #expect(try FileMetadata.inspect(file).st_ino == renewed.st_ino)
+}
+
 @Test func baseTreeCopyBindsContentModesAndLinks() throws {
   let temporary = try TemporaryDirectory()
   defer { temporary.remove() }

@@ -190,10 +190,12 @@ enum BaseExecutionView {
               + group.map { root.appendingPathComponent($0.0).path }, timeout: 180))
       }
       let executableRecords = try originals.map {
-        try AppleCode.validateLocalTool(root.appendingPathComponent($0.0), scope: .executable)
+        let executable = root.appendingPathComponent($0.0)
+        try renewSignedExecutable(executable)
+        try AppleCode.validateLocalTool(executable, scope: .executable)
         return Executable(
           path: $0.0, originalSHA256: $0.1,
-          executionSHA256: try SafeFile.sha256(root.appendingPathComponent($0.0)))
+          executionSHA256: try SafeFile.sha256(executable))
       }
       try SafeFile.writeNew(
         JSON.encode(executableRecords),
@@ -204,6 +206,27 @@ enum BaseExecutionView {
       try journal.setMetadata("executionTools", value: executableRecords.count)
       try journal.setMetadata("outputSystemModified", value: false)
       return root
+    }
+  }
+
+  static func renewSignedExecutable(_ executable: URL) throws {
+    let original = try FileMetadata.inspect(executable)
+    guard original.st_mode & S_IFMT == S_IFREG, original.st_nlink == 1 else {
+      throw MisoError.invalid("Unexpected signed execution file")
+    }
+    let digest = try SafeFile.sha256(executable)
+    let temporary = executable.deletingLastPathComponent()
+      .appendingPathComponent(".miso-signed-" + UUID().uuidString)
+    try Artifacts.clone(executable, to: temporary)
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    let replacement = try FileMetadata.inspect(temporary)
+    guard replacement.st_ino != original.st_ino, replacement.st_dev == original.st_dev,
+      replacement.st_mode == original.st_mode, replacement.st_uid == original.st_uid,
+      replacement.st_gid == original.st_gid, try SafeFile.sha256(temporary) == digest,
+      try FileMetadata.inspect(executable).st_ino == original.st_ino
+    else { throw MisoError.invalid("Signed execution copy changed") }
+    guard rename(temporary.path, executable.path) == 0 else {
+      throw MisoError.system("Publish signed execution copy", errno)
     }
   }
 
