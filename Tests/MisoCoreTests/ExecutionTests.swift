@@ -79,8 +79,11 @@ private func withProcess<T>(_ body: (FileHandle, FileHandle, URL) throws -> T) t
 
 @Test func nativeProcessCancellation() throws {
   let token = try CancellationToken()
-  DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) { token.cancel() }
   try withProcess { out, err, _ in
+    Thread.detachNewThread {
+      Thread.sleep(forTimeInterval: 0.1)
+      token.cancel()
+    }
     let result = try NativeProcess.run(
       NativeCommand("/bin/sleep", arguments: ["30"]), stdout: out, stderr: err, cancellation: token)
     #expect(result.cancelled && !result.timedOut && !result.succeeded)
