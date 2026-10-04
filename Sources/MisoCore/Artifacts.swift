@@ -17,7 +17,9 @@ enum Artifacts {
     }
   }
 
-  static func record(_ url: URL, relativeTo root: URL) throws -> ImageBundle.FileRecord {
+  static func record(
+    _ url: URL, relativeTo root: URL, cancellation: CancellationToken? = nil
+  ) throws -> ImageBundle.FileRecord {
     guard url.path.hasPrefix(root.path + "/") else {
       throw MisoError.invalid("Artifact is outside its operation")
     }
@@ -25,7 +27,8 @@ enum Artifacts {
     let input = try SafeFile.openRegular(url)
     defer { try? input.close() }
     return ImageBundle.FileRecord(
-      path: relative, bytes: try SafeFile.size(input), sha256: try SafeFile.sha256(input))
+      path: relative, bytes: try SafeFile.size(input),
+      sha256: try SafeFile.sha256(input, cancellation: cancellation))
   }
 
   static func resolve(

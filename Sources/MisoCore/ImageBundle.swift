@@ -38,7 +38,9 @@ public enum ImageBundle {
     public let bootabilityProven = false
   }
 
-  public static func verify(_ directory: URL) throws -> Verification {
+  public static func verify(_ directory: URL, cancellation: CancellationToken? = nil) throws
+    -> Verification
+  {
     let manifest = try JSON.read(
       Manifest.self, from: directory.appendingPathComponent("manifest.json"), limit: 1 << 20)
     try manifest.validate()
@@ -46,7 +48,8 @@ public enum ImageBundle {
       let url = directory.appendingPathComponent(record.path)
       let file = try SafeFile.openRegular(url)
       defer { try? file.close() }
-      guard try SafeFile.size(file) == record.bytes, try SafeFile.sha256(file) == record.sha256
+      guard try SafeFile.size(file) == record.bytes,
+        try SafeFile.sha256(file, cancellation: cancellation) == record.sha256
       else {
         throw MisoError.invalid("Bundle file differs from manifest: \(record.path)")
       }

@@ -5,7 +5,22 @@ import MisoCore
 struct Bundle: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     abstract: "Check bundle integrity or validate a VM configuration without creating a VM.",
-    subcommands: [Verify.self, Validate.self, Assemble.self])
+    subcommands: [Verify.self, Validate.self, Assemble.self, ExportTart.self])
+
+  struct ExportTart: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Export a verified offline bundle for Tart OCI publication without starting a VM.")
+    @Argument var directory: String
+    @Option var output: String
+
+    @MainActor func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        TartBundle.export(
+          source: fileURL(directory), output: fileURL(output), cancellation: cancellation.token))
+    }
+  }
 
   struct Assemble: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
