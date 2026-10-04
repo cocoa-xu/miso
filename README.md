@@ -2,6 +2,31 @@
 
 Native tools for offline macOS system images. Swift 6, Apple silicon, macOS 15 or later.
 
+## CI and releases
+
+CI runs `make test-unit` on pushes and pull requests using GitHub's `xcode-27`
+ARM64 runner. It resolves only the pinned Swift package dependencies and runs local
+unit tests with synthetic inputs and mocked HTTP responses. Tests requiring real
+restore inputs, Apple restore tickets, CLT packages or runner archives are explicitly
+excluded. CI does not download IPSWs, Xcode archives or Simulator assets, construct
+system images, request root privileges or start VMs.
+
+The release workflow runs when a `v`-prefixed version tag is pushed. Update the
+version in `Sources/MisoCLI/Miso.swift` before tagging; the tag must match
+`miso --version` (for example, `v0.1.0` for `0.1.0`). The workflow runs the same unit
+tests, builds and ad-hoc signs the ARM64 executable with its required entitlement,
+then publishes a GitHub Release with `miso-VERSION-macos-arm64.tar.gz` and its
+SHA-256 checksum. Hyphenated versions such as `v0.1.0-rc.1` become prereleases.
+The archive includes the executable, build metadata, README and dependency licenses.
+It is not Developer ID signed or notarized, and contains no macOS or Xcode images.
+
+To check packaging locally after `make build`, run
+`bash Scripts/package-release.sh vVERSION`. This writes verified assets under
+`.build/artifacts` without publishing them. Rerunning a published version does not
+overwrite its release assets.
+
+## Runtime dependencies
+
 The runtime does not require the third-party `ipsw` executable, Python, Homebrew,
 or separately installed command-line helpers. ArgumentParser and ZIPFoundation
 are pinned source dependencies compiled into the executable. Cryptography,

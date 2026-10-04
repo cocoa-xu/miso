@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish macOS ARM64
+    runs-on: xcode-27
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Run unit tests
+        run: make test-unit
+      - name: Build signed executable
+        run: make build
+      - name: Package release
+        run: bash Scripts/package-release.sh "$RELEASE_TAG"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          options=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            options+=(--prerelease --latest=false)
+          fi
+          archive=".build/artifacts/miso-${RELEASE_TAG#v}-macos-arm64.tar.gz"
+          gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" \
+            --verify-tag --generate-notes --title "MISO $RELEASE_TAG" "${options[@]}"
