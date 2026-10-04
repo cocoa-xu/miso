@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   release:
-    name: Build and publish macOS ARM64
+    name: Build and publish
     runs-on: xcode-27
     timeout-minutes: 30
     permissions:
@@ -36,10 +36,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          options=()
-          if [[ "$RELEASE_TAG" == *-* ]]; then
-            options+=(--prerelease --latest=false)
-          fi
-          archive=".build/artifacts/miso-${RELEASE_TAG#v}-macos-arm64.tar.gz"
+          archive=".build/artifacts/miso.tar.gz"
           gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" \
-            --verify-tag --generate-notes --title "MISO $RELEASE_TAG" "${options[@]}"
+            --verify-tag --generate-notes --title "MISO $RELEASE_TAG"

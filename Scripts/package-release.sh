@@ -2,7 +2,7 @@
 set -euo pipefail
 
 tag=${1:?Usage: package-release.sh vVERSION}
-if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
   printf 'Invalid release tag: %s\n' "$tag" >&2
   exit 1
 fi
@@ -21,7 +21,7 @@ fi
 codesign --verify --strict "$binary"
 
 output="$PWD/.build/artifacts"
-archive="miso-$version-macos-arm64.tar.gz"
+archive="miso.tar.gz"
 mkdir -p "$output"
 if [[ -e "$output/$archive" || -e "$output/$archive.sha256" ]]; then
   printf '%s\n' 'Release assets already exist.' >&2

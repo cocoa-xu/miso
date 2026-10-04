@@ -11,12 +11,14 @@ restore inputs, Apple restore tickets, CLT packages or runner archives are expli
 excluded. CI does not download IPSWs, Xcode archives or Simulator assets, construct
 system images, request root privileges or start VMs.
 
-The release workflow runs when a `v`-prefixed version tag is pushed. Update the
+The release workflow runs when a `vMAJOR.MINOR.PATCH` version tag is pushed. Update the
 version in `Sources/MisoCLI/Miso.swift` before tagging; the tag must match
 `miso --version` (for example, `v0.1.0` for `0.1.0`). The workflow runs the same unit
 tests, builds and ad-hoc signs the ARM64 executable with its required entitlement,
-then publishes a GitHub Release with `miso-VERSION-macos-arm64.tar.gz` and its
-SHA-256 checksum. Hyphenated versions such as `v0.1.0-rc.1` become prereleases.
+then publishes a GitHub Release with `miso.tar.gz` and `miso.tar.gz.sha256`.
+Asset names stay the same across releases; the release tag, `miso --version` and
+the archive's `BUILD.txt` identify the version. Releases support macOS on Apple
+silicon only; Intel, Universal and Linux binaries are not provided.
 The archive includes the executable, build metadata, README and dependency licenses.
 It is not Developer ID signed or notarized, and contains no macOS or Xcode images.
 
