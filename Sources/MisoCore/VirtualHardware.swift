@@ -63,8 +63,10 @@ public enum VirtualHardware {
     public let cpuCount: Int
     public let memoryBytes: UInt64
     public let auxiliarySHA256: String
-    public let configurationValidationPassed = true
-    public let invalidCPUCountRejected = true
+    public let hostVirtualizationSupported: Bool
+    public let configurationValidationPassed: Bool?
+    public let invalidCPUCountRejected: Bool?
+    public let hostValidationUnavailableReason: String?
     public let diskReadOnly = true
     public let networkInterfaces = 0
     public let auxiliaryUnchanged = true
@@ -74,9 +76,10 @@ public enum VirtualHardware {
     public let bootabilityProven = false
   }
 
-  public static func validateBundle(_ bundle: URL, cpuCount: Int = 4, memoryBytes: UInt64 = 4 << 30)
-    throws -> ValidationReceipt
-  {
+  public static func validateBundle(
+    _ bundle: URL, cpuCount: Int = 4, memoryBytes: UInt64 = 4 << 30,
+    allowUnavailableHost: Bool = false
+  ) throws -> ValidationReceipt {
     guard cpuCount > 0, memoryBytes > 0 else {
       throw MisoError.invalid("CPU count and memory must be positive")
     }
@@ -118,18 +121,30 @@ public enum VirtualHardware {
     configuration.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
     configuration.keyboards = [VZUSBKeyboardConfiguration()]
     configuration.pointingDevices = [VZUSBScreenCoordinatePointingDeviceConfiguration()]
-    try configuration.validate()
-    configuration.cpuCount = 0
-    var invalidCPUCountRejected = false
-    do { try configuration.validate() } catch { invalidCPUCountRejected = true }
-    guard invalidCPUCountRejected else {
-      throw MisoError.invalid("Configuration negative control was accepted")
+    let hostSupported = VZVirtualMachine.isSupported
+    var unavailableReason: String?
+    do {
+      try configuration.validate()
+    } catch {
+      guard allowUnavailableHost, !hostSupported else { throw error }
+      unavailableReason = error.localizedDescription
+    }
+    if unavailableReason == nil {
+      configuration.cpuCount = 0
+      var rejected = false
+      do { try configuration.validate() } catch { rejected = true }
+      guard rejected else {
+        throw MisoError.invalid("Configuration negative control was accepted")
+      }
     }
     guard before == (try SafeFile.read(auxiliaryURL, limit: AuxiliaryStorage.size)) else {
       throw MisoError.invalid("Auxiliary storage changed during configuration validation")
     }
     return ValidationReceipt(
       host: try HostInfo.current(), cpuCount: cpuCount, memoryBytes: memoryBytes,
-      auxiliarySHA256: SafeFile.sha256(before))
+      auxiliarySHA256: SafeFile.sha256(before), hostVirtualizationSupported: hostSupported,
+      configurationValidationPassed: unavailableReason == nil ? true : nil,
+      invalidCPUCountRejected: unavailableReason == nil ? true : nil,
+      hostValidationUnavailableReason: unavailableReason)
   }
 }

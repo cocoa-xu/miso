@@ -65,7 +65,8 @@ public enum XcodeCompletion {
         }
       }
       let bundle = output.appendingPathComponent("image/bundle")
-      _ = try VirtualHardware.validateBundle(bundle)
+      let hardware = try VirtualHardware.validateBundle(bundle, allowUnavailableHost: true)
+      try journal.setMetadata("virtualHardware", value: hardware)
       let manifestURL = bundle.appendingPathComponent("manifest.json")
       let original = try SafeFile.read(manifestURL, limit: 1 << 20)
       try requireStages(original, configuration: configuration, finalized: true)

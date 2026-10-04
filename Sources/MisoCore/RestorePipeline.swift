@@ -81,7 +81,7 @@ public enum RestorePipeline {
         cancellation: journal.cancellation)
       try journal.setMetadata("stage", value: "validate-configuration")
       let validation = try VirtualHardware.validateBundle(
-        assembled.appendingPathComponent("bundle"))
+        assembled.appendingPathComponent("bundle"), allowUnavailableHost: true)
       let result = Receipt(
         profile: inputs.profile, bundle: "assembled/bundle", files: assembly.files,
         configuration: validation)

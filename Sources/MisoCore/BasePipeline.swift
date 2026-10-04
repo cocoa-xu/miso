@@ -48,7 +48,7 @@ public enum BasePipeline {
       try journal.setMetadata("recipe", value: recipe)
       try journal.setMetadata("stage", value: "preflight")
       let plans = try preflight(recipe, inputs: inputVolume, cancellation: journal.cancellation)
-      _ = try VirtualHardware.validateBundle(source)
+      _ = try VirtualHardware.validateBundle(source, allowUnavailableHost: true)
       var current = source
       var previous: URL?
       var completed: [String] = []
@@ -80,7 +80,7 @@ public enum BasePipeline {
           certificateDetails = try JSON.read(Result.self, from: log).details
         }
         current = stage.appendingPathComponent("bundle")
-        _ = try VirtualHardware.validateBundle(current)
+        _ = try VirtualHardware.validateBundle(current, allowUnavailableHost: true)
         if !keepIntermediates {
           try BaseStageWorkspace.prune(stage, image: false, journal: journal)
           if let previous { try BaseStageWorkspace.prune(previous, image: true, journal: journal) }
@@ -113,7 +113,7 @@ public enum BasePipeline {
       try validateStage(finalStage, operation: "base-cleanup", target: recipe.target)
       current = finalStage.appendingPathComponent("bundle")
       completed.append("base-cleanup")
-      let configuration = try VirtualHardware.validateBundle(current)
+      let configuration = try VirtualHardware.validateBundle(current, allowUnavailableHost: true)
       _ = try ImageBundle.verify(source)
       guard
         try Artifacts.record(sourceVolume.path("manifest.json"), relativeTo: source)
