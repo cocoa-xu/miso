@@ -84,5 +84,8 @@ jobs:
 ```
 
 For image-building jobs, supply the inputs and APFS workspace described above.
-Full image builds on GitHub-hosted runners and their disk-space requirements have
-not yet been validated.
+The manual [image workflow](.github/workflows/image-test.yml) builds macOS 27.0.1
+Vanilla on the official `xcode-27` runner, publishes to GHCR, and verifies a fresh
+download without starting a VM. It removes unused runner software to provide at
+least 89 GiB of free workspace. Base and Xcode builds on hosted runners are not yet
+validated.
