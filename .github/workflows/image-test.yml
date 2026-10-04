@@ -1,0 +1,49 @@
+name: Image build test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-build-test
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: xcode-27
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Inspect build host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/image-evidence"
+          {
+            sw_vers
+            uname -m
+            sysctl hw.model hw.memsize kern.hv_support
+            xcodebuild -version
+            swift --version
+            sudo -n id -u
+            csrutil status
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
+              /System/Library/PrivateFrameworks/APFS.framework/Resources/Info.plist
+            df -h /
+            diskutil apfs list
+            du -sk /Applications/Xcode*.app /Library/Developer/CoreSimulator \
+              /Users/runner/Library/Android /Users/runner/.rustup \
+              /usr/local/share/dotnet /opt/homebrew /System/Library/AssetsV2 2>/dev/null || true
+          } 2>&1 | tee "$RUNNER_TEMP/image-evidence/host.txt"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: image-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/image-evidence
+          retention-days: 7
