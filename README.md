@@ -40,6 +40,9 @@ sudo "$(command -v miso)" restore restore.ipsw \
 
 The image bundle is written to `vanilla/assembled/bundle`. Output directories must
 be new, with enough free space for the image and its inputs.
+You can also pass an Apple HTTPS IPSW URL. MISO removes its download after successful
+input preparation; add `--keep-downloads` to retain it. Local IPSW files are always
+preserved.
 
 To build a Base image from a prepared recipe and its input directory:
 

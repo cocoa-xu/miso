@@ -12,7 +12,8 @@ public enum RestorePipeline {
 
   public static func run(
     ipsw: URL, configuration: ImageConfiguration, packages: URL, output: URL,
-    diskBytes: UInt64 = 40 << 30, cancellation: CancellationToken? = nil
+    diskBytes: UInt64 = 40 << 30, keepDownloads: Bool = false,
+    cancellation: CancellationToken? = nil
   ) async throws -> Receipt {
     guard geteuid() == 0 else {
       throw MisoError.invalid("Offline restore requires administrator privileges")
@@ -34,15 +35,23 @@ public enum RestorePipeline {
     let boot = journal.output.appendingPathComponent("boot")
     let assembled = journal.output.appendingPathComponent("assembled")
     do {
+      try journal.setMetadata("stage", value: "acquire-ipsw")
+      let archive = try await RestoreArchive.acquire(
+        ipsw, workspace: journal.output, cancellation: journal.cancellation)
+      try journal.setMetadata("ipswSource", value: ipsw.absoluteString)
+      try journal.setMetadata("ipswDownloaded", value: archive.downloaded)
+      try journal.setMetadata("keepDownloads", value: keepDownloads)
       try journal.setMetadata("stage", value: "preflight-inputs")
-      let inspection = try RestoreInspection.inspect(ipsw)
+      let inspection = try RestoreInspection.inspect(archive.url)
       try journal.setMetadata("target", value: inspection.profile.release)
       _ = try CommandLineTools.validateInputs(
         packages: packages, profile: inspection.profile, cancellation: journal.cancellation)
       try journal.setMetadata("stage", value: "prepare")
       let inputs = try await RestorePreparation.run(
-        ipsw: ipsw, configuration: configuration, output: prepared,
+        ipsw: archive.url, configuration: configuration, output: prepared,
         cancellation: journal.cancellation)
+      let removed = try archive.removeDownload(keepDownloads: keepDownloads)
+      try journal.setMetadata("downloadedIPSWRemoved", value: removed)
       try journal.setMetadata("target", value: inputs.profile.release)
       try journal.setMetadata("stage", value: "seal-system")
       _ = try SystemConstruction.run(

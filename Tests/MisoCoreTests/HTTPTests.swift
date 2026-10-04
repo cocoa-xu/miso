@@ -129,6 +129,60 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
   #expect(try SafeFile.read(output, limit: 64) == Data(repeating: 42, count: 64))
 }
 
+@Test func restoreDownloadRetentionNeverDeletesLocalInputs() async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let source = temporary.url.appendingPathComponent("user.ipsw")
+  let data = Data("user archive".utf8)
+  try SafeFile.writeNew(data, to: source)
+  let local = try await RestoreArchive.acquire(source, workspace: temporary.url)
+  #expect(try !local.removeDownload(keepDownloads: false))
+  #expect(try SafeFile.read(source, limit: 64) == data)
+  let remote = try await RestoreArchive.acquire(
+    URL(string: "https://updates.cdn-apple.com/test/fixture_Restore.ipsw")!,
+    workspace: temporary.url, configuration: stubConfiguration())
+  #expect(try !remote.removeDownload(keepDownloads: true))
+  #expect(try SafeFile.read(remote.url, limit: 64) == Data(repeating: 42, count: 64))
+  #expect(try remote.removeDownload(keepDownloads: false))
+  #expect(!FileManager.default.fileExists(atPath: remote.url.path))
+  #expect(try SafeFile.read(source, limit: 64) == data)
+}
+
+@Test func restoreDownloadCleanupRejectsReplacedFiles() async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let archive = try await RestoreArchive.acquire(
+    URL(string: "https://updates.cdn-apple.com/test/fixture_Restore.ipsw")!,
+    workspace: temporary.url, configuration: stubConfiguration())
+  let replacement = Data("replacement must survive".utf8)
+  try SafeFile.replace(replacement, at: archive.url)
+  #expect(throws: MisoError.self) { try archive.removeDownload(keepDownloads: false) }
+  #expect(try SafeFile.read(archive.url, limit: 64) == replacement)
+}
+
+@Test func restoreDownloadRejectsUntrustedURLsAndExistingOutputs() async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let output = temporary.url.appendingPathComponent("archive.ipsw")
+  for source in [
+    "http://updates.cdn-apple.com/fixture_Restore.ipsw",
+    "https://example.com/fixture_Restore.ipsw",
+    "https://updates.cdn-apple.com/fixture_Restore.ipsw?other=true",
+  ] {
+    await #expect(throws: MisoError.self) {
+      try await HTTPFile.restoreArchive(
+        URL(string: source)!, to: output, configuration: stubConfiguration())
+    }
+  }
+  try SafeFile.writeNew(Data("existing".utf8), to: output)
+  await #expect(throws: MisoError.self) {
+    try await HTTPFile.restoreArchive(
+      URL(string: "https://updates.cdn-apple.com/test/fixture_Restore.ipsw")!,
+      to: output, configuration: stubConfiguration())
+  }
+  #expect(try SafeFile.read(output, limit: 64) == Data("existing".utf8))
+}
+
 @Test func homebrewIndexesAndBottlesUseBoundedAnonymousRegistryRequests() async throws {
   let index = URL(string: "https://ghcr.io/v2/homebrew/core/node/24/manifests/24.1.0_2-1")!
   let bytes = try await HTTPData.homebrewIndex(index, configuration: stubConfiguration())

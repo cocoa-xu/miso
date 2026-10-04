@@ -73,6 +73,33 @@ enum Artifacts {
     try destination.synchronize()
   }
 
+  static func moveDownload(
+    _ source: URL, to output: URL, maximumBytes: UInt64, cancellation: CancellationToken? = nil
+  ) throws {
+    try cancellation?.check()
+    let input = try SafeFile.openRegular(source)
+    defer { try? input.close() }
+    let size = try SafeFile.size(input)
+    guard size > 0, size <= maximumBytes else {
+      throw MisoError.invalid("Invalid download size")
+    }
+    let parent = try SafeFile.openDirectory(output.deletingLastPathComponent())
+    defer { close(parent) }
+    guard
+      renameatx_np(AT_FDCWD, source.path, parent, output.lastPathComponent, UInt32(RENAME_EXCL))
+        == 0
+    else {
+      guard errno == EXDEV else {
+        throw MisoError.system("Move download without replacing files", errno)
+      }
+      try copy(source, to: output, maximumBytes: maximumBytes, cancellation: cancellation)
+      guard unlink(source.path) == 0 else {
+        throw MisoError.system("Remove transferred download", errno)
+      }
+      return
+    }
+  }
+
   static func requireSpace(_ bytes: UInt64, at directory: URL) throws {
     var info = statfs()
     guard statfs(directory.path, &info) == 0 else {

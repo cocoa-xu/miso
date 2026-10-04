@@ -35,16 +35,33 @@ enum HTTPFile {
     ) {}
   }
 
-  static func validate(_ url: URL, maximumBytes: UInt64, appleAsset: Bool = false) throws {
+  static func validate(
+    _ url: URL, maximumBytes: UInt64, appleAsset: Bool = false, appleRestore: Bool = false
+  ) throws {
     if appleAsset {
       guard AppleAssetCatalog.isArchiveURL(url) else {
         throw MisoError.invalid("Invalid Apple asset archive URL")
       }
     }
+    if appleRestore {
+      guard url.host == "updates.cdn-apple.com", url.path.hasSuffix("_Restore.ipsw") else {
+        throw MisoError.invalid("Invalid Apple restore archive URL")
+      }
+    }
     guard url.scheme == "https", url.host != nil, url.user == nil, url.password == nil,
       url.fragment == nil, url.query == nil, url.port == nil || url.port == 443,
-      (1...(appleAsset ? 32 << 30 : 2 << 30)).contains(maximumBytes)
+      (1...(appleAsset || appleRestore ? 32 << 30 : 2 << 30)).contains(maximumBytes)
     else { throw MisoError.invalid("Invalid HTTPS payload request") }
+  }
+
+  static func restoreArchive(
+    _ url: URL, to output: URL, cancellation: CancellationToken? = nil,
+    configuration: URLSessionConfiguration = .ephemeral
+  ) async throws {
+    try await fetch(
+      url, to: output, maximumBytes: 32 << 30, body: nil, contentType: nil,
+      cancellation: cancellation, redirects: .reject, gitProtocolV2: false,
+      authorization: nil, configuration: configuration, appleRestore: true)
   }
 
   static func appleAsset(
@@ -113,15 +130,16 @@ enum HTTPFile {
     _ url: URL, to output: URL, maximumBytes: UInt64, body: Data?, contentType: String?,
     cancellation: CancellationToken?, redirects: HTTPData.RedirectPolicy,
     gitProtocolV2: Bool, authorization: String?,
-    configuration: URLSessionConfiguration, appleAsset: Bool = false
+    configuration: URLSessionConfiguration, appleAsset: Bool = false, appleRestore: Bool = false
   ) async throws {
-    try validate(url, maximumBytes: maximumBytes, appleAsset: appleAsset)
+    try validate(
+      url, maximumBytes: maximumBytes, appleAsset: appleAsset, appleRestore: appleRestore)
     try cancellation?.check()
     configuration.httpCookieStorage = nil
     configuration.urlCredentialStorage = nil
     configuration.urlCache = nil
     configuration.timeoutIntervalForRequest = 30
-    configuration.timeoutIntervalForResource = appleAsset ? 3600 : 300
+    configuration.timeoutIntervalForResource = appleAsset || appleRestore ? 3600 : 300
     let delegate = Delegate(url: url, maximumBytes: Int64(maximumBytes), redirects: redirects)
     let session = URLSession(configuration: configuration)
     defer { session.invalidateAndCancel() }
@@ -149,9 +167,13 @@ enum HTTPFile {
         guard response.expectedContentLength <= maximumBytes else {
           throw MisoError.invalid("HTTPS payload exceeds size limit")
         }
-        try Artifacts.copy(
-          temporary, to: output, maximumBytes: maximumBytes,
-          cancellation: cancellation)
+        if appleRestore {
+          try Artifacts.moveDownload(
+            temporary, to: output, maximumBytes: maximumBytes, cancellation: cancellation)
+        } else {
+          try Artifacts.copy(
+            temporary, to: output, maximumBytes: maximumBytes, cancellation: cancellation)
+        }
       }
       group.addTask {
         while true {
