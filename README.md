@@ -128,7 +128,12 @@ and installs the four original developer disk payloads from the signed package.
 The final bundle is `<stage>/image/bundle`. Its construction completion flag remains
 separate from runtime verification: first-launch status, compilation, tests and
 simulator execution still require acceptance on an independent disposable clone.
-End-to-end Xcode acceptance remains pending.
+macOS 27.0.1 (26A434) with Xcode 27.0 (27A266a) passed all 16 native construction
+stages without starting a VM. Separate disposable-clone acceptance on M5 passed
+16 functional controls, nine SDK compiles, three Swift tests and executable probes
+on all four configured Simulator platforms. Base account, SSH and VNC checks also
+passed without manual guest repair. Acceptance retained 23 explicitly reviewed
+diagnostic reports; it did not pass the strict zero-diagnostics policy.
 
 This is an in-progress native migration. The commands below work without starting
 a virtual machine. The experimental `restore` and `base build` commands have
