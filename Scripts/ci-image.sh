@@ -168,17 +168,26 @@ collect() {
     sudo -n find "$work/restore" -maxdepth 3 -name journal.json -type f -print0 |
       while IFS= read -r -d '' path; do
         sudo -n cat "$path" | jq -c \
-          '{operation,status,error,vmStarted,stage:.metadata.stage,target:.metadata.target,ipswDownloaded:.metadata.ipswDownloaded,downloadedIPSWRemoved:.metadata.downloadedIPSWRemoved,keepDownloads:.metadata.keepDownloads,commands:[.commands[] | select(.error != null) | {name,error,result}]}'
+          '{operation,status,error,vmStarted,stage:.metadata.stage,target:.metadata.target,ipswDownloaded:.metadata.ipswDownloaded,downloadedIPSWRemoved:.metadata.downloadedIPSWRemoved,keepDownloads:.metadata.keepDownloads,commands:[.commands[] | {name,startedAt,finishedAt,error,result}]}'
       done > "$evidence/journals.jsonl"
     sudo -n find "$work/restore" -maxdepth 3 -name journal.json -type f -print0 |
       while IFS= read -r -d '' path; do
-        sudo -n cat "$path" | jq -r '.commands[] | select(.error != null) | .stderr' |
+        sudo -n cat "$path" | jq -r '.commands[] | select(.error != null or .result == null) | .stdout,.stderr' |
           while IFS= read -r log; do
             [[ "$log" == logs/* && "$log" != *..* ]] || continue
             printf '\n%s/%s\n' "${path%/journal.json}" "$log"
             sudo -n tail -c 8192 "${path%/journal.json}/$log"
           done
       done > "$evidence/failed-commands.txt"
+    if [[ -s "$evidence/failed-commands.txt" ]]; then
+      ps -axo pid=,ppid=,etime=,pcpu=,state=,comm= |
+        grep -E '/(miso|diskutil|diskarbitrationd|diskmanagementd|storagekitd|local-newfs_apfs)$' \
+        > "$evidence/disk-processes.txt" || true
+      hdiutil info -plist > "$evidence/attachments.plist"
+      sudo -n /usr/bin/log show --last 8m --style compact \
+        --predicate 'process == "diskarbitrationd" OR process == "diskmanagementd" OR process == "storagekitd"' \
+        | tail -200 > "$evidence/disk-services.log"
+    fi
   fi
 }
 

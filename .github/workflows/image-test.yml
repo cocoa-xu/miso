@@ -66,6 +66,7 @@ jobs:
         run: bash Scripts/ci-image.sh verify 2>&1 | tee "$RUNNER_TEMP/image-evidence/verify.log"
       - name: Collect build status
         if: always()
+        timeout-minutes: 5
         run: bash Scripts/ci-image.sh collect
       - uses: actions/upload-artifact@v7
         if: always()
