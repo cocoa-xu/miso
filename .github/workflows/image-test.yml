@@ -2,6 +2,11 @@ name: Image build test
 
 on:
   workflow_dispatch:
+    inputs:
+      keep_downloads:
+        description: Keep the downloaded IPSW until the runner is disposed
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -23,6 +28,7 @@ jobs:
       packages: write
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
+      MISO_KEEP_DOWNLOADS: ${{ inputs.keep_downloads }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -37,7 +43,7 @@ jobs:
       - name: Prepare runner and publication tools
         timeout-minutes: 15
         run: bash Scripts/ci-image.sh prepare 2>&1 | tee "$RUNNER_TEMP/image-evidence/prepare.log"
-      - name: Download verified restore inputs
+      - name: Download verified CLT inputs
         timeout-minutes: 60
         run: bash Scripts/ci-image.sh download 2>&1 | tee "$RUNNER_TEMP/image-evidence/download.log"
       - name: Build and export Vanilla without a VM

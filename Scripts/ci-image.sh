@@ -81,15 +81,26 @@ download() {
     printf 'Downloading %s\n' "$filename"
     fetch "$url" "$work/inputs/packages/$filename" "$bytes" "$digest"
   done < Resources/CI/macos-27.0.1-clt.tsv
-  fetch https://updates.cdn-apple.com/2026FallFCS/59241290-5d51-4ca8-9df4-31624b9a4eac/UniversalMac_27.0.1_26A434_Restore.ipsw \
-    "$work/inputs/restore.ipsw" 26637307067 2f016638293c3e641b8b25391a76fbc16563b3711915a5551cf8aa0f5598a5c1
   df -k / > "$evidence/space-after-download.txt"
 }
 
 build() {
-  sudo -n "$binary" restore "$work/inputs/restore.ipsw" \
-    --packages "$work/inputs/packages" --disk-bytes 68719476736 --output "$work/restore" \
+  (
+    while true; do
+      printf '%s\t%s\n' "$(date -u +%FT%TZ)" "$(df -k "$work" | awk 'NR==2 {print $4}')" \
+        >> "$evidence/space-samples.tsv"
+      sleep 30
+    done
+  ) &
+  monitor_pid=$!
+  local options=(--disk-bytes 68719476736 --output "$work/restore")
+  if [[ ${MISO_KEEP_DOWNLOADS:-false} == true ]]; then options+=(--keep-downloads); fi
+  sudo -n "$binary" restore \
+    https://updates.cdn-apple.com/2026FallFCS/59241290-5d51-4ca8-9df4-31624b9a4eac/UniversalMac_27.0.1_26A434_Restore.ipsw \
+    --packages "$work/inputs/packages" "${options[@]}" \
     > "$evidence/restore.json"
+  jq -e '.profile.release == {version:"27.0.1",build:"26A434"} and .profile.ipswSHA256 == "2f016638293c3e641b8b25391a76fbc16563b3711915a5551cf8aa0f5598a5c1"' \
+    "$evidence/restore.json"
   sudo -n "$binary" bundle export-tart "$work/restore/assembled/bundle" \
     --output "$work/export" > "$evidence/export.json"
   sudo -n cp "$work/restore/assembled/bundle/manifest.json" "$evidence/bundle-manifest.json"
@@ -101,6 +112,9 @@ build() {
   if grep -F "$work/restore" "$evidence/attachments.txt"; then
     printf '%s\n' 'Restore images are still attached.' >&2
     return 1
+  fi
+  if [[ ${MISO_KEEP_DOWNLOADS:-false} == true ]]; then
+    sudo -n mv "$work/restore/downloads" "$work/retained-downloads"
   fi
   sudo -n rm -r "$work/restore" "$work/inputs"
   df -k / > "$evidence/space-after-build.txt"
@@ -154,7 +168,7 @@ collect() {
     sudo -n find "$work/restore" -maxdepth 3 -name journal.json -type f -print0 |
       while IFS= read -r -d '' path; do
         sudo -n cat "$path" | jq -c \
-          '{operation,status,error,vmStarted,stage:.metadata.stage,target:.metadata.target,commands:[.commands[] | select(.error != null) | {name,error,result}]}'
+          '{operation,status,error,vmStarted,stage:.metadata.stage,target:.metadata.target,ipswDownloaded:.metadata.ipswDownloaded,downloadedIPSWRemoved:.metadata.downloadedIPSWRemoved,keepDownloads:.metadata.keepDownloads,commands:[.commands[] | select(.error != null) | {name,error,result}]}'
       done > "$evidence/journals.jsonl"
     sudo -n find "$work/restore" -maxdepth 3 -name journal.json -type f -print0 |
       while IFS= read -r -d '' path; do
@@ -168,10 +182,19 @@ collect() {
   fi
 }
 
+finish() {
+  local status=$?
+  if [[ -n ${monitor_pid:-} ]]; then
+    kill "$monitor_pid" 2>/dev/null || true
+    wait "$monitor_pid" 2>/dev/null || true
+  fi
+  printf '{"stage":"%s","exitCode":%d}\n' "$stage" "$status" > "$evidence/$stage-status.json"
+}
+
 case ${1:-} in
   host|prepare|download|build|publish|verify|collect)
     stage=$1
-    trap 'status=$?; printf "{\"stage\":\"%s\",\"exitCode\":%d}\n" "$stage" "$status" > "$evidence/$stage-status.json"' EXIT
+    trap finish EXIT
     "$stage"
     ;;
   *) printf '%s\n' 'Usage: ci-image.sh host|prepare|download|build|publish|verify|collect' >&2; exit 2 ;;
