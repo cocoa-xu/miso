@@ -47,7 +47,7 @@ jobs:
         timeout-minutes: 60
         run: bash Scripts/ci-image.sh download 2>&1 | tee "$RUNNER_TEMP/image-evidence/download.log"
       - name: Build and export Vanilla without a VM
-        timeout-minutes: 90
+        timeout-minutes: 150
         run: bash Scripts/ci-image.sh build 2>&1 | tee "$RUNNER_TEMP/image-evidence/build-image.log"
       - name: Publish OCI image
         timeout-minutes: 45
