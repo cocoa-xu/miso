@@ -6,6 +6,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: image-build-test
   cancel-in-progress: false
@@ -13,7 +17,10 @@ concurrency:
 jobs:
   image:
     runs-on: xcode-27
-    timeout-minutes: 15
+    timeout-minutes: 240
+    permissions:
+      contents: read
+      packages: write
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
     steps:
@@ -21,27 +28,39 @@ jobs:
         with:
           persist-credentials: false
       - name: Inspect build host
-        shell: bash
         run: |
-          set -euo pipefail
           mkdir -p "$RUNNER_TEMP/image-evidence"
-          {
-            sw_vers
-            uname -m
-            sysctl hw.model hw.memsize
-            sysctl kern.hv_support || true
-            xcodebuild -version
-            swift --version
-            sudo -n id -u
-            csrutil status
-            /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
-              /System/Library/Filesystems/apfs.fs/Contents/Info.plist
-            df -h /
-            diskutil apfs list
-            du -sk /Applications/Xcode*.app /Library/Developer/CoreSimulator \
-              /Users/runner/Library/Android /Users/runner/.rustup \
-              /usr/local/share/dotnet /opt/homebrew /System/Library/AssetsV2 2>/dev/null || true
-          } 2>&1 | tee "$RUNNER_TEMP/image-evidence/host.txt"
+          bash Scripts/ci-image.sh host 2>&1 | tee "$RUNNER_TEMP/image-evidence/host.txt"
+      - name: Build MISO
+        timeout-minutes: 15
+        run: make build 2>&1 | tee "$RUNNER_TEMP/image-evidence/build-miso.log"
+      - name: Prepare runner and publication tools
+        timeout-minutes: 15
+        run: bash Scripts/ci-image.sh prepare 2>&1 | tee "$RUNNER_TEMP/image-evidence/prepare.log"
+      - name: Download verified restore inputs
+        timeout-minutes: 60
+        run: bash Scripts/ci-image.sh download 2>&1 | tee "$RUNNER_TEMP/image-evidence/download.log"
+      - name: Build and export Vanilla without a VM
+        timeout-minutes: 90
+        run: bash Scripts/ci-image.sh build 2>&1 | tee "$RUNNER_TEMP/image-evidence/build-image.log"
+      - name: Publish OCI image
+        timeout-minutes: 45
+        env:
+          TART_REGISTRY_HOSTNAME: ghcr.io
+          TART_REGISTRY_USERNAME: ${{ github.actor }}
+          TART_REGISTRY_PASSWORD: ${{ github.token }}
+        run: bash Scripts/ci-image.sh publish 2>&1 | tee "$RUNNER_TEMP/image-evidence/publish.log"
+      - name: Download and verify published image
+        timeout-minutes: 60
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TART_REGISTRY_HOSTNAME: ghcr.io
+          TART_REGISTRY_USERNAME: ${{ github.actor }}
+          TART_REGISTRY_PASSWORD: ${{ github.token }}
+        run: bash Scripts/ci-image.sh verify 2>&1 | tee "$RUNNER_TEMP/image-evidence/verify.log"
+      - name: Collect build status
+        if: always()
+        run: bash Scripts/ci-image.sh collect
       - uses: actions/upload-artifact@v7
         if: always()
         with:
