@@ -28,13 +28,14 @@ jobs:
           {
             sw_vers
             uname -m
-            sysctl hw.model hw.memsize kern.hv_support
+            sysctl hw.model hw.memsize
+            sysctl kern.hv_support || true
             xcodebuild -version
             swift --version
             sudo -n id -u
             csrutil status
             /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
-              /System/Library/PrivateFrameworks/APFS.framework/Resources/Info.plist
+              /System/Library/Filesystems/apfs.fs/Contents/Info.plist
             df -h /
             diskutil apfs list
             du -sk /Applications/Xcode*.app /Library/Developer/CoreSimulator \
