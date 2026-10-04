@@ -184,6 +184,15 @@ collect() {
         grep -E '/(miso|diskutil|diskarbitrationd|diskmanagementd|storagekitd|local-newfs_apfs)$' \
         > "$evidence/disk-processes.txt" || true
       hdiutil info -plist > "$evidence/attachments.plist"
+      local devices=() device
+      while IFS= read -r device; do
+        [[ "$device" =~ ^/dev/disk[0-9]+(s[0-9]+)*$ ]] || continue
+        devices+=("$device" "/dev/r${device#/dev/}")
+      done < <(plutil -convert json -o - "$evidence/attachments.plist" | jq -r --arg prefix "$work/restore/" \
+        '.images[] | select(."image-path" | startswith($prefix)) | ."system-entities"[]."dev-entry"')
+      if [[ ${#devices[@]} -gt 0 ]]; then
+        sudo -n lsof -nP -- "${devices[@]}" > "$evidence/disk-open-files.txt" 2>&1 || true
+      fi
       sudo -n /usr/bin/log show --last 8m --style compact \
         --predicate 'process == "diskarbitrationd" OR process == "diskmanagementd" OR process == "storagekitd"' \
         | tail -200 > "$evidence/disk-services.log"
