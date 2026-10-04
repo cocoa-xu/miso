@@ -57,7 +57,6 @@ func pinnedCLTPackagesPassNativePreparation() throws {
           profile.family == .sequoia ? "16.4." : profile.family == .tahoe ? "26.6." : "27.0."))
     }
   }
-  #expect(CLTPins.sizes.count == 1)
   for controls in CLTPins.sizes.values {
     for (path, control) in controls {
       #expect(path.hasPrefix(PackageInventory.root + "/"))

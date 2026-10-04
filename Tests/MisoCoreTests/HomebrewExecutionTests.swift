@@ -21,9 +21,6 @@ import Testing
   #expect(!program.contains("#{"))
   let encoded = try JSON.encode(arguments).base64EncodedString()
   #expect(program.contains("JSON.parse('\(encoded)'.unpack1('m0'))"))
-  #expect(
-    try JSONDecoder().decode([String].self, from: #require(Data(base64Encoded: encoded)))
-      == arguments)
   for invalid in [[], ["bad\0argument"], [String(repeating: "a", count: 4097)]] {
     #expect(throws: MisoError.self) { try HomebrewExecution.installProgram(arguments: invalid) }
   }

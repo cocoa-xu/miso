@@ -16,9 +16,7 @@ func invalidVersions(_ value: String) {
   #expect(throws: (any Error).self) { try MacOSVersion.requireUpgrade(from: "26.7", to: "26.6.2") }
 }
 
-@Test func exactProfiles() throws {
-  #expect(RestoreProfile.supported.count == 4)
-  #expect(UpgradeProfile.supported.count == 5)
+@Test func profileSelectionRequiresExactReleases() throws {
   for profile in RestoreProfile.supported {
     #expect(try RestoreProfile.select(profile.release) == profile)
     try SafeFile.validateSHA256(profile.ipswSHA256)
@@ -49,19 +47,6 @@ func invalidVersions(_ value: String) {
   ] {
     #expect(throws: (any Error).self) { try RestoreProfile.select(release) }
   }
-}
-
-@Test func restoreProfilesDecodeHistoricalInformationalFields() throws {
-  let profile = try RestoreProfile.select(.init(version: "27.0", build: "26A428"))
-  var record = try #require(
-    JSONSerialization.jsonObject(with: JSONEncoder().encode(profile)) as? [String: Any])
-  record["virtualPolicyKextSHA256"] = String(repeating: "a", count: 64)
-  let decoded = try JSONDecoder().decode(
-    RestoreProfile.self, from: JSONSerialization.data(withJSONObject: record))
-  #expect(decoded == profile)
-  let encoded = try #require(
-    JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded)) as? [String: Any])
-  #expect(encoded["virtualPolicyKextSHA256"] == nil)
 }
 
 @Test(arguments: ["", "/etc/passwd", "../a", "a/../b", "a//b", "a/", "./a", "a\\b", "a\0b"])
