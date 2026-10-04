@@ -7,6 +7,7 @@ evidence="$RUNNER_TEMP/image-evidence"
 mkdir -p "$evidence"
 binary="$work/bin/miso"
 tart="$work/bin/tart.app/Contents/MacOS/tart"
+export PATH="$work/bin:$PATH"
 export TART_HOME="$work/tart"
 export TART_NO_AUTO_PRUNE=1
 
@@ -40,6 +41,13 @@ prepare() {
   mkdir -p "$work/bin" "$work/inputs/packages" "$TART_HOME/vms"
   cp .build/release/miso "$binary"
   codesign --verify --strict "$binary"
+  cp "$(command -v gh)" "$work/bin/gh"
+  otool -L "$work/bin/gh" > "$evidence/gh-libraries.txt"
+  if grep -q '/opt/homebrew/' "$evidence/gh-libraries.txt"; then
+    printf '%s\n' 'GitHub CLI still requires Homebrew libraries.' >&2
+    return 1
+  fi
+  /usr/bin/jq --version
   fetch https://github.com/openai/tart/releases/download/2.40.1/tart.tar.gz \
     "$work/tart.tar.gz" 22943905 363e2701154a8155cbc1bb6d845430c9b42697d2a186bc49574471ca2877db46
   tar -xzf "$work/tart.tar.gz" -C "$work/bin"
@@ -55,12 +63,16 @@ prepare() {
   done
   for path in "$HOME/Library/Android" "$HOME/.android" "$HOME/.gradle" \
     "$HOME/.rustup" "$HOME/.cargo" "$HOME/Library/Caches/Homebrew" \
+    "$HOME/Library/Caches/org.swift.swiftpm" .build /opt/homebrew \
     /usr/local/share/powershell /usr/local/share/dotnet /usr/local/lib/node_modules \
     /System/Library/AssetsV2/com_apple_MobileAsset_AppleDeveloperDocumentation; do
     if [[ -d "$path" && ! -L "$path" ]]; then sudo -n rm -r "$path"; fi
   done
+  hash -r
+  "$work/bin/gh" --version
+  /usr/bin/git --version
   df -k / | tee "$evidence/space-after-cleanup.txt"
-  [[ $(df -k "$work" | awk 'NR==2 {print $4}') -ge 73400320 ]]
+  [[ $(df -k "$work" | awk 'NR==2 {print $4}') -ge 93323264 ]]
 }
 
 download() {
