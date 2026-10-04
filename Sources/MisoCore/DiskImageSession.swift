@@ -313,12 +313,19 @@ public final class DiskImageSession {
 
   public func detach() throws {
     guard attachmentAttempted else { return }
+    for attempt in 0..<5 {
+      if try detachAttempt(allowBusy: attempt < 4) { return }
+      Thread.sleep(forTimeInterval: TimeInterval(1 << attempt))
+    }
+  }
+
+  private func detachAttempt(allowBusy: Bool) throws -> Bool {
     let matches = try matchingImages(cleanup: true)
     if matches.isEmpty {
       whole = nil
       attachment = nil
       attachmentAttempted = false
-      return
+      return true
     }
     guard matches.count == 1, let match = matches.first else {
       throw MisoError.invalid("Ambiguous image attachment; refusing detach")
@@ -336,8 +343,9 @@ public final class DiskImageSession {
     }
     try journal.run(
       "detach-image", NativeCommand(.diskImages, arguments: ["detach", device], timeout: 120),
-      cleanup: true, expectedExitCodes: forceReadOnlyDetach ? [0, 16] : [0])
+      cleanup: true, expectedExitCodes: allowBusy || forceReadOnlyDetach ? [0, 16] : [0])
     if journal.record.commands.last?.result?.exitCode == 16 {
+      if allowBusy { return false }
       let current = try matchingImages(cleanup: true)
       guard forceReadOnlyDetach, readOnly, current.count == 1, current[0].writable == false,
         current[0].entities.contains(where: { $0.device == device })
@@ -355,5 +363,6 @@ public final class DiskImageSession {
     whole = nil
     attachment = nil
     attachmentAttempted = false
+    return true
   }
 }
