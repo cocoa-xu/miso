@@ -125,12 +125,12 @@ public enum VolumeConstruction {
           (
             .main,
             [
-              ("Macintosh HD - Data", "D"), ("Preboot", "B"), ("Recovery", "R"), ("VM", "V"),
-              ("Update", "E"),
+              ("Macintosh HD - Data", "d"), ("Preboot", "b"), ("Recovery", "r"), ("VM", "v"),
+              ("Update", "p"),
             ]
           ),
-          (.isc, [("iSCPreboot", "B"), ("Hardware", "H"), ("xART", "0"), ("Recovery", "R")]),
-          (.recovery, [("Recovery", "R"), ("Update", "E")]),
+          (.isc, [("iSCPreboot", "b"), ("Hardware", "h"), ("xART", "0"), ("Recovery", "r")]),
+          (.recovery, [("Recovery", "r"), ("Update", "p")]),
         ]
         for (kind, volumes) in additions {
           guard let container = state[kind] else {
@@ -138,14 +138,12 @@ public enum VolumeConstruction {
           }
           for (index, value) in volumes.enumerated() {
             try session.verifyOwnership()
+            var arguments = ["-A", "-w", "-v", value.0]
+            if value.1 != "0" { arguments += ["-R", value.1] }
+            arguments.append("/dev/" + container.device)
             try journal.run(
               "add-\(kind.rawValue)-\(index)",
-              NativeCommand(
-                .disks,
-                arguments: [
-                  "apfs", "addVolume", container.device, "APFS", value.0, "-role", value.1,
-                  "-nomount",
-                ]))
+              newfs.command(arguments: arguments, timeout: 300))
           }
         }
         state = try select(session)
