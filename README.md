@@ -85,7 +85,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$RUNNER_TEMP/miso"
-          gh release download v0.2.0 --repo cocoa-xu/miso \
+          gh release download v0.2.1 --repo cocoa-xu/miso \
             --pattern 'miso.tar.gz*' --dir "$RUNNER_TEMP/miso"
           cd "$RUNNER_TEMP/miso"
           shasum -a 256 -c miso.tar.gz.sha256
