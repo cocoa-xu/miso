@@ -3,20 +3,27 @@ import Darwin
 import Foundation
 
 enum APFSPrivate {
+  static let frameworkPath = "/System/Library/PrivateFrameworks/APFS.framework/APFS"
+  static let groupSymbol = "APFSContainerVolumeGroupAdd"
+
   static func requireHost() throws -> String {
     let host = try HostInfo.current()
     let path = URL(fileURLWithPath: "/System/Library/Filesystems/apfs.fs/Contents/Info.plist")
-    let info = try RestoreInspection.plist(SafeFile.read(path, limit: 1 << 20))
-    return try validateHost(host, apfsVersion: info["CFBundleVersion"] as? String)
+    let info = try? RestoreInspection.plist(SafeFile.read(path, limit: 1 << 20))
+    let version = try validateHost(host, apfsVersion: info?["CFBundleVersion"] as? String)
+    let library = try NativeLibrary(frameworkPath, host: host)
+    defer { withExtendedLifetime(library) {} }
+    _ = try library.symbol(groupSymbol)
+    return version
   }
 
   static func validateHost(_ host: HostInfo, apfsVersion: String?) throws -> String {
-    guard host.architecture == "arm64", host.productVersion == "27.0",
-      ["26A5425a", "26A428"].contains(host.productBuild), apfsVersion == "3288.1.3"
-    else {
-      throw MisoError.unsupported("private APFS operations on this host build")
+    guard host.architecture == "arm64" else {
+      throw MisoError.unsupported(
+        "Offline image construction requires arm64; host is \(host.architecture) "
+          + "on macOS \(host.productVersion) (\(host.productBuild))")
     }
-    return "3288.1.3"
+    return apfsVersion ?? "unknown"
   }
 
   static func group(_ session: DiskImageSession, container: UUID, system: UUID, data: UUID) throws {
@@ -35,10 +42,9 @@ enum APFSPrivate {
       }
       indices.append(NSNumber(value: index))
     }
-    guard let framework = dlopen("/System/Library/PrivateFrameworks/APFS.framework/APFS", RTLD_NOW),
-      let symbol = dlsym(framework, "APFSContainerVolumeGroupAdd")
-    else { throw MisoError.unsupported("APFS volume-group API unavailable") }
-    defer { dlclose(framework) }
+    let library = try NativeLibrary(frameworkPath)
+    defer { withExtendedLifetime(library) {} }
+    let symbol = try library.symbol(groupSymbol)
     typealias AddGroup =
       @convention(c) (UnsafePointer<CChar>, CFArray, UnsafeMutableRawPointer) -> Int32
     let add = unsafeBitCast(symbol, to: AddGroup.self)
@@ -47,7 +53,9 @@ enum APFSPrivate {
       ("/dev/" + selected.device).withCString { add($0, indices as CFArray, bytes.baseAddress!) }
     }
     guard status == 0 else {
-      throw MisoError.invalid("APFS volume-group creation failed (\(status))")
+      throw MisoError.invalid(
+        "\(groupSymbol) in \(frameworkPath) returned \(status) for /dev/\(selected.device) "
+          + "on macOS \(library.host.productVersion) (\(library.host.productBuild))")
     }
   }
 }

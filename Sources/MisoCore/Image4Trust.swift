@@ -51,7 +51,6 @@ enum Image4Trust {
   static func authenticate(_ image: Data, type: String, decoder: Decoder, nonce: Bool = false)
     throws -> Data?
   {
-    _ = try APFSPrivate.requireHost()
     let measurement = try evaluate(image, type: type, decoder: decoder, nonce: nonce, trusted: true)
     let fields = try fields(image)
     let root = try DER.one(image)
@@ -86,10 +85,11 @@ enum Image4Trust {
   static func evaluate(
     _ image: Data, type expectedType: String, decoder: Decoder, nonce: Bool, trusted: Bool
   ) throws -> Data? {
-    guard image.count <= 128 << 20, expectedType.utf8.count == 4,
-      let library = dlopen("/usr/lib/libamsupport.dylib", RTLD_NOW)
-    else { throw MisoError.invalid("Invalid Image4 input or unavailable host decoder") }
-    defer { dlclose(library) }
+    guard image.count <= 128 << 20, expectedType.utf8.count == 4 else {
+      throw MisoError.invalid("Invalid Image4 input")
+    }
+    let library = try NativeLibrary("/usr/lib/libamsupport.dylib")
+    defer { withExtendedLifetime(library) {} }
     typealias Initialize =
       @convention(c) (UnsafeRawPointer?, Int, UnsafeMutableRawPointer?) -> Int32
     typealias PayloadType =
@@ -107,13 +107,12 @@ enum Image4Trust {
         UnsafeRawPointer?, UInt32, UnsafeMutablePointer<UnsafeRawPointer?>?,
         UnsafeMutablePointer<Int>?
       ) -> Int32
-    guard let initializeSymbol = dlsym(library, "Img4DecodeInit"),
-      let payloadSymbol = dlsym(library, "Img4DecodeGetPayloadType"),
-      let trustSymbol = dlsym(library, "Img4DecodePerformTrustEvaluation"),
-      let measurementSymbol = dlsym(library, "Img4DecodeCopyManifestTrustedBootPolicyMeasurement"),
-      let dataSymbol = dlsym(library, "Img4DecodeGetPropertyData"),
-      let implementation = dlsym(library, decoder.rawValue)
-    else { throw MisoError.unsupported("host Image4 functions") }
+    let initializeSymbol = try library.symbol("Img4DecodeInit")
+    let payloadSymbol = try library.symbol("Img4DecodeGetPayloadType")
+    let trustSymbol = try library.symbol("Img4DecodePerformTrustEvaluation")
+    let measurementSymbol = try library.symbol("Img4DecodeCopyManifestTrustedBootPolicyMeasurement")
+    let dataSymbol = try library.symbol("Img4DecodeGetPropertyData")
+    let implementation = try library.symbol(decoder.rawValue)
     let initialize = unsafeBitCast(initializeSymbol, to: Initialize.self)
     let payloadType = unsafeBitCast(payloadSymbol, to: PayloadType.self)
     let trust = unsafeBitCast(trustSymbol, to: Trust.self)
@@ -149,9 +148,7 @@ enum Image4Trust {
         throw MisoError.invalid("Apple Image4 initialization failed")
       }
       if nonce {
-        guard let symbol = dlsym(library, "Img4DecodeGetRestoreInfoData") else {
-          throw MisoError.unsupported("Image4 restore nonce getter")
-        }
+        let symbol = try library.symbol("Img4DecodeGetRestoreInfoData")
         let getRestore = unsafeBitCast(symbol, to: RestoreData.self)
         var pointer: UnsafeRawPointer?
         var length = 0

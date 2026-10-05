@@ -16,9 +16,10 @@ export PATH="$HOME/.local/bin:$PATH"
 miso --version
 ```
 
-Image construction currently requires macOS 27.0 (26A428 or 26A5425a), an APFS
-workspace and administrator privileges. Downloads and Apple personalization need
-network access. No Python or third-party `ipsw` executable is required.
+Image construction requires Apple silicon macOS, an APFS workspace and administrator
+privileges. Required host interfaces are checked at runtime; missing interfaces are
+reported by name. Downloads and Apple personalization need network access.
+No Python or third-party `ipsw` executable is required.
 
 ## Build an image
 
