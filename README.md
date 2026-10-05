@@ -54,6 +54,16 @@ sudo "$(command -v miso)" base build --source vanilla/assembled/bundle \
 Use `miso base --help` for input preparation and `miso xcode --help` for Xcode,
 SDK and Simulator installation. Each subcommand provides its own `--help`.
 
+Final images automatically compress eligible installed files and reclaim unused
+APFS blocks. To optimize an existing, trusted MISO bundle into a new clone:
+
+```sh
+sudo "$(command -v miso)" bundle optimize /path/to/bundle --output optimized
+```
+
+The result is `optimized/bundle`; the source is preserved. Add `--no-compress` to
+only reclaim free blocks, or `--username NAME` for a different guest account.
+
 ## GitHub Actions
 
 Install a release in an Apple silicon macOS job, then run MISO in later steps:

@@ -5,7 +5,28 @@ import MisoCore
 struct Bundle: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     abstract: "Check bundle integrity or validate a VM configuration without creating a VM.",
-    subcommands: [Verify.self, Validate.self, Assemble.self, ExportTart.self])
+    subcommands: [Verify.self, Validate.self, Assemble.self, Optimize.self, ExportTart.self])
+
+  struct Optimize: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Compress installed payloads and reclaim APFS free blocks in a new offline clone.")
+    @Argument var directory: String
+    @Option var output: String
+    @Option var username = "admin"
+    @Flag(
+      inversion: .prefixedNo,
+      help: "Compress eligible installed files before reclaiming free blocks.")
+    var compress = true
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        ImageOptimization.run(
+          source: fileURL(directory), output: fileURL(output),
+          username: username, compress: compress, cancellation: cancellation.token))
+    }
+  }
 
   struct ExportTart: AsyncParsableCommand {
     static let configuration = CommandConfiguration(

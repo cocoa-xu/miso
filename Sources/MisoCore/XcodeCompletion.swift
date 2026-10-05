@@ -28,6 +28,7 @@ public enum XcodeCompletion {
   @MainActor
   public static func run(
     source: URL, output: URL, configuration: XcodeConfiguration = .init(),
+    username: String = "admin",
     cancellation: CancellationToken? = nil
   ) throws -> Receipt {
     try configuration.validate()
@@ -39,7 +40,8 @@ public enum XcodeCompletion {
     return try journal.perform {
       let image = try BaseImageStage.run(
         source: source, output: output.appendingPathComponent("image"),
-        operation: "xcode-finalize", layer: .xcode, cancellation: journal.cancellation
+        operation: "xcode-finalize", layer: .xcode, cancellation: journal.cancellation,
+        optimizationUsername: username, xcodeApplication: configuration.applicationPath
       ) { bundle, target, stage in
         let session = try DiskImageSession(
           image: bundle.appendingPathComponent("disk.img"), readOnly: false, journal: stage)
@@ -78,7 +80,6 @@ public enum XcodeCompletion {
       try SafeFile.replace(
         JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]),
         at: manifestURL)
-      _ = try ImageBundle.verify(bundle)
       return Receipt(image: image, bundle: "image/bundle")
     }
   }

@@ -110,8 +110,14 @@ public enum BundleAssembly {
           readOnly: true)
         try Artifacts.requireSpace(8 << 30, at: data.root)
       }
+      let configuration = try ImageConfiguration.read(
+        Artifacts.resolve(
+          inputs.receipt.configuration, under: prepared, cancellation: journal.cancellation))
+      let optimization = try ImageOptimization.apply(
+        bundle: bundle, username: configuration.username, journal: journal)
       let files = try ImageBundle.requiredFiles.sorted().map {
-        try Artifacts.record(bundle.appendingPathComponent($0), relativeTo: bundle)
+        try Artifacts.record(
+          bundle.appendingPathComponent($0), relativeTo: bundle, cancellation: journal.cancellation)
       }
       let manifest: [String: Any] = [
         "schema_version": 1,
@@ -120,12 +126,12 @@ public enum BundleAssembly {
         "construction_vm_started": false, "runtime_verified": false, "cross_mac_verified": false,
         "install_rosetta": false, "minimum_cpus": 2, "minimum_memory_bytes": UInt64(4 << 30),
         "network_configuration": "supplied-by-launcher",
+        "optimization": try JSONSerialization.jsonObject(with: JSON.encode(optimization)),
         "files": try JSONSerialization.jsonObject(with: JSON.encode(files)),
       ]
       try SafeFile.writeNew(
         JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]),
         to: bundle.appendingPathComponent("manifest.json"))
-      _ = try ImageBundle.verify(bundle)
       let result = Receipt(
         profile: boot.profile, sourceJournal: source.journalRecord,
         bootJournal: try Artifacts.record(journalURL, relativeTo: bootStage), files: files,

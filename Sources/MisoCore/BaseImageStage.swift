@@ -27,7 +27,8 @@ enum BaseImageStage {
 
   static func run<T: Encodable>(
     source: URL, output: URL, operation: String, layer: Layer = .base,
-    cancellation: CancellationToken?,
+    cancellation: CancellationToken?, optimizationUsername: String? = nil,
+    xcodeApplication: String? = nil,
     body: (URL, MacOSRelease, ExecutionJournal) throws -> T
   ) throws -> BaseStageReceipt<T> {
     guard geteuid() == 0 else {
@@ -47,8 +48,9 @@ enum BaseImageStage {
     else { throw MisoError.invalid("A never-booted native source bundle is required") }
     try advanceManifest(&manifest, operation: operation, layer: layer)
     let target = try RestoreProfile.select(.init(version: version, build: build)).release
+    let sourceState = try ImageBundle.snapshot(source)
     let verificationStarted = ProcessInfo.processInfo.systemUptime
-    let original = try ImageBundle.verify(source)
+    let original = try ImageBundle.verify(source, cancellation: cancellation)
     let initialVerificationSeconds = ProcessInfo.processInfo.systemUptime - verificationStarted
     let journal = try ExecutionJournal(
       output: output, operation: operation, cancellation: cancellation)
@@ -65,16 +67,21 @@ enum BaseImageStage {
           source.appendingPathComponent(name), to: bundle.appendingPathComponent(name))
       }
       let details = try journal.measure("stageSeconds") { try body(bundle, target, journal) }
-      try sourceSession.requireDetached()
-      let sourceAfter = try journal.measure("finalSourceVerificationSeconds") {
-        try ImageBundle.verify(source)
+      if let optimizationUsername {
+        let optimization = try ImageOptimization.apply(
+          bundle: bundle, username: optimizationUsername, application: xcodeApplication,
+          journal: journal)
+        manifest["optimization"] = try JSONSerialization.jsonObject(with: JSON.encode(optimization))
       }
-      guard sourceAfter.files == original.files,
+      try sourceSession.requireDetached()
+      guard try ImageBundle.snapshot(source) == sourceState,
         try Artifacts.record(manifestURL, relativeTo: source) == sourceManifest
       else { throw MisoError.invalid("Base source changed during construction") }
       let files = try journal.measure("outputHashingSeconds") {
         try ImageBundle.requiredFiles.sorted().map {
-          try Artifacts.record(bundle.appendingPathComponent($0), relativeTo: bundle)
+          try Artifacts.record(
+            bundle.appendingPathComponent($0), relativeTo: bundle,
+            cancellation: journal.cancellation)
         }
       }
       for file in files where file.path != "disk.img" {
@@ -88,7 +95,6 @@ enum BaseImageStage {
       try SafeFile.writeNew(
         JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]),
         to: bundle.appendingPathComponent("manifest.json"))
-      try journal.measure("outputVerificationSeconds") { try ImageBundle.verify(bundle) }
       if FileManager.default.fileExists(
         atPath: output.appendingPathComponent("execution-root").path)
       {

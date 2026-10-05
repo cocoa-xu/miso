@@ -48,7 +48,8 @@ public enum BaseCleanup {
     let plan = try JSON.read(Plan.self, from: planURL)
     try plan.validate()
     return try BaseImageStage.run(
-      source: source, output: output, operation: "base-cleanup", cancellation: cancellation
+      source: source, output: output, operation: "base-cleanup", cancellation: cancellation,
+      optimizationUsername: username
     ) { bundle, target, journal in
       guard target == plan.target else { throw MisoError.invalid("Cleanup target mismatch") }
       try journal.setMetadata("cleanupPlan", value: plan)

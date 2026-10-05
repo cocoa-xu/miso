@@ -21,6 +21,7 @@ struct Xcode: AsyncParsableCommand {
     @Option var source: String
     @Option var output: String
     @Option var config: String?
+    @Option var username = "admin"
 
     @MainActor func run() async throws {
       let cancellation = try CancellationScope()
@@ -31,7 +32,7 @@ struct Xcode: AsyncParsableCommand {
           configuration: try config.map {
             try JSON.read(XcodeConfiguration.self, from: fileURL($0))
           }
-            ?? .init(), cancellation: cancellation.token))
+            ?? .init(), username: username, cancellation: cancellation.token))
     }
   }
 

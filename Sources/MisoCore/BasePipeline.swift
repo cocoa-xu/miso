@@ -109,7 +109,7 @@ public enum BasePipeline {
           arguments: [
             "base", "cleanup", "--source", current.path, "--plan", cleanupPlanURL.path,
             "--output", finalStage.path, "--username", recipe.username,
-          ], timeout: 1800))
+          ], timeout: 10800))
       try validateStage(finalStage, operation: "base-cleanup", target: recipe.target)
       current = finalStage.appendingPathComponent("bundle")
       completed.append("base-cleanup")

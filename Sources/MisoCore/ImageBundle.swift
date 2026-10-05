@@ -1,6 +1,34 @@
+import Darwin
 import Foundation
 
 public enum ImageBundle {
+  struct FileState: Equatable {
+    let device: dev_t
+    let inode: ino_t
+    let bytes: UInt64
+    let modified: [Int]
+    let changed: [Int]
+  }
+
+  static func snapshot(_ directory: URL) throws -> [String: FileState] {
+    try Dictionary(
+      uniqueKeysWithValues: requiredFiles.map { name in
+        let url = directory.appendingPathComponent(name)
+        try SafeFile.requireNoSymlinks(url)
+        let info = try FileMetadata.inspect(url)
+        guard info.st_mode & S_IFMT == S_IFREG, info.st_size > 0 else {
+          throw MisoError.invalid("Expected nonempty bundle file")
+        }
+        return (
+          name,
+          FileState(
+            device: info.st_dev, inode: info.st_ino, bytes: UInt64(info.st_size),
+            modified: [info.st_mtimespec.tv_sec, info.st_mtimespec.tv_nsec],
+            changed: [info.st_ctimespec.tv_sec, info.st_ctimespec.tv_nsec])
+        )
+      })
+  }
+
   public static let requiredFiles: Set<String> = [
     "disk.img", "aux.bin", "hardware-model.bin", "machine-identifier.bin",
   ]
