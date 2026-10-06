@@ -3,6 +3,15 @@ import Virtualization
 
 @MainActor
 public enum TartBundle {
+  struct Configuration: Decodable {
+    let version: Int
+    let os: String
+    let arch: String
+    let diskFormat: String
+    let hardwareModel: Data
+    let ecid: Data
+  }
+
   struct Metadata: Decodable {
     let target: MacOSRelease
     let constructionVMStarted: Bool
@@ -23,6 +32,62 @@ public enum TartBundle {
     public let files: [ImageBundle.FileRecord]
     public let bundle = "vm"
     public let vmStarted = false
+  }
+
+  public struct ImportReceipt: Encodable, Sendable {
+    public let target: MacOSRelease
+    public let sourceManifest: ImageBundle.FileRecord
+    public let files: [ImageBundle.FileRecord]
+    public let bundle = "bundle"
+    public let vmStarted = false
+  }
+
+  public static func importImage(
+    source: URL, manifest manifestURL: URL, output: URL,
+    cancellation: CancellationToken? = nil
+  ) throws -> ImportReceipt {
+    _ = try GuestVolume(source)
+    let bytes = try SafeFile.read(manifestURL, limit: 1 << 20)
+    let metadata = try JSONDecoder().decode(Metadata.self, from: bytes)
+    let manifest = try JSONDecoder().decode(ImageBundle.Manifest.self, from: bytes)
+    try manifest.validate()
+    _ = try RestoreProfile.select(metadata.target)
+    let fields = try JSONSerialization.jsonObject(with: bytes) as? [String: Any]
+    guard !metadata.constructionVMStarted, fields?["runtime_verified"] as? Bool == false else {
+      throw MisoError.invalid("Tart import requires the original unbooted MISO manifest")
+    }
+    let configuration = try JSON.read(
+      Configuration.self, from: source.appendingPathComponent("config.json"), limit: 1 << 20)
+    let records = Dictionary(uniqueKeysWithValues: manifest.files.map { ($0.path, $0) })
+    guard configuration.version == 1, configuration.os == "darwin",
+      configuration.arch == "arm64", configuration.diskFormat == "raw",
+      VZMacHardwareModel(dataRepresentation: configuration.hardwareModel) != nil,
+      VZMacMachineIdentifier(dataRepresentation: configuration.ecid) != nil,
+      SafeFile.sha256(configuration.hardwareModel) == records["hardware-model.bin"]?.sha256,
+      SafeFile.sha256(configuration.ecid) == records["machine-identifier.bin"]?.sha256,
+      records["aux.bin"]?.bytes == UInt64(AuxiliaryStorage.size)
+    else { throw MisoError.invalid("Tart image identity differs from its MISO manifest") }
+    let journal = try ExecutionJournal(
+      output: output, operation: "import-tart", cancellation: cancellation)
+    return try journal.perform {
+      let bundle = output.appendingPathComponent("bundle")
+      try SafeFile.makeDirectory(bundle)
+      try SafeFile.writeNew(
+        configuration.hardwareModel, to: bundle.appendingPathComponent("hardware-model.bin"))
+      try SafeFile.writeNew(
+        configuration.ecid, to: bundle.appendingPathComponent("machine-identifier.bin"))
+      for (original, name) in [("disk.img", "disk.img"), ("nvram.bin", "aux.bin")] {
+        try Artifacts.clone(
+          source.appendingPathComponent(original), to: bundle.appendingPathComponent(name))
+      }
+      try SafeFile.writeNew(bytes, to: bundle.appendingPathComponent("manifest.json"))
+      let verification = try ImageBundle.verify(bundle, cancellation: journal.cancellation)
+      return ImportReceipt(
+        target: metadata.target,
+        sourceManifest: .init(
+          path: manifestURL.lastPathComponent, bytes: UInt64(bytes.count),
+          sha256: SafeFile.sha256(bytes)), files: verification.files)
+    }
   }
 
   public static func export(

@@ -26,7 +26,7 @@ private func exportFixture(_ directory: URL) throws -> URL {
   }
   let manifest: [String: Any] = [
     "schema_version": 1, "target": ["version": "27.0.1", "build": "26A434"],
-    "construction_vm_started": false, "minimum_cpus": 2,
+    "construction_vm_started": false, "runtime_verified": false, "minimum_cpus": 2,
     "minimum_memory_bytes": UInt64(4 << 30),
     "files": try JSONSerialization.jsonObject(with: JSON.encode(files)),
   ]
@@ -77,5 +77,50 @@ private func exportFixture(_ directory: URL) throws -> URL {
   let output = temporary.url.appendingPathComponent("export")
   try SafeFile.replace(Data("corrupt disk".utf8), at: source.appendingPathComponent("disk.img"))
   #expect(throws: MisoError.self) { try TartBundle.export(source: source, output: output) }
+  #expect(!FileManager.default.fileExists(atPath: output.path))
+}
+
+@Test @MainActor func tartImportRoundTripPreservesTheManifestAndIsolatesChanges() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let source = try exportFixture(temporary.url)
+  let exported = temporary.url.appendingPathComponent("export")
+  _ = try TartBundle.export(source: source, output: exported)
+  let output = temporary.url.appendingPathComponent("import")
+  let manifest = source.appendingPathComponent("manifest.json")
+  _ = try TartBundle.importImage(
+    source: exported.appendingPathComponent("vm"), manifest: manifest, output: output)
+  #expect(
+    try SafeFile.read(output.appendingPathComponent("bundle/manifest.json"), limit: 1 << 20)
+      == SafeFile.read(manifest, limit: 1 << 20))
+  try SafeFile.replace(
+    Data("changed clone".utf8), at: output.appendingPathComponent("bundle/disk.img"))
+  #expect(
+    try SafeFile.read(exported.appendingPathComponent("vm/disk.img"), limit: 1024)
+      == Data("disk fixture".utf8))
+}
+
+@Test @MainActor func tartImportRejectsChangedDiskAndMachineIdentity() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let source = try exportFixture(temporary.url)
+  let exported = temporary.url.appendingPathComponent("export")
+  _ = try TartBundle.export(source: source, output: exported)
+  let vm = exported.appendingPathComponent("vm")
+  let manifest = source.appendingPathComponent("manifest.json")
+  try SafeFile.replace(Data("changed disk".utf8), at: vm.appendingPathComponent("disk.img"))
+  #expect(throws: MisoError.self) {
+    try TartBundle.importImage(
+      source: vm, manifest: manifest, output: temporary.url.appendingPathComponent("bad-disk"))
+  }
+  let configURL = vm.appendingPathComponent("config.json")
+  var config = try #require(
+    JSONSerialization.jsonObject(with: SafeFile.read(configURL, limit: 1 << 20)) as? [String: Any])
+  config["ecid"] = VZMacMachineIdentifier().dataRepresentation.base64EncodedString()
+  try SafeFile.replace(JSONSerialization.data(withJSONObject: config), at: configURL)
+  let output = temporary.url.appendingPathComponent("bad-identity")
+  #expect(throws: MisoError.self) {
+    try TartBundle.importImage(source: vm, manifest: manifest, output: output)
+  }
   #expect(!FileManager.default.fileExists(atPath: output.path))
 }

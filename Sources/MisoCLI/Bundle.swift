@@ -5,7 +5,26 @@ import MisoCore
 struct Bundle: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     abstract: "Check bundle integrity or validate a VM configuration without creating a VM.",
-    subcommands: [Verify.self, Validate.self, Assemble.self, Optimize.self, ExportTart.self])
+    subcommands: [
+      Verify.self, Validate.self, Assemble.self, Optimize.self, ExportTart.self, ImportTart.self,
+    ])
+
+  struct ImportTart: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Import an unbooted Tart image using its original MISO manifest.")
+    @Argument var directory: String
+    @Option var manifest: String
+    @Option var output: String
+
+    @MainActor func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        TartBundle.importImage(
+          source: fileURL(directory), manifest: fileURL(manifest), output: fileURL(output),
+          cancellation: cancellation.token))
+    }
+  }
 
   struct Optimize: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
