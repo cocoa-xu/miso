@@ -33,7 +33,10 @@ enum BaseExecutionView {
     -> Prepared
   {
     try journal.measure("executionViewSeconds", progress: "Prepare offline execution environment") {
-      let mode = try Mode.select(target)
+      let host = journal.record.host.productBuild
+      let mode = try Mode.select(target, hostBuild: host)
+      BuildProgress.write(
+        "Execution environment: \(mode.rawValue), host \(host), target \(target.build)")
       try journal.setMetadata("executionViewMode", value: mode)
       let root: URL
       switch mode {
@@ -62,19 +65,25 @@ enum BaseExecutionView {
     }
     try Artifacts.requireSpace((target.build == "26A434" ? 20 : 12) << 30, at: journal.output)
     let session = try DiskImageSession(image: image, readOnly: true, journal: journal)
+    BuildProgress.write("Attaching execution image read-only")
     return try session.withAttachment { session in
-      let main = try BaseImageStage.mainContainer(session)
-      let system = try ImageMounts.mount(
-        main.volume(role: "System"), session: session, journal: journal,
-        name: "view-system", readOnly: true)
-      let data = try ImageMounts.mount(
-        main.volume(role: "Data"), session: session, journal: journal,
-        name: "view-data", readOnly: true)
-      let version = try system.plist("System/Library/CoreServices/SystemVersion.plist")
-      guard version["ProductVersion"] as? String == target.version,
-        version["ProductBuildVersion"] as? String == target.build
-      else {
-        throw MisoError.invalid("Execution System version differs from target")
+      let (system, data) = try journal.measure(
+        "executionMountSeconds", progress: "Mount execution volumes and verify target version"
+      ) {
+        let main = try BaseImageStage.mainContainer(session)
+        let system = try ImageMounts.mount(
+          main.volume(role: "System"), session: session, journal: journal,
+          name: "view-system", readOnly: true)
+        let data = try ImageMounts.mount(
+          main.volume(role: "Data"), session: session, journal: journal,
+          name: "view-data", readOnly: true)
+        let version = try system.plist("System/Library/CoreServices/SystemVersion.plist")
+        guard version["ProductVersion"] as? String == target.version,
+          version["ProductBuildVersion"] as? String == target.build
+        else {
+          throw MisoError.invalid("Execution System version differs from target")
+        }
+        return (system, data)
       }
       guard
         let firmlinkText = String(
@@ -89,6 +98,17 @@ enum BaseExecutionView {
       let resign = ["25G83", "26A434"].contains(target.build)
       if !resign {
         throw MisoError.unsupported("Base execution view for target build \(target.build)")
+      }
+      var copiedFiles = 0
+      var copiedBytes: UInt64 = 0
+      var lastCopyReport = ProcessInfo.processInfo.systemUptime
+      func reportCopy(_ relative: String, force: Bool = false) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard force || now - lastCopyReport >= 30 else { return }
+        lastCopyReport = now
+        let size = String(format: "%.2f", Double(copiedBytes) / Double(1 << 30))
+        BuildProgress.write(
+          "Execution copy: \(copiedFiles) files, \(size) GiB logical; \(relative)")
       }
       func copy(_ source: URL, _ relative: String, device: dev_t) throws {
         try journal.cancellation.check()
@@ -154,15 +174,24 @@ enum BaseExecutionView {
                 Executable(path: relative, originalSHA256: digest, executionSHA256: digest))
             }
           }
+          copiedFiles += 1
+          copiedBytes += UInt64(info.st_size)
+          reportCopy(relative)
         case S_IFLNK:
           let link = try FileManager.default.destinationOfSymbolicLink(atPath: source.path)
           try createLink(link, at: destination, mode: info.st_mode & 0o755)
         default: throw MisoError.invalid("Unsupported execution source entry")
         }
       }
-      for name in try FileManager.default.contentsOfDirectory(atPath: system.root.path).sorted()
-      where name != "dev" {
-        try copy(system.root.appendingPathComponent(name), name, device: system.device)
+      try journal.measure(
+        "executionCopySeconds", progress: "Copy temporary System files and verify Apple tools"
+      ) {
+        for name in try FileManager.default.contentsOfDirectory(atPath: system.root.path).sorted()
+        where name != "dev" {
+          try BuildProgress.run("Copy execution /\(name)") {
+            try copy(system.root.appendingPathComponent(name), name, device: system.device)
+          }
+        }
       }
       let view = try GuestVolume(root)
       for path in ["dev", "System/Volumes", "System/Volumes/Data", "System/Volumes/Preboot"] {
@@ -172,41 +201,66 @@ enum BaseExecutionView {
           throw MisoError.system("Set execution mount directory mode", errno)
         }
       }
-      try buildLibraryOverlay(data: data, root: root, copy: copy)
-      for (path, target) in bindings.sorted(by: { $0.key < $1.key }) {
-        if path == "Library" { continue }
-        try linkData(path, target: target, root: view)
+      try journal.measure("executionLibrarySeconds", progress: "Prepare Library and compiler tools")
+      {
+        try buildLibraryOverlay(data: data, root: root) { source, relative, device in
+          try BuildProgress.run("Copy \(relative) with Apple signatures") {
+            try copy(source, relative, device: device)
+          }
+        }
       }
-      if bindings["opt"] == nil { try linkData("opt", target: "opt", root: view) }
-      for offset in stride(from: 0, to: originals.count, by: 48) {
-        let group = originals[offset..<min(offset + 48, originals.count)]
-        try journal.run(
-          "remove-execution-signatures",
-          NativeCommand(
-            .codesign,
-            arguments: ["--remove-signature"]
-              + group.map { root.appendingPathComponent($0.0).path }, timeout: 180))
-        try journal.run(
-          "sign-execution-tools",
-          NativeCommand(
-            .codesign,
-            arguments: ["--sign", "-", "--timestamp=none"]
-              + group.map { root.appendingPathComponent($0.0).path }, timeout: 180))
+      reportCopy("copy complete", force: true)
+      try journal.measure("executionLinkSeconds", progress: "Link execution Data directories") {
+        for (path, target) in bindings.sorted(by: { $0.key < $1.key }) {
+          if path == "Library" { continue }
+          try linkData(path, target: target, root: view)
+        }
+        if bindings["opt"] == nil { try linkData("opt", target: "opt", root: view) }
       }
-      let executableRecords = try originals.map {
-        let executable = root.appendingPathComponent($0.0)
-        try renewSignedExecutable(executable)
-        try AppleCode.validateLocalTool(executable, scope: .executable)
-        return Executable(
-          path: $0.0, originalSHA256: $0.1,
-          executionSHA256: try SafeFile.sha256(executable))
+      try journal.measure("executionSignSeconds", progress: "Sign temporary execution tools") {
+        for offset in stride(from: 0, to: originals.count, by: 48) {
+          let group = originals[offset..<min(offset + 48, originals.count)]
+          try BuildProgress.run(
+            "Sign temporary tools \(offset + 1)-\(offset + group.count)/\(originals.count)"
+          ) {
+            try journal.run(
+              "remove-execution-signatures",
+              NativeCommand(
+                .codesign,
+                arguments: ["--remove-signature"]
+                  + group.map { root.appendingPathComponent($0.0).path }, timeout: 180))
+            try journal.run(
+              "sign-execution-tools",
+              NativeCommand(
+                .codesign,
+                arguments: ["--sign", "-", "--timestamp=none"]
+                  + group.map { root.appendingPathComponent($0.0).path }, timeout: 180))
+          }
+        }
       }
-      try SafeFile.writeNew(
-        JSON.encode(executableRecords),
-        to: journal.output.appendingPathComponent("execution-tools.json"))
-      try SafeFile.writeNew(
-        JSON.encode(compilerTools),
-        to: journal.output.appendingPathComponent("execution-compiler-tools.json"))
+      let executableRecords = try journal.measure(
+        "executionValidationSeconds", progress: "Validate temporary tools and save inventory"
+      ) {
+        let records = try originals.enumerated().map { index, original in
+          let executable = root.appendingPathComponent(original.0)
+          try renewSignedExecutable(executable)
+          try AppleCode.validateLocalTool(executable, scope: .executable)
+          let record = Executable(
+            path: original.0, originalSHA256: original.1,
+            executionSHA256: try SafeFile.sha256(executable))
+          if (index + 1).isMultiple(of: 48) || index + 1 == originals.count {
+            BuildProgress.write("Validated temporary tools: \(index + 1)/\(originals.count)")
+          }
+          return record
+        }
+        try SafeFile.writeNew(
+          JSON.encode(records),
+          to: journal.output.appendingPathComponent("execution-tools.json"))
+        try SafeFile.writeNew(
+          JSON.encode(compilerTools),
+          to: journal.output.appendingPathComponent("execution-compiler-tools.json"))
+        return records
+      }
       guard chown(root.path, 0, 0) == 0, chmod(root.path, 0o755) == 0 else {
         throw MisoError.system("Finalize execution root", errno)
       }
