@@ -14,6 +14,7 @@ private final class RegistryFixture: @unchecked Sendable {
   var corruptDownload = false
   var rejectUpload = false
   var stall = false
+  var stallDownload = false
 
   func respond(_ request: URLRequest) throws -> (Int, [String: String], Data) {
     try lock.withLock {
@@ -43,7 +44,7 @@ private final class RegistryFixture: @unchecked Sendable {
         return (manifest == nil ? 404 : 200, headers, manifest ?? empty)
       }
       if method == "POST" {
-        headers["Location"] = "/v2/fixture/image/blobs/uploads/upload?state=opaque"
+        headers["Location"] = "https://ghcr.io:443/v2/uploads/opaque?state=opaque"
         return (202, headers, empty)
       }
       if method == "PUT" {
@@ -104,6 +105,10 @@ private final class RegistryProtocol: URLProtocol, @unchecked Sendable {
       let response = HTTPURLResponse(
         url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
       client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      if fixture.lock.withLock({ fixture.stallDownload }), request.url!.path.contains("/blobs/") {
+        client?.urlProtocol(self, didLoad: data.prefix(64 << 10))
+        return
+      }
       if !data.isEmpty { client?.urlProtocol(self, didLoad: data) }
       client?.urlProtocolDidFinishLoading(self)
     } catch {
@@ -113,6 +118,35 @@ private final class RegistryProtocol: URLProtocol, @unchecked Sendable {
 }
 
 @Suite(.serialized) struct OCITransferTests {
+  @Test func downloadReportsBytesBeforeTheLayerCompletes() async throws {
+    let temporary = try TemporaryDirectory()
+    defer { temporary.remove() }
+    let (fixture, configuration) = setup()
+    let bytes = Data(repeating: 1, count: 1 << 20)
+    let blob = OCIDescriptor(
+      mediaType: OCIManifest.nvramType, size: UInt64(bytes.count),
+      digest: "sha256:" + SafeFile.sha256(bytes))
+    fixture.blobs[blob.digest] = bytes
+    fixture.stallDownload = true
+    let token = try CancellationToken()
+    let registry = try OCIRegistry(
+      reference: OCIReference("ghcr.io/fixture/image:test"), username: nil, password: nil,
+      pushing: false, cancellation: token, configuration: configuration)
+    let progress = TransferProgress("Test", total: Int64(blob.size))
+    let destination = temporary.url.appendingPathComponent("blob")
+    let download = Task {
+      try await registry.download(blob, to: destination, progress: progress, id: UUID())
+    }
+    for _ in 0..<100 {
+      if progress.transferredBytes > 0 { break }
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    token.cancel()
+    await #expect(throws: CancellationError.self) { try await download.value }
+    #expect(progress.transferredBytes == 64 << 10)
+    #expect(!FileManager.default.fileExists(atPath: destination.path))
+  }
+
   @Test func credentialsStayOnGHCRAndInvalidReferencesAreRejected() async throws {
     for reference in [
       "https://ghcr.io/a/b:t", "ghcr.io/a/../b:t", "ghcr.io/a/b", "ghcr.io/a/b:t?token=secret",
