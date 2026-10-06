@@ -43,6 +43,7 @@ struct Xcode: AsyncParsableCommand {
     @Option var source: String
     @Option var prepared: String
     @Option var output: String
+    @Option var config: String?
     @Option var username = "admin"
 
     func run() async throws {
@@ -50,7 +51,10 @@ struct Xcode: AsyncParsableCommand {
       defer { withExtendedLifetime(cancellation) {} }
       try printJSON(
         await XcodeFlutterInstallation.install(
-          source: fileURL(source), prepared: fileURL(prepared), output: fileURL(output),
+          source: fileURL(source), prepared: fileURL(prepared),
+          configuration: try config.map {
+            try JSON.read(XcodeConfiguration.self, from: fileURL($0))
+          } ?? .init(), output: fileURL(output),
           username: username, cancellation: cancellation.token))
     }
   }
@@ -81,6 +85,7 @@ struct Xcode: AsyncParsableCommand {
     @Option var source: String
     @Option var prepared: String
     @Option var output: String
+    @Option var config: String?
     @Option var username = "admin"
 
     func run() async throws {
@@ -88,7 +93,10 @@ struct Xcode: AsyncParsableCommand {
       defer { withExtendedLifetime(cancellation) {} }
       try printJSON(
         await XcodeAndroidInstallation.install(
-          source: fileURL(source), prepared: fileURL(prepared), output: fileURL(output),
+          source: fileURL(source), prepared: fileURL(prepared),
+          configuration: try config.map {
+            try JSON.read(XcodeConfiguration.self, from: fileURL($0))
+          } ?? .init(), output: fileURL(output),
           username: username, cancellation: cancellation.token))
     }
   }
@@ -119,6 +127,7 @@ struct Xcode: AsyncParsableCommand {
     @Option var source: String
     @Option var prepared: String
     @Option var output: String
+    @Option var config: String?
     @Option var username = "admin"
 
     func run() async throws {
@@ -126,7 +135,10 @@ struct Xcode: AsyncParsableCommand {
       defer { withExtendedLifetime(cancellation) {} }
       try printJSON(
         await XcodeTuistInstallation.install(
-          source: fileURL(source), prepared: fileURL(prepared), output: fileURL(output),
+          source: fileURL(source), prepared: fileURL(prepared),
+          configuration: try config.map {
+            try JSON.read(XcodeConfiguration.self, from: fileURL($0))
+          } ?? .init(), output: fileURL(output),
           username: username, cancellation: cancellation.token))
     }
   }
@@ -176,6 +188,7 @@ struct Xcode: AsyncParsableCommand {
     @Option var source: String
     @Option var prepared: String
     @Option var output: String
+    @Option var config: String?
     @Option var username = "admin"
 
     func run() async throws {
@@ -183,7 +196,10 @@ struct Xcode: AsyncParsableCommand {
       defer { withExtendedLifetime(cancellation) {} }
       try printJSON(
         await XcodeSimulatorTools.install(
-          source: fileURL(source), prepared: fileURL(prepared), output: fileURL(output),
+          source: fileURL(source), prepared: fileURL(prepared),
+          configuration: try config.map {
+            try JSON.read(XcodeConfiguration.self, from: fileURL($0))
+          } ?? .init(), output: fileURL(output),
           username: username, cancellation: cancellation.token))
     }
   }
@@ -254,6 +270,7 @@ struct Xcode: AsyncParsableCommand {
     @Option var source: String
     @Option var prepared: String
     @Option var output: String
+    @Option var config: String?
     @Option var username = "admin"
 
     func run() throws {
@@ -261,7 +278,10 @@ struct Xcode: AsyncParsableCommand {
       defer { withExtendedLifetime(cancellation) {} }
       try printJSON(
         XcodeGemInstallation.install(
-          source: fileURL(source), prepared: fileURL(prepared), output: fileURL(output),
+          source: fileURL(source), prepared: fileURL(prepared),
+          configuration: try config.map {
+            try JSON.read(XcodeConfiguration.self, from: fileURL($0))
+          } ?? .init(), output: fileURL(output),
           username: username, cancellation: cancellation.token))
     }
   }

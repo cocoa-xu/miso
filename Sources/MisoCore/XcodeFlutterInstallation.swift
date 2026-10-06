@@ -19,12 +19,14 @@ public enum XcodeFlutterInstallation {
   }
 
   public static func install(
-    source: URL, prepared: URL, output: URL, username: String = "admin",
+    source: URL, prepared: URL, configuration: XcodeConfiguration = .init(),
+    output: URL, username: String = "admin",
     cancellation: CancellationToken? = nil
   ) async throws -> Receipt {
     guard geteuid() == 0 else {
       throw MisoError.invalid("Flutter installation requires administrator privileges")
     }
+    try configuration.validate()
     let previous = try JSON.read(
       XcodeFlutterInputs.Receipt.self, from: GuestVolume(prepared).path("flutter.json"))
     let journal = try ExecutionJournal(
@@ -43,7 +45,7 @@ public enum XcodeFlutterInstallation {
         }
         return try install(
           input, inputs: inputs, image: bundle.appendingPathComponent("disk.img"),
-          username: username, journal: stage)
+          configuration: configuration, username: username, journal: stage)
       }
       try BaseStageWorkspace.requireUnmounted(inputs)
       for path in ["flutter", "pub-cache", "source/checkout", input.dartArchive.path] {
@@ -59,7 +61,8 @@ public enum XcodeFlutterInstallation {
   }
 
   private static func install(
-    _ input: XcodeFlutterInputs.Receipt, inputs: URL, image: URL, username: String,
+    _ input: XcodeFlutterInputs.Receipt, inputs: URL, image: URL, configuration: XcodeConfiguration,
+    username: String,
     journal: ExecutionJournal
   ) throws -> Details {
     let session = try DiskImageSession(image: image, readOnly: false, journal: journal)
@@ -76,7 +79,6 @@ public enum XcodeFlutterInstallation {
         journal: journal, name: "flutter-data", readOnly: false)
       let account = try BaseImageStage.Account(username, data: data)
       identity = [account.uid, account.gid]
-      let configuration = XcodeConfiguration()
       _ = try XcodeArchive.inspect(
         data.directory(configuration.applicationPath).url, target: input.target,
         configuration: configuration)

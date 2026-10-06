@@ -20,12 +20,14 @@ public enum XcodeTuistInstallation {
   }
 
   public static func install(
-    source: URL, prepared: URL, output: URL, username: String = "admin",
+    source: URL, prepared: URL, configuration: XcodeConfiguration = .init(),
+    output: URL, username: String = "admin",
     cancellation: CancellationToken? = nil
   ) async throws -> Receipt {
     guard geteuid() == 0 else {
       throw MisoError.invalid("Tuist installation requires administrator privileges")
     }
+    try configuration.validate()
     let previous = try JSON.read(
       XcodeTuistInputs.Receipt.self, from: GuestVolume(prepared).path("tuist.json"))
     let journal = try ExecutionJournal(
@@ -44,7 +46,7 @@ public enum XcodeTuistInstallation {
         }
         return try install(
           input, inputs: inputs, image: bundle.appendingPathComponent("disk.img"),
-          username: username, journal: stage)
+          configuration: configuration, username: username, journal: stage)
       }
       try BaseStageWorkspace.requireUnmounted(inputs)
       try FileManager.default.removeItem(at: inputs.appendingPathComponent("expanded"))
@@ -59,7 +61,8 @@ public enum XcodeTuistInstallation {
   }
 
   private static func install(
-    _ input: XcodeTuistInputs.Receipt, inputs: URL, image: URL, username: String,
+    _ input: XcodeTuistInputs.Receipt, inputs: URL, image: URL, configuration: XcodeConfiguration,
+    username: String,
     journal: ExecutionJournal
   ) throws -> Details {
     let root = try BaseExecutionView.prepare(image: image, target: input.target, journal: journal)
@@ -76,7 +79,6 @@ public enum XcodeTuistInstallation {
     ) { guest in
       try guest.verifyControls(target: input.target)
       identity = [guest.account.uid, guest.account.gid]
-      let configuration = XcodeConfiguration()
       _ = try XcodeArchive.inspect(
         guest.data.directory(configuration.applicationPath).url, target: input.target,
         configuration: configuration)

@@ -141,12 +141,14 @@ public enum XcodeSimulatorTools {
   }
 
   public static func install(
-    source: URL, prepared: URL, output: URL, username: String = "admin",
+    source: URL, prepared: URL, configuration: XcodeConfiguration = .init(),
+    output: URL, username: String = "admin",
     cancellation: CancellationToken? = nil
   ) async throws -> BaseStageReceipt<Details> {
     guard geteuid() == 0 else {
       throw MisoError.invalid("Simulator tool installation requires administrator privileges")
     }
+    try configuration.validate()
     let previous = try JSON.read(Inputs.self, from: GuestVolume(prepared).path("tools.json"))
     let replay = output.appendingPathComponent("inputs")
     try SafeFile.makeDirectory(output)
@@ -167,8 +169,8 @@ public enum XcodeSimulatorTools {
       ) { guest in
         try guest.verifyControls(target: target)
         _ = try XcodeArchive.inspect(
-          guest.data.directory(XcodeConfiguration().applicationPath).url, target: target,
-          configuration: XcodeConfiguration())
+          guest.data.directory(configuration.applicationPath).url, target: target,
+          configuration: configuration)
         let execution = try HomebrewExecution(guest: guest)
         defer { try? execution.remove() }
         try execution.verify()

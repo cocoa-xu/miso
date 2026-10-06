@@ -12,9 +12,11 @@ public enum XcodeGemInstallation {
   }
 
   public static func install(
-    source: URL, prepared: URL, output: URL, username: String = "admin",
+    source: URL, prepared: URL, configuration: XcodeConfiguration = .init(),
+    output: URL, username: String = "admin",
     cancellation: CancellationToken? = nil
   ) throws -> BaseStageReceipt<Details> {
+    try configuration.validate()
     let planURL = prepared.appendingPathComponent("plan.json")
     let hash = try SafeFile.sha256(planURL)
     let plan = try XcodeGemInputs.verify(prepared, cancellation: cancellation)
@@ -32,7 +34,6 @@ public enum XcodeGemInstallation {
       ) { guest in
         try guest.verifyControls(target: target)
         identity = [guest.account.uid, guest.account.gid]
-        let configuration = XcodeConfiguration()
         _ = try XcodeArchive.inspect(
           guest.data.directory(configuration.applicationPath).url,
           target: target, configuration: configuration)
