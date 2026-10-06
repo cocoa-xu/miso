@@ -71,15 +71,15 @@ Use the Action in an Apple silicon macOS job:
 
 ```yaml
 steps:
-  - uses: cocoa-xu/miso@main
+  - uses: cocoa-xu/miso@v0.2.3
     with:
-      version: source
+      version: 0.2.3
       xcode-base-url: ${{ secrets.XCODE_BASE_URL }}
   - run: miso --version
 ```
 
 `version` accepts a release number, `latest` (default), or `source` to build the
-Action revision. Xcode mirror support currently requires `source`.
+Action revision. Xcode mirror support requires MISO 0.2.3 or later.
 Omit `xcode-base-url` when using local XIPs. The Action passes it to MISO through
 `MISO_XCODE_BASE_URL` and masks it; MISO also masks the complete download URL.
 
