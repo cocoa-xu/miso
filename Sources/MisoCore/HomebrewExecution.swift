@@ -51,7 +51,7 @@ final class HomebrewExecution {
 
   func verify() throws {
     let child =
-      "require 'sandbox'; require 'socket'; raise 'Nested sandbox enabled' if Sandbox.available?; raise 'Wrong ARM cellar' unless Utils::Bottles.tag.default_cellar == '/opt/homebrew/Cellar'; begin; TCPServer.new('127.0.0.1',0); abort 'IP socket unexpectedly allowed'; rescue Errno::EPERM,Errno::EACCES; puts 'IP denied'; end"
+      "require 'sandbox'; require 'socket'; raise 'Nested sandbox enabled' if Sandbox.available?; raise 'Child groups differ' unless [[], [Process.egid]].include?(Process.groups); raise 'Wrong ARM cellar' unless Utils::Bottles.tag.default_cellar == '/opt/homebrew/Cellar'; begin; TCPServer.new('127.0.0.1',0); abort 'IP socket unexpectedly allowed'; rescue Errno::EPERM,Errno::EACCES; puts 'IP denied'; end"
     let encoded = try JSON.encode(child).base64EncodedString()
     let control = """
       require 'json'
@@ -91,13 +91,12 @@ final class HomebrewExecution {
     }
     return """
       require 'global'; require 'sandbox'; require 'fiddle'
+      \(groupsProgram)
       native = Fiddle.dlopen(nil)
       check = Fiddle::Function.new(native['sandbox_check'], [Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT], Fiddle::TYPE_INT)
-      groups = Fiddle::Function.new(native['getgroups'], [Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP], Fiddle::TYPE_INT)
-      buffer = Fiddle::Pointer.malloc(128)
-      count = groups.call(32, buffer)
-      ids = count < 0 ? nil : buffer[0, count * 4].unpack('I*')
+      ids = kernel_groups.call
       raise 'Missing outer isolation' unless Process.euid == \(uid) && [[], [\(gid)]].include?(ids) && check.call(Process.pid, nil, 0) == 1
+      Process.singleton_class.define_method(:groups, &kernel_groups)
       \(prefixProgram)
       Sandbox.singleton_class.prepend(Module.new { def available?; false; end })
       \(propagate ? """
@@ -108,6 +107,17 @@ final class HomebrewExecution {
       """ : "")
       """
   }
+
+  static let groupsProgram = """
+    require 'fiddle'
+    query_groups = Fiddle::Function.new(Fiddle.dlopen(nil)['getgroups'], [Fiddle::TYPE_INT, Fiddle::TYPE_VOIDP], Fiddle::TYPE_INT)
+    kernel_groups = lambda do
+      buffer = Fiddle::Pointer.malloc(128)
+      count = query_groups.call(32, buffer)
+      raise 'Cannot read kernel groups' unless (0..32).cover?(count)
+      buffer[0, count * 4].unpack('I*')
+    end
+    """
 
   static let prefixProgram = """
     require 'utils/bottles'
