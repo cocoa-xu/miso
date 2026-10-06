@@ -84,15 +84,23 @@ without credentials. Transfers default to four concurrent requests; set
 download speed. Temporary transfer data is removed automatically. No Tart executable
 or VM is needed.
 
+To reuse an exported parent, import it with its original MISO manifest. Optional
+`--disk-bytes` expands the clone and its APFS container while preserving Recovery:
+
+```sh
+sudo miso bundle import-tart downloaded/vm --manifest parent-manifest.json \
+  --output parent --disk-bytes 160000000000
+```
+
 ## GitHub Actions
 
 Use the Action in an Apple silicon macOS job:
 
 ```yaml
 steps:
-  - uses: cocoa-xu/miso@v0.2.4
+  - uses: cocoa-xu/miso@v0.3.0
     with:
-      version: 0.2.4
+      version: 0.3.0
       xcode-base-url: ${{ secrets.XCODE_BASE_URL }}
   - run: miso --version
 ```
