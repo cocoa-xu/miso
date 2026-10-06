@@ -7,7 +7,60 @@ struct Bundle: AsyncParsableCommand {
     abstract: "Check bundle integrity or validate a VM configuration without creating a VM.",
     subcommands: [
       Verify.self, Validate.self, Assemble.self, Optimize.self, ExportTart.self, ImportTart.self,
+      Push.self, Pull.self,
     ])
+
+  struct Push: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Upload a Tart-compatible image to GHCR.")
+    @Argument(help: "Directory containing config.json, disk.img and nvram.bin.") var directory:
+      String
+    @Argument(help: "ghcr.io/owner/image:tag") var reference: String
+    @Option var output: String
+    @Option(help: "Concurrent transfers (1–16).") var concurrency = 4
+    @Option(name: .customLong("label"), help: "OCI image label: key=value.") var labels: [String] =
+      []
+
+    func run() async throws {
+      var parsed: [String: String] = [:]
+      for label in labels {
+        guard let split = label.firstIndex(of: "="), split != label.startIndex else {
+          throw ValidationError("Expected --label key=value")
+        }
+        parsed[String(label[..<split])] = String(label[label.index(after: split)...])
+      }
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      let environment = ProcessInfo.processInfo.environment
+      try printJSON(
+        await OCITransfer.push(
+          source: fileURL(directory), reference: reference, output: fileURL(output),
+          concurrency: concurrency, labels: parsed,
+          username: environment["MISO_REGISTRY_USERNAME"],
+          password: environment["MISO_REGISTRY_PASSWORD"],
+          cancellation: cancellation.token))
+    }
+  }
+
+  struct Pull: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Download a GHCR image to a sparse Tart-compatible directory.")
+    @Argument(help: "ghcr.io/owner/image:tag or ghcr.io/owner/image@sha256:…") var reference: String
+    @Option var output: String
+    @Option(help: "Concurrent transfers (1–16).") var concurrency = 4
+
+    func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      let environment = ProcessInfo.processInfo.environment
+      try printJSON(
+        await OCITransfer.pull(
+          reference: reference, output: fileURL(output), concurrency: concurrency,
+          username: environment["MISO_REGISTRY_USERNAME"],
+          password: environment["MISO_REGISTRY_PASSWORD"],
+          cancellation: cancellation.token))
+    }
+  }
 
   struct ImportTart: AsyncParsableCommand {
     static let configuration = CommandConfiguration(

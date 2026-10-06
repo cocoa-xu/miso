@@ -1,0 +1,75 @@
+name: OCI transport compatibility
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  transport:
+    if: github.repository == 'cocoa-xu/miso' && github.actor == 'cocoa-xu'
+    runs-on: xcode-27
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
+      TEST_TAG: transport-test-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build and create sparse test data
+        run: |
+          make build
+          mkdir -p "$RUNNER_TEMP/oci-test/evidence"
+          swift Scripts/oci-fixture.swift "$RUNNER_TEMP/oci-test/source"
+          { sw_vers; swift --version; } > "$RUNNER_TEMP/oci-test/evidence/host.txt"
+      - name: Native upload and existing blob reuse
+        env:
+          MISO_REGISTRY_USERNAME: ${{ github.actor }}
+          MISO_REGISTRY_PASSWORD: ${{ github.token }}
+        run: |
+          work="$RUNNER_TEMP/oci-test"
+          for attempt in first repeat; do
+            .build/release/miso bundle push "$work/source" "ghcr.io/cocoa-xu/miso-ci-vanilla:$TEST_TAG" \
+              --output "$work/$attempt" --concurrency 4 \
+              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+              > "$work/evidence/$attempt.json" 2> >(tee "$work/evidence/$attempt.log" >&2)
+          done
+          jq -e '.skippedBlobs > 0' "$work/evidence/repeat.json"
+      - name: Native anonymous download
+        run: |
+          work="$RUNNER_TEMP/oci-test"
+          reference=$(jq -er .reference "$work/evidence/repeat.json")
+          .build/release/miso bundle pull "$reference" --output "$work/pull" --concurrency 4 \
+            > "$work/evidence/pull.json" 2> >(tee "$work/evidence/pull.log" >&2)
+          for file in config.json disk.img nvram.bin; do cmp "$work/source/$file" "$work/pull/vm/$file"; done
+          stat -f 'logical=%z blocks=%b' "$work/pull/vm/disk.img" > "$work/evidence/allocation.txt"
+          test "$(stat -f %b "$work/pull/vm/disk.img")" -lt 262144
+      - name: Independent Tart download
+        run: |
+          work="$RUNNER_TEMP/oci-test"
+          curl --fail --location --silent --show-error --retry 2 \
+            https://github.com/openai/tart/releases/download/2.40.1/tart.tar.gz -o "$work/tart.tar.gz"
+          tar -xzf "$work/tart.tar.gz" -C "$work"
+          codesign --verify --deep --strict "$work/tart.app"
+          export TART_HOME="$work/tart" TART_NO_AUTO_PRUNE=1
+          reference=$(jq -er .reference "$work/evidence/repeat.json")
+          "$work/tart.app/Contents/MacOS/tart" --version > "$work/evidence/client.txt"
+          "$work/tart.app/Contents/MacOS/tart" clone "$reference" downloaded --concurrency 4
+          for file in disk.img nvram.bin; do cmp "$work/source/$file" "$TART_HOME/vms/downloaded/$file"; done
+          "$work/tart.app/Contents/MacOS/tart" get downloaded --format json > "$work/evidence/tart-config.json"
+      - name: Remove test package versions
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash Scripts/cleanup-oci-test.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oci-transport-evidence
+          path: ${{ runner.temp }}/oci-test/evidence
+          retention-days: 14
