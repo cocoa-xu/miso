@@ -22,6 +22,7 @@ try Data().write(to: url, options: .withoutOverwriting)
 let disk = try FileHandle(forWritingTo: url)
 defer { try? disk.close() }
 try disk.truncate(atOffset: 2 << 30)
+try disk.seek(toOffset: 0)
 var bytes = Data(count: 16 << 20)
 let result = bytes.withUnsafeMutableBytes {
   SecRandomCopyBytes(kSecRandomDefault, $0.count, $0.baseAddress!)

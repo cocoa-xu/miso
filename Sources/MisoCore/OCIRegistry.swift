@@ -18,6 +18,11 @@ final class OCIRegistry: @unchecked Sendable {
     let progress: TransferProgress?
     let id: UUID
     let maximumBytes: Int64
+    private let lock = NSLock()
+    private var redirects = 0
+    private var exceeded = false
+
+    var exceededLimit: Bool { lock.withLock { exceeded } }
 
     init(blobRedirects: Bool, progress: TransferProgress?, id: UUID, maximumBytes: Int64) {
       self.blobRedirects = blobRedirects
@@ -34,7 +39,11 @@ final class OCIRegistry: @unchecked Sendable {
       guard blobRedirects, request.httpMethod == "GET" || request.httpMethod == "HEAD",
         let url = request.url, url.scheme == "https", url.user == nil, url.password == nil,
         url.port == nil, url.fragment == nil,
-        ["ghcr.io", "pkg-containers.githubusercontent.com"].contains(url.host)
+        ["ghcr.io", "pkg-containers.githubusercontent.com"].contains(url.host),
+        lock.withLock({
+          redirects += 1
+          return redirects <= 3
+        })
       else {
         completionHandler(nil)
         return
@@ -53,7 +62,11 @@ final class OCIRegistry: @unchecked Sendable {
       _ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
       totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
     ) {
-      if totalBytesWritten > maximumBytes { downloadTask.cancel() }
+      guard (downloadTask.response as? HTTPURLResponse)?.statusCode == 200 else { return }
+      if totalBytesWritten > maximumBytes || totalBytesExpectedToWrite > maximumBytes {
+        lock.withLock { exceeded = true }
+        downloadTask.cancel()
+      }
       progress?.update(id, bytes: totalBytesWritten)
     }
 
@@ -193,6 +206,9 @@ final class OCIRegistry: @unchecked Sendable {
         }
       } catch let error as URLError {
         try cancellation.check()
+        if observer.exceededLimit {
+          throw MisoError.invalid("Downloaded OCI blob exceeds its declared size")
+        }
         throw OCIRegistryError(status: error.errorCode, retryAfter: 2)
       }
       defer { try? FileManager.default.removeItem(at: temporary) }
@@ -209,6 +225,7 @@ final class OCIRegistry: @unchecked Sendable {
         throw MisoError.invalid("Downloaded OCI blob size differs from manifest")
       }
       try FileManager.default.moveItem(at: temporary, to: file)
+      progress.update(id, bytes: Int64(blob.size))
       return
     }
   }

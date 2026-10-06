@@ -45,6 +45,10 @@ final class TransferProgress: @unchecked Sendable {
     self.total = total
   }
 
+  var transferredBytes: UInt64 { lock.withLock { UInt64(rate.bytes) } }
+
+  deinit { timer?.cancel() }
+
   func start() {
     report()
     let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))

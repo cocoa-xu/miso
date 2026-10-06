@@ -81,7 +81,8 @@ public enum OCITransfer {
       }
       progress.complete(id, bytes: Int64(data.count))
       let receipt = Receipt(
-        reference: reference.name + "@" + digest, bytes: bytes, transferredBytes: transferred,
+        reference: reference.name + "@" + digest, bytes: bytes,
+        transferredBytes: progress.transferredBytes,
         skippedBlobs: manifest.blobs.count - missing.count, vmStarted: false)
       try SafeFile.writeNew(
         JSON.encode(receipt), to: journal.output.appendingPathComponent("transfer.json"))
@@ -159,7 +160,8 @@ public enum OCITransfer {
       }
       try journal.cancellation.check()
       let receipt = Receipt(
-        reference: reference.name + "@" + digest, bytes: bytes, transferredBytes: bytes,
+        reference: reference.name + "@" + digest, bytes: bytes,
+        transferredBytes: progress.transferredBytes,
         skippedBlobs: 0, vmStarted: false)
       try FileManager.default.moveItem(at: vm, to: journal.output.appendingPathComponent("vm"))
       try SafeFile.writeNew(

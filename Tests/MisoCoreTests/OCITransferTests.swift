@@ -13,6 +13,7 @@ private final class RegistryFixture: @unchecked Sendable {
   var uploads = 0
   var corruptDownload = false
   var rejectUpload = false
+  var stall = false
 
   func respond(_ request: URLRequest) throws -> (Int, [String: String], Data) {
     try lock.withLock {
@@ -98,6 +99,7 @@ private final class RegistryProtocol: URLProtocol, @unchecked Sendable {
   override func startLoading() {
     do {
       let fixture = Self.lock.withLock { Self.fixture }
+      if fixture.lock.withLock({ fixture.stall }) { return }
       let (status, headers, data) = try fixture.respond(request)
       let response = HTTPURLResponse(
         url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
@@ -111,6 +113,65 @@ private final class RegistryProtocol: URLProtocol, @unchecked Sendable {
 }
 
 @Suite(.serialized) struct OCITransferTests {
+  @Test func credentialsStayOnGHCRAndInvalidReferencesAreRejected() async throws {
+    for reference in [
+      "https://ghcr.io/a/b:t", "ghcr.io/a/../b:t", "ghcr.io/a/b", "ghcr.io/a/b:t?token=secret",
+    ] {
+      #expect(throws: MisoError.self) { try OCIReference(reference) }
+    }
+    let session = URLSession(configuration: .ephemeral)
+    defer { session.invalidateAndCancel() }
+    let origin = URL(string: "https://ghcr.io/v2/fixture/image/blobs/sha256:test")!
+    let task = session.dataTask(with: origin)
+    let response = HTTPURLResponse(
+      url: origin, statusCode: 307, httpVersion: "HTTP/1.1", headerFields: nil)!
+    let observer = OCIRegistry.Observer(
+      blobRedirects: true, progress: nil, id: UUID(), maximumBytes: 1024)
+    for destination in [
+      "https://pkg-containers.githubusercontent.com/blob", "https://example.com/blob",
+      "http://ghcr.io/blob",
+    ] {
+      var request = URLRequest(url: URL(string: destination)!)
+      request.setValue("Bearer secret", forHTTPHeaderField: "Authorization")
+      let redirected = await withCheckedContinuation { continuation in
+        observer.urlSession(
+          session, task: task, willPerformHTTPRedirection: response, newRequest: request
+        ) {
+          continuation.resume(returning: $0)
+        }
+      }
+      if destination.contains("pkg-containers") {
+        #expect(redirected != nil)
+        #expect(redirected?.value(forHTTPHeaderField: "Authorization") == nil)
+      } else {
+        #expect(redirected == nil)
+      }
+    }
+  }
+
+  @Test func cancellationInterruptsAStalledRegistryRequest() async throws {
+    let temporary = try TemporaryDirectory()
+    defer { temporary.remove() }
+    let (fixture, configuration) = setup()
+    fixture.stall = true
+    let token = try CancellationToken()
+    let cancel = Task {
+      try await Task.sleep(for: .milliseconds(50))
+      token.cancel()
+    }
+    defer { cancel.cancel() }
+    let output = temporary.url.appendingPathComponent("cancelled")
+    await #expect(throws: CancellationError.self) {
+      try await OCITransfer.pull(
+        reference: "ghcr.io/fixture/image:test", output: output,
+        cancellation: token, configuration: configuration)
+    }
+    let record = try JSON.read(
+      ExecutionJournal.Record.self, from: output.appendingPathComponent("journal.json"))
+    #expect(record.status == .cancelled)
+    #expect(!FileManager.default.fileExists(atPath: output.appendingPathComponent("vm").path))
+  }
+
   private func setup() -> (RegistryFixture, URLSessionConfiguration) {
     let fixture = RegistryFixture()
     RegistryProtocol.lock.withLock { RegistryProtocol.fixture = fixture }

@@ -40,6 +40,8 @@ jobs:
               > "$work/evidence/$attempt.json" 2> >(tee "$work/evidence/$attempt.log" >&2)
           done
           jq -e '.skippedBlobs > 0' "$work/evidence/repeat.json"
+          jq -e '.transferredBytes > 16777216' "$work/evidence/first.json"
+          jq -e '.transferredBytes < 65536' "$work/evidence/repeat.json"
       - name: Native anonymous download
         run: |
           work="$RUNNER_TEMP/oci-test"
@@ -49,6 +51,7 @@ jobs:
           for file in config.json disk.img nvram.bin; do cmp "$work/source/$file" "$work/pull/vm/$file"; done
           stat -f 'logical=%z blocks=%b' "$work/pull/vm/disk.img" > "$work/evidence/allocation.txt"
           test "$(stat -f %b "$work/pull/vm/disk.img")" -lt 262144
+          jq -e '.transferredBytes > 16777216' "$work/evidence/pull.json"
       - name: Independent Tart download
         run: |
           work="$RUNNER_TEMP/oci-test"
