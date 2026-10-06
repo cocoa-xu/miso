@@ -11,6 +11,7 @@ public enum BaseBottles {
     let executionControlsVerified: Bool
     let lifecycleProbes: [String: String]?
     let coreTrustVerified: Bool?
+    var refreshedFormulaSources: [String]? = nil
   }
 
   public static func run(
@@ -57,6 +58,7 @@ public enum BaseBottles {
       var installed: [String: String] = [:]
       var accountIdentity: [UInt32] = []
       var lifecycleProbes: [String: String]?
+      var refreshedFormulaSources: [String]?
       let trustPath = "Users/\(username)/.homebrew"
       var trustPayload: [BaseInputArchive.Entry] = []
       let payload = try GuestExecution.withSession(
@@ -84,10 +86,19 @@ public enum BaseBottles {
         }
         let stagingIdentity = try FileMetadata.inspect(staging)
         var expected = before
+        let core = try GuestVolume(
+          guest.data.directory("opt/homebrew/Library/Taps/homebrew/homebrew-core").url)
+        if layer == .xcode {
+          refreshedFormulaSources = try journal.measure(
+            "refreshFormulaSourcesSeconds", progress: "Stage resolved Homebrew formula sources"
+          ) {
+            try HomebrewBottleInputs.stageFormulaSources(
+              selection.payloads.map(\.formula), resolution: resolution, core: core,
+              uid: guest.account.uid, gid: guest.account.gid, cancellation: journal.cancellation)
+          }
+        }
         try HomebrewBottleInputs.verifyFormulaSources(
-          selection.payloads.map(\.formula),
-          core: GuestVolume(
-            guest.data.directory("opt/homebrew/Library/Taps/homebrew/homebrew-core").url),
+          selection.payloads.map(\.formula), core: core,
           cancellation: journal.cancellation)
         try guest.data.makeDirectories(trustPath, uid: guest.account.uid, gid: guest.account.gid)
         try guest.run(
@@ -239,7 +250,8 @@ public enum BaseBottles {
             $0.formula.name
           },
         payloadEntries: payload.count + trustPayload.count, detachedPayloadVerified: true,
-        executionControlsVerified: true, lifecycleProbes: lifecycleProbes, coreTrustVerified: true)
+        executionControlsVerified: true, lifecycleProbes: lifecycleProbes, coreTrustVerified: true,
+        refreshedFormulaSources: refreshedFormulaSources)
     }
   }
 

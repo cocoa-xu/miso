@@ -49,6 +49,35 @@ public enum HomebrewBottleInputs {
     }
   }
 
+  static func stageFormulaSources(
+    _ formulae: [HomebrewResolution.Formula], resolution: URL, core: GuestVolume,
+    uid: uid_t, gid: gid_t, cancellation: CancellationToken? = nil
+  ) throws -> [String] {
+    let inputs = try GuestVolume(resolution)
+    var changed: [String] = []
+    for formula in formulae {
+      try cancellation?.check()
+      let source = try SafeFile.read(inputs.path("metadata/\(formula.name).rb"), limit: 8 << 20)
+      guard SafeFile.sha256(source) == formula.sourceSHA256 else {
+        throw MisoError.invalid("Prepared formula source changed: \(formula.name)")
+      }
+      let components = formula.sourceURL.pathComponents.dropFirst(4)
+      let path = components.joined(separator: "/")
+      guard components.first == "Formula", components.last == formula.name + ".rb" else {
+        throw MisoError.invalid("Unexpected Homebrew formula source path")
+      }
+      if try core.contains(path), try SafeFile.sha256(core.path(path)) == formula.sourceSHA256 {
+        continue
+      }
+      let parent = components.dropLast().joined(separator: "/")
+      try core.makeDirectories(parent, uid: uid, gid: gid)
+      try core.directory(parent).replace(
+        formula.name + ".rb", data: source, uid: uid, gid: gid, mode: 0o644)
+      changed.append(formula.name)
+    }
+    return changed
+  }
+
   struct Resolved {
     let receipt: HomebrewResolution.Receipt
     let sha256: String

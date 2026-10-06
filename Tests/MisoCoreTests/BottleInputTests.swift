@@ -46,6 +46,37 @@ private func bottleFormula(
   #expect(BaseBottles.coreTrustControl.contains("abort 'Untrusted core snapshot'"))
 }
 
+@Test func xcodeFormulaSourcesRefreshAnOlderCoreWithoutChangingUnrelatedFormulae() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let source = Data("class Example < Formula\n  desc 'Resolved source'\nend\n".utf8)
+  let formula = bottleFormula(sourceSHA256: SafeFile.sha256(source))
+  let core = try GuestVolume(temporary.url)
+  try SafeFile.writeNew(
+    source, to: Artifacts.makeParents(for: "metadata/example.rb", under: temporary.url))
+  try SafeFile.writeNew(
+    Data("old source".utf8),
+    to: Artifacts.makeParents(for: "Formula/e/example.rb", under: temporary.url))
+  try SafeFile.writeNew(Data("unrelated".utf8), to: core.path("Formula/e/existing.rb"))
+  #expect(
+    try HomebrewBottleInputs.stageFormulaSources(
+      [formula], resolution: temporary.url, core: core, uid: getuid(), gid: getgid()) == ["example"]
+  )
+  try HomebrewBottleInputs.verifyFormulaSources([formula], core: core)
+  #expect(
+    try SafeFile.read(core.path("Formula/e/existing.rb"), limit: 1024) == Data("unrelated".utf8))
+  #expect(
+    try HomebrewBottleInputs.stageFormulaSources(
+      [formula], resolution: temporary.url, core: core, uid: getuid(), gid: getgid()
+    ).isEmpty)
+  try SafeFile.replace(Data("changed input".utf8), at: core.path("metadata/example.rb"))
+  #expect(throws: MisoError.self) {
+    try HomebrewBottleInputs.stageFormulaSources(
+      [formula], resolution: temporary.url, core: core, uid: getuid(), gid: getgid())
+  }
+  try HomebrewBottleInputs.verifyFormulaSources([formula], core: core)
+}
+
 private func bottleIndex(annotations changes: [String: String] = [:], duplicate: Bool = false)
   throws -> Data
 {
