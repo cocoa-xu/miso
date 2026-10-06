@@ -84,7 +84,6 @@ enum DiskExpansion {
     }
     try punch(file, offset: table.partitions[1].end, bytes: start - table.partitions[1].end)
     var entries = table.entries
-    entries.put(start / 512 - 1, at: 128 + 40)
     entries.put(start / 512, at: 256 + 32)
     entries.put((start + recoveryBytes) / 512 - 1, at: 256 + 40)
     let sectors = bytes / 512

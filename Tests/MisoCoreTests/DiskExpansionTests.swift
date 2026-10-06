@@ -62,7 +62,7 @@ func diskExpansionPreservesIdentityAndMovesOverlappingRecovery(bytes: UInt64) th
       expanded.entries[(offset + 48)..<(offset + 128)]
         == original.entries[(offset + 48)..<(offset + 128)])
   }
-  #expect(expanded.partitions[1].end == result.recoveryOffset)
+  #expect(expanded.partitions[1].end == original.partitions[1].end)
   #expect(
     try file.readExactly(Int(result.recoveryOffset - (8 << 20)), at: 8 << 20).allSatisfy { $0 == 0 }
   )
