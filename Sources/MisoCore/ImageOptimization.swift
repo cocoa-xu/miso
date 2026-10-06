@@ -99,17 +99,21 @@ public enum ImageOptimization {
         let data = try ImageMounts.mount(
           main.volume(role: "Data"), session: session, journal: journal,
           name: "optimize-data", readOnly: false)
-        let result = try journal.measure("compressionSeconds") {
-          try TransparentCompression.run(
-            data: data, roots: roots(username: username),
-            workspace: journal.output, cancellation: journal.cancellation)
+        let result = try BuildProgress.run("Compress installed files") {
+          try journal.measure("compressionSeconds") {
+            try TransparentCompression.run(
+              data: data, roots: roots(username: username),
+              workspace: journal.output, cancellation: journal.cancellation)
+          }
         }
         return result
       }
     }
     let detached = try DiskImageSession(image: image, readOnly: false, journal: journal)
-    let compaction = try journal.measure("compactionSeconds") {
-      try APFSCompaction.run(detached, cancellation: journal.cancellation)
+    let compaction = try BuildProgress.run("Reclaim APFS free space and punch sparse holes") {
+      try journal.measure("compactionSeconds") {
+        try APFSCompaction.run(detached, cancellation: journal.cancellation)
+      }
     }
     let audit = try DiskImageSession(image: image, readOnly: true, journal: journal)
     try audit.withAttachment { session in

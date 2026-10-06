@@ -94,6 +94,30 @@ private func withProcess<T>(_ body: (FileHandle, FileHandle, URL) throws -> T) t
   }
 }
 
+@Test func progressRelayStreamsAndDrainsWithoutChangingTheEvidence() throws {
+  try withProcess { writer, destination, source in
+    let first = Data("[miso] First operation: started\n".utf8)
+    let final = Data(repeating: 65, count: 150_000)
+    let mirrored = source.deletingLastPathComponent().appendingPathComponent("stderr")
+    let relay = try BuildProgress.Relay(file: source, output: destination)
+    do {
+      defer { relay.finish() }
+      try writer.write(contentsOf: first)
+      let deadline = ProcessInfo.processInfo.systemUptime + 5
+      while try FileMetadata.inspect(mirrored).st_size == 0,
+        ProcessInfo.processInfo.systemUptime < deadline
+      {
+        Thread.sleep(forTimeInterval: 0.02)
+      }
+      #expect(try SafeFile.read(mirrored, limit: 1024) == first)
+      try writer.write(contentsOf: final)
+    }
+    let expected = first + final
+    #expect(try SafeFile.read(mirrored, limit: 1 << 20) == expected)
+    #expect(try SafeFile.read(source, limit: 1 << 20) == expected)
+  }
+}
+
 @Test func journalPersistsSuccessFailureAndRedaction() throws {
   let directory = try TemporaryDirectory()
   defer { directory.remove() }

@@ -157,7 +157,7 @@ final class GuestExecution {
   @discardableResult
   func run(
     _ name: String, arguments: [String], capability: Capability = .readOnly,
-    timeout: TimeInterval = 90, expectedExitCodes: Set<Int32> = [0]
+    timeout: TimeInterval = 90, expectedExitCodes: Set<Int32> = [0], progress: String? = nil
   ) throws -> String {
     guard try SafeFile.sha256(executable) == executableSHA256 else {
       throw MisoError.invalid("Native execution helper changed")
@@ -168,9 +168,11 @@ final class GuestExecution {
         String(account.gid),
         "--username", account.username, "--capability", capability.rawValue,
       ] + arguments
-    let log = try journal.run(
-      name, NativeCommand(executable.path, arguments: argv, timeout: timeout),
-      expectedExitCodes: expectedExitCodes)
+    let log = try BuildProgress.run(progress) {
+      try journal.run(
+        name, NativeCommand(executable.path, arguments: argv, timeout: timeout),
+        expectedExitCodes: expectedExitCodes)
+    }
     guard let text = String(data: try SafeFile.read(log, limit: 8 << 20), encoding: .utf8) else {
       throw MisoError.invalid("Invalid guest command output")
     }

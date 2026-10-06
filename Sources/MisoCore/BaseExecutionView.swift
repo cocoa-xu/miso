@@ -32,7 +32,7 @@ enum BaseExecutionView {
   static func prepare(image: URL, target: MacOSRelease, journal: ExecutionJournal) throws
     -> Prepared
   {
-    try journal.measure("executionViewSeconds") {
+    try journal.measure("executionViewSeconds", progress: "Prepare offline execution environment") {
       let mode = try Mode.select(target)
       try journal.setMetadata("executionViewMode", value: mode)
       let root: URL

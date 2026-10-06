@@ -38,6 +38,21 @@ public struct BaseBuildRecipe: Codable {
       }
     }
 
+    var title: String {
+      switch self {
+      case .static: "Install CI runner and shell configuration"
+      case .bootstrap: "Install Homebrew"
+      case .bottles: "Install Homebrew packages and dependencies"
+      case .ruby: "Build and install Ruby runtimes"
+      case .packages: "Install Bundler and npm packages"
+      case .taps: "Install tap packages and guest agent"
+      case .gcm: "Install Git Credential Manager"
+      case .security: "Configure boot security and automation permissions"
+      case .settings: "Configure guest services and system settings"
+      case .certificates: "Install CA certificates"
+      }
+    }
+
     var timeout: TimeInterval {
       switch self {
       case .ruby: 14_400

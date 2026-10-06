@@ -136,7 +136,8 @@ public enum BaseBottles {
             "install-bottle",
             arguments: GuestExecution.brewArguments(
               execution.rubyArguments(program: install),
-              username: username), capability: .brew, timeout: 600)
+              username: username), capability: .brew, timeout: 600,
+            progress: "Install bottle \(formula.name) \(formula.kegVersion)")
           expected[formula.name] = formula.kegVersion
         }
         if postInstall {

@@ -47,99 +47,114 @@ public enum BasePipeline {
     return try journal.perform {
       try journal.setMetadata("recipe", value: recipe)
       try journal.setMetadata("stage", value: "preflight")
-      let plans = try preflight(recipe, inputs: inputVolume, cancellation: journal.cancellation)
-      _ = try VirtualHardware.validateBundle(source, allowUnavailableHost: true)
+      let plans = try BuildProgress.run("Base preflight: check inputs and Vanilla parent") {
+        let plans = try preflight(recipe, inputs: inputVolume, cancellation: journal.cancellation)
+        _ = try VirtualHardware.validateBundle(source, allowUnavailableHost: true)
+        return plans
+      }
       var current = source
       var previous: URL?
       var completed: [String] = []
       var certificateDetails: BaseCertificates.Details?
       for (index, step) in recipe.steps.enumerated() {
-        try journal.cancellation.check()
-        for record in step.files.values {
-          _ = try Artifacts.resolve(record, under: inputs, cancellation: journal.cancellation)
+        try BuildProgress.run("Base \(index + 1)/11: \(step.stage.title)") {
+          try journal.cancellation.check()
+          for record in step.files.values {
+            _ = try Artifacts.resolve(record, under: inputs, cancellation: journal.cancellation)
+          }
+          guard try SafeFile.sha256(executable) == executableHash else {
+            throw MisoError.invalid("Native build executable changed")
+          }
+          let name = String(format: "%02d-%@", index + 1, step.stage.rawValue)
+          try journal.setMetadata("stage", value: name)
+          let stage = output.appendingPathComponent(name)
+          let arguments =
+            try recipe.arguments(
+              for: step, inputs: inputVolume, nodeFormula: plans.packages.nodeFormula)
+            + ["--source", current.path, "--output", stage.path]
+          let log = try journal.run(
+            step.stage.operation,
+            NativeCommand(executable.path, arguments: arguments, timeout: step.stage.timeout),
+            forwardProgress: true)
+          try validateStage(stage, operation: step.stage.operation, target: recipe.target)
+          for record in step.files.values {
+            _ = try Artifacts.resolve(record, under: inputs, cancellation: journal.cancellation)
+          }
+          if step.stage == .certificates {
+            struct Result: Decodable { let details: BaseCertificates.Details }
+            certificateDetails = try JSON.read(Result.self, from: log).details
+          }
+          current = stage.appendingPathComponent("bundle")
+          _ = try VirtualHardware.validateBundle(current, allowUnavailableHost: true)
+          if !keepIntermediates {
+            try BaseStageWorkspace.prune(stage, image: false, journal: journal)
+            if let previous {
+              try BaseStageWorkspace.prune(previous, image: true, journal: journal)
+            }
+          }
+          previous = stage
+          completed.append(step.stage.operation)
+          try journal.setMetadata("completedStages", value: completed)
         }
-        guard try SafeFile.sha256(executable) == executableHash else {
-          throw MisoError.invalid("Native build executable changed")
+      }
+      let finalStage = output.appendingPathComponent("11-cleanup")
+      try BuildProgress.run("Base 11/11: Clean caches, audit dependencies and optimize disk space")
+      {
+        guard let certificates = certificateDetails else {
+          throw MisoError.invalid("Missing certificate receipt")
         }
-        let name = String(format: "%02d-%@", index + 1, step.stage.rawValue)
-        try journal.setMetadata("stage", value: name)
-        let stage = output.appendingPathComponent(name)
-        let arguments =
-          try recipe.arguments(
-            for: step, inputs: inputVolume, nodeFormula: plans.packages.nodeFormula)
-          + ["--source", current.path, "--output", stage.path]
-        let log = try journal.run(
-          step.stage.operation,
-          NativeCommand(executable.path, arguments: arguments, timeout: step.stage.timeout))
-        try validateStage(stage, operation: step.stage.operation, target: recipe.target)
-        for record in step.files.values {
-          _ = try Artifacts.resolve(record, under: inputs, cancellation: journal.cancellation)
-        }
-        if step.stage == .certificates {
-          struct Result: Decodable { let details: BaseCertificates.Details }
-          certificateDetails = try JSON.read(Result.self, from: log).details
-        }
-        current = stage.appendingPathComponent("bundle")
-        _ = try VirtualHardware.validateBundle(current, allowUnavailableHost: true)
+        let cleanupPlan = BaseCleanup.Plan(
+          schemaVersion: 1, target: recipe.target, nodeFormula: plans.packages.nodeFormula,
+          pythonFormula: plans.ca.pythonFormula, pythonExecutable: plans.ca.pythonExecutable,
+          rubyVersions: plans.ruby.builds.map(\.version), certificateBundle: certificates.bundle,
+          certificateCount: certificates.certificateFingerprints.count)
+        try cleanupPlan.validate()
+        let cleanupPlanURL = output.appendingPathComponent("cleanup-plan.json")
+        try SafeFile.writeNew(JSON.encode(cleanupPlan), to: cleanupPlanURL)
+        try journal.setMetadata("stage", value: "11-cleanup")
+        try journal.run(
+          "base-cleanup",
+          NativeCommand(
+            executable.path,
+            arguments: [
+              "base", "cleanup", "--source", current.path, "--plan", cleanupPlanURL.path,
+              "--output", finalStage.path, "--username", recipe.username,
+            ], timeout: 10800), forwardProgress: true)
+        try validateStage(finalStage, operation: "base-cleanup", target: recipe.target)
+        current = finalStage.appendingPathComponent("bundle")
+        completed.append("base-cleanup")
+      }
+      return try BuildProgress.run("Base finalize: verify parent and completed image") {
+        try journal.setMetadata("stage", value: "finalize")
+        let configuration = try VirtualHardware.validateBundle(current, allowUnavailableHost: true)
+        _ = try ImageBundle.verify(source)
+        guard
+          try Artifacts.record(sourceVolume.path("manifest.json"), relativeTo: source)
+            == sourceManifest,
+          try SafeFile.sha256(recipeURL) == recipeHash,
+          try SafeFile.sha256(executable) == executableHash
+        else { throw MisoError.invalid("Base build inputs changed") }
         if !keepIntermediates {
-          try BaseStageWorkspace.prune(stage, image: false, journal: journal)
+          try BaseStageWorkspace.prune(finalStage, image: false, journal: journal)
           if let previous { try BaseStageWorkspace.prune(previous, image: true, journal: journal) }
         }
-        previous = stage
-        completed.append(step.stage.operation)
+        let manifestURL = try GuestVolume(current).path("manifest.json")
+        guard
+          var manifest = try JSONSerialization.jsonObject(
+            with: SafeFile.read(manifestURL, limit: 1 << 20)) as? [String: Any],
+          manifest["base_stages"] as? [String] == completed
+        else { throw MisoError.invalid("Final Base stage lineage differs") }
+        manifest["base_complete"] = true
+        try SafeFile.replace(
+          JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]),
+          at: manifestURL)
+        let verified = try ImageBundle.verify(current)
         try journal.setMetadata("completedStages", value: completed)
+        return Receipt(
+          target: recipe.target, recipeSHA256: recipeHash, bundle: "11-cleanup/bundle",
+          files: verified.files, stages: completed, configuration: configuration, baseComplete: true
+        )
       }
-      guard let certificates = certificateDetails else {
-        throw MisoError.invalid("Missing certificate receipt")
-      }
-      let cleanupPlan = BaseCleanup.Plan(
-        schemaVersion: 1, target: recipe.target, nodeFormula: plans.packages.nodeFormula,
-        pythonFormula: plans.ca.pythonFormula, pythonExecutable: plans.ca.pythonExecutable,
-        rubyVersions: plans.ruby.builds.map(\.version), certificateBundle: certificates.bundle,
-        certificateCount: certificates.certificateFingerprints.count)
-      try cleanupPlan.validate()
-      let cleanupPlanURL = output.appendingPathComponent("cleanup-plan.json")
-      try SafeFile.writeNew(JSON.encode(cleanupPlan), to: cleanupPlanURL)
-      let finalStage = output.appendingPathComponent("11-cleanup")
-      try journal.setMetadata("stage", value: "11-cleanup")
-      try journal.run(
-        "base-cleanup",
-        NativeCommand(
-          executable.path,
-          arguments: [
-            "base", "cleanup", "--source", current.path, "--plan", cleanupPlanURL.path,
-            "--output", finalStage.path, "--username", recipe.username,
-          ], timeout: 10800))
-      try validateStage(finalStage, operation: "base-cleanup", target: recipe.target)
-      current = finalStage.appendingPathComponent("bundle")
-      completed.append("base-cleanup")
-      let configuration = try VirtualHardware.validateBundle(current, allowUnavailableHost: true)
-      _ = try ImageBundle.verify(source)
-      guard
-        try Artifacts.record(sourceVolume.path("manifest.json"), relativeTo: source)
-          == sourceManifest,
-        try SafeFile.sha256(recipeURL) == recipeHash,
-        try SafeFile.sha256(executable) == executableHash
-      else { throw MisoError.invalid("Base build inputs changed") }
-      if !keepIntermediates {
-        try BaseStageWorkspace.prune(finalStage, image: false, journal: journal)
-        if let previous { try BaseStageWorkspace.prune(previous, image: true, journal: journal) }
-      }
-      let manifestURL = try GuestVolume(current).path("manifest.json")
-      guard
-        var manifest = try JSONSerialization.jsonObject(
-          with: SafeFile.read(manifestURL, limit: 1 << 20)) as? [String: Any],
-        manifest["base_stages"] as? [String] == completed
-      else { throw MisoError.invalid("Final Base stage lineage differs") }
-      manifest["base_complete"] = true
-      try SafeFile.replace(
-        JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]),
-        at: manifestURL)
-      let verified = try ImageBundle.verify(current)
-      try journal.setMetadata("completedStages", value: completed)
-      return Receipt(
-        target: recipe.target, recipeSHA256: recipeHash, bundle: "11-cleanup/bundle",
-        files: verified.files, stages: completed, configuration: configuration, baseComplete: true)
     }
   }
 

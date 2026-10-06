@@ -27,25 +27,28 @@ enum HomebrewLifecycle {
         arguments: GuestExecution.brewArguments(
           execution.rubyArguments(program: postInstallProgram, arguments: [formula.name]),
           username: guest.account.username),
-        capability: .brew, timeout: 180)
+        capability: .brew, timeout: 180,
+        progress: "Run post-install for \(formula.name) \(formula.kegVersion)")
     }
     var results: [String: String] = [:]
     for probe in try probes(formulae) {
       let output = try guest.run(
         "formula-probe", arguments: probe.arguments,
-        capability: .base, timeout: 180)
+        capability: .base, timeout: 180, progress: "Check tool \(probe.name)")
       guard !output.isEmpty else { throw MisoError.invalid("Empty formula probe: \(probe.name)") }
       results[probe.name] = output
     }
     let missing = try guest.run(
       "formula-missing",
       arguments: GuestExecution.brewArguments(
-        ["missing"], username: guest.account.username), capability: .brew, timeout: 180)
+        ["missing"], username: guest.account.username), capability: .brew, timeout: 180,
+      progress: "Check Homebrew dependencies")
     guard missing.isEmpty else { throw MisoError.invalid("Homebrew reports missing dependencies") }
     results["linkage"] = try guest.run(
       "formula-linkage",
       arguments: GuestExecution.brewArguments(
-        ["linkage", "--test"], username: guest.account.username), capability: .brew, timeout: 300)
+        ["linkage", "--test"], username: guest.account.username), capability: .brew, timeout: 300,
+      progress: "Check Homebrew library linkage")
     return results
   }
 

@@ -64,7 +64,9 @@ public enum BaseStaticLayer {
       let version = target["version"], let build = target["build"]
     else { throw MisoError.invalid("A never-booted native source bundle is required") }
     let profile = try RestoreProfile.select(MacOSRelease(version: version, build: build))
-    let original = try ImageBundle.verify(source)
+    let original = try BuildProgress.run("Verify base-static source image") {
+      try ImageBundle.verify(source)
+    }
     let runnerRelease = try JSON.read(RunnerRelease.self, from: release)
     let runnerDigest = try SafeFile.sha256(runner)
     let matching = runnerRelease.assets.filter { $0.name == runner.lastPathComponent }

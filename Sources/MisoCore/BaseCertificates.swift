@@ -38,7 +38,9 @@ public enum BaseCertificates {
       ) { guest in
         try guest.verifyControls(target: target)
         identity = [guest.account.uid, guest.account.gid]
-        return try install(verified, certificates: certificates, planHash: planHash, guest: guest)
+        return try BuildProgress.run("Build CA bundle and check OpenSSL and Python trust") {
+          try install(verified, certificates: certificates, planHash: planHash, guest: guest)
+        }
       }
       let audit = try DiskImageSession(image: image, readOnly: true, journal: journal)
       try audit.withAttachment { session in

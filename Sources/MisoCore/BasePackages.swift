@@ -87,7 +87,8 @@ public enum BasePackages {
           "bundler-install",
           arguments: rubyEnvironment + [
             rubyBin + "/gem", "install", "--local", archives[0], "--no-document",
-          ], capability: .ruby, timeout: 300)
+          ], capability: .ruby, timeout: 300,
+          progress: "Install Bundler \(plan.bundler.version)")
         try guest.run(
           "packages-rehash", arguments: rubyEnvironment + ["/opt/homebrew/bin/rbenv", "rehash"],
           capability: .ruby)
@@ -125,7 +126,9 @@ public enum BasePackages {
           arguments: environment + [
             nodeBin + "/npm", "install", "--global", "--offline", "--omit=optional",
             "--foreground-scripts",
-          ] + archives.dropFirst(), capability: .base, timeout: 300)
+          ] + archives.dropFirst(), capability: .base, timeout: 300,
+          progress: "Install npm packages: "
+            + plan.npm.map { "\($0.name) \($0.version)" }.joined(separator: ", "))
         installed = try versions("npm-after")
         guard installed == expected else {
           throw MisoError.invalid("Installed npm versions differ from plan")

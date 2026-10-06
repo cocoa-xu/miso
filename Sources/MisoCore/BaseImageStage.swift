@@ -50,7 +50,9 @@ enum BaseImageStage {
     let target = try RestoreProfile.select(.init(version: version, build: build)).release
     let sourceState = try ImageBundle.snapshot(source)
     let verificationStarted = ProcessInfo.processInfo.systemUptime
-    let original = try ImageBundle.verify(source, cancellation: cancellation)
+    let original = try BuildProgress.run("Verify \(operation) source image") {
+      try ImageBundle.verify(source, cancellation: cancellation)
+    }
     let initialVerificationSeconds = ProcessInfo.processInfo.systemUptime - verificationStarted
     let journal = try ExecutionJournal(
       output: output, operation: operation, cancellation: cancellation)
@@ -77,11 +79,13 @@ enum BaseImageStage {
       guard try ImageBundle.snapshot(source) == sourceState,
         try Artifacts.record(manifestURL, relativeTo: source) == sourceManifest
       else { throw MisoError.invalid("Base source changed during construction") }
-      let files = try journal.measure("outputHashingSeconds") {
-        try ImageBundle.requiredFiles.sorted().map {
-          try Artifacts.record(
-            bundle.appendingPathComponent($0), relativeTo: bundle,
-            cancellation: journal.cancellation)
+      let files = try BuildProgress.run("Record \(operation) output image") {
+        try journal.measure("outputHashingSeconds") {
+          try ImageBundle.requiredFiles.sorted().map {
+            try Artifacts.record(
+              bundle.appendingPathComponent($0), relativeTo: bundle,
+              cancellation: journal.cancellation)
+          }
         }
       }
       for file in files where file.path != "disk.img" {
@@ -98,8 +102,10 @@ enum BaseImageStage {
       if FileManager.default.fileExists(
         atPath: output.appendingPathComponent("execution-root").path)
       {
-        try journal.measure("executionCleanupSeconds") {
-          try BaseStageWorkspace.pruneExecutionView(output, journal: journal)
+        try BuildProgress.run("Remove \(operation) temporary execution files") {
+          try journal.measure("executionCleanupSeconds") {
+            try BaseStageWorkspace.pruneExecutionView(output, journal: journal)
+          }
         }
       }
       return BaseStageReceipt(

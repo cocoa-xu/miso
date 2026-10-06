@@ -64,10 +64,12 @@ public final class ExecutionJournal {
   }
 
   @discardableResult
-  public func measure<T>(_ name: String, body: () throws -> T) throws -> T {
+  public func measure<T>(
+    _ name: String, progress: String? = nil, body: () throws -> T
+  ) throws -> T {
     let started = ProcessInfo.processInfo.systemUptime
     do {
-      let value = try body()
+      let value = try BuildProgress.run(progress, operation: body)
       try setMetadata(name, value: ProcessInfo.processInfo.systemUptime - started)
       return value
     } catch {
@@ -79,7 +81,7 @@ public final class ExecutionJournal {
   @discardableResult
   public func run(
     _ name: String, _ command: NativeCommand, cleanup: Bool = false, output: URL? = nil,
-    expectedExitCodes: Set<Int32> = [0]
+    expectedExitCodes: Set<Int32> = [0], forwardProgress: Bool = false
   ) throws -> URL {
     try Self.validateName(name)
     guard !expectedExitCodes.isEmpty, expectedExitCodes.allSatisfy({ (0...255).contains($0) })
@@ -109,6 +111,10 @@ public final class ExecutionJournal {
         expectedExitCodes: expectedExitCodes.sorted(),
         workingDirectory: command.workingDirectory?.path))
     try save()
+    let relay =
+      try forwardProgress
+      ? BuildProgress.Relay(file: self.output.appendingPathComponent(errName)) : nil
+    defer { relay?.finish() }
     do {
       let result = try NativeProcess.run(
         command, stdout: stdout, stderr: stderr,

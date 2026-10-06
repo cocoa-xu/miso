@@ -106,16 +106,18 @@ public enum BaseSystemSettings {
       try data.write(wrapper, data: Data(supervisor.utf8), mode: 0o755)
       var files = [wrapper]
       for service in services {
-        let role = service.contains("LaunchDaemons/") ? "daemon" : "agent"
-        let settings = try supervisedService(data.plist(service), role: role)
-        try data.write(
-          service,
-          data: PropertyListSerialization.data(
-            fromPropertyList: settings, format: .binary, options: 0))
-        guard NSDictionary(dictionary: try data.plist(service)).isEqual(to: settings) else {
-          throw MisoError.invalid("Tart service readback differs")
+        try BuildProgress.run("Configure service \((service as NSString).lastPathComponent)") {
+          let role = service.contains("LaunchDaemons/") ? "daemon" : "agent"
+          let settings = try supervisedService(data.plist(service), role: role)
+          try data.write(
+            service,
+            data: PropertyListSerialization.data(
+              fromPropertyList: settings, format: .binary, options: 0))
+          guard NSDictionary(dictionary: try data.plist(service)).isEqual(to: settings) else {
+            throw MisoError.invalid("Tart service readback differs")
+          }
+          files.append(service)
         }
-        files.append(service)
       }
       let created = Date(
         timeIntervalSince1970: floor(journal.record.startedAt.timeIntervalSince1970))
@@ -125,25 +127,27 @@ public enum BaseSystemSettings {
         throw MisoError.system("Set Spotlight root mode", errno)
       }
       for (role, directory) in stores {
-        let path = directory + "/VolumeConfiguration.plist"
-        guard !(try data.contains(path)) else {
-          throw MisoError.invalid("Existing Spotlight configuration needs a merge")
+        try BuildProgress.run("Disable Spotlight indexing on \(role)") {
+          let path = directory + "/VolumeConfiguration.plist"
+          guard !(try data.contains(path)) else {
+            throw MisoError.invalid("Existing Spotlight configuration needs a merge")
+          }
+          let configuration = try spotlight(
+            plan, volume: main.volume(role: role).identifier, store: UUID(), created: created,
+            modified: modified)
+          try data.makeDirectories(directory)
+          guard chmod(try data.path(directory).path, 0o700) == 0 else {
+            throw MisoError.system("Set Spotlight directory mode", errno)
+          }
+          try data.write(
+            path,
+            data: PropertyListSerialization.data(
+              fromPropertyList: configuration, format: .binary, options: 0), mode: 0o600)
+          guard NSDictionary(dictionary: try data.plist(path)).isEqual(to: configuration) else {
+            throw MisoError.invalid("Spotlight readback differs")
+          }
+          files.append(path)
         }
-        let configuration = try spotlight(
-          plan, volume: main.volume(role: role).identifier, store: UUID(), created: created,
-          modified: modified)
-        try data.makeDirectories(directory)
-        guard chmod(try data.path(directory).path, 0o700) == 0 else {
-          throw MisoError.system("Set Spotlight directory mode", errno)
-        }
-        try data.write(
-          path,
-          data: PropertyListSerialization.data(
-            fromPropertyList: configuration, format: .binary, options: 0), mode: 0o600)
-        guard NSDictionary(dictionary: try data.plist(path)).isEqual(to: configuration) else {
-          throw MisoError.invalid("Spotlight readback differs")
-        }
-        files.append(path)
       }
       guard try Artifacts.record(data.path(agent), relativeTo: data.root) == vendor else {
         throw MisoError.invalid("Tart vendor binary changed")

@@ -68,7 +68,7 @@ public enum BaseCleanup {
         try guest.run(
           "cleanup-brew",
           arguments: GuestExecution.brewArguments(["cleanup", "--prune=all"], username: username),
-          capability: .brew, timeout: 300)
+          capability: .brew, timeout: 300, progress: "Clean Homebrew caches")
         try guest.run(
           "cleanup-npm",
           arguments: [
@@ -76,18 +76,18 @@ public enum BaseCleanup {
             "npm_config_cache=/Users/\(username)/Library/Caches/npm",
             "PATH=/opt/homebrew/opt/\(plan.nodeFormula)/bin:/opt/homebrew/bin:/usr/bin:/bin",
             "/opt/homebrew/opt/\(plan.nodeFormula)/bin/npm", "cache", "clean", "--force",
-          ], capability: .base, timeout: 180)
+          ], capability: .base, timeout: 180, progress: "Clean npm cache")
         guard
           try guest.run(
             "cleanup-brew-missing",
             arguments: GuestExecution.brewArguments(["missing"], username: username),
-            capability: .brew, timeout: 180
+            capability: .brew, timeout: 180, progress: "Check final Homebrew dependencies"
           ).isEmpty
         else { throw MisoError.invalid("Homebrew reports missing dependencies") }
         try guest.run(
           "cleanup-brew-linkage",
           arguments: GuestExecution.brewArguments(["linkage", "--test"], username: username),
-          capability: .brew, timeout: 300)
+          capability: .brew, timeout: 300, progress: "Check final Homebrew library linkage")
         let count = try guest.run(
           "cleanup-python-trust",
           arguments: [
@@ -121,10 +121,12 @@ public enum BaseCleanup {
               rootOwner = (0, 0)
             }
           }
-          removed[path] = try GuestCleanup.removeDirectory(
-            path, volume: guest.data, uid: guest.account.uid, gid: guest.account.gid,
-            rootOwner: rootOwner,
-            cancellation: journal.cancellation)
+          removed[path] = try BuildProgress.run("Remove guest cache \(path)") {
+            try GuestCleanup.removeDirectory(
+              path, volume: guest.data, uid: guest.account.uid, gid: guest.account.gid,
+              rootOwner: rootOwner,
+              cancellation: journal.cancellation)
+          }
         }
         _ = try Artifacts.resolve(plan.certificateBundle, under: guest.data.root)
         return try inventory(guest.data, paths: paths, account: guest.account, journal: journal)

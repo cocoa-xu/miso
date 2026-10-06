@@ -62,13 +62,17 @@ public enum BaseSecurity {
         image: image, root: root, username: username, journal: journal
       ) { guest in
         try guest.verifyControls(target: target)
-        return try configure(plan, schema: schema, guest: guest)
+        return try BuildProgress.run("Configure TCC and Safari remote automation") {
+          try configure(plan, schema: schema, guest: guest)
+        }
       }
       let write = try DiskImageSession(image: image, readOnly: false, journal: journal)
       let policy = try write.withAttachment { session in
-        try BaseBootSecurity.apply(
-          inputs, mounts: BaseBootSecurity.mounts(session, journal: journal, readOnly: false),
-          journal: journal)
+        try BuildProgress.run("Configure SIP boot policy") {
+          try BaseBootSecurity.apply(
+            inputs, mounts: BaseBootSecurity.mounts(session, journal: journal, readOnly: false),
+            journal: journal)
+        }
       }
       let audit = try DiskImageSession(image: image, readOnly: true, journal: journal)
       try audit.withAttachment { session in
@@ -194,6 +198,10 @@ public enum BaseSecurity {
       }
       let path = prefix + "/TCC.db"
       let url = try guest.data.path(path)
+      for grant in grants {
+        BuildProgress.write(
+          "Configure \(userOwned ? "user" : "system") TCC: \(grant.service) for \(grant.client)")
+      }
       rows.append(
         try BaseTCC.seed(
           url, schema: schema, version: plan.tccSchemaVersion, grants: grants,

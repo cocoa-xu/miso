@@ -105,12 +105,14 @@ public enum BaseTaps {
               chown(destination.path, guest.account.uid, guest.account.gid) == 0,
               chmod(destination.path, 0o444) == 0
             else { throw MisoError.invalid("Staged tap payload differs from plan") }
-            _ = try brew(
-              "tap-install",
-              execution.rubyArguments(
-                program: try installProgram(
-                  fullName: fullName, uid: guest.account.uid, gid: guest.account.gid)),
-              capability: .brew, timeout: 300)
+            try BuildProgress.run("Install tap package \(fullName) \(formula.kegVersion)") {
+              _ = try brew(
+                "tap-install",
+                execution.rubyArguments(
+                  program: try installProgram(
+                    fullName: fullName, uid: guest.account.uid, gid: guest.account.gid)),
+                capability: .brew, timeout: 300)
+            }
             expected[formula.name] = formula.kegVersion
           }
         }

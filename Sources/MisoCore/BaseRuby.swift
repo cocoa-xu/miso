@@ -193,7 +193,8 @@ public enum BaseRuby {
                 "ruby-build",
                 arguments: environment + options + [
                   "/opt/homebrew/bin/rbenv", "install", "-v", build.version,
-                ], capability: .ruby, timeout: 1800)
+                ], capability: .ruby, timeout: 1800,
+                progress: "Build Ruby \(build.version)")
             }
             let probe = try guest.run(
               "ruby-extensions",
