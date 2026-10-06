@@ -48,6 +48,14 @@ private func runtimeCatalog() throws -> Data {
   ] {
     #expect(throws: MisoError.self) { try requirement.validate(.init()) }
   }
+  configuration = XcodeConfiguration()
+  configuration.version = "27.1"
+  configuration.build = "27A9275"
+  try XcodeRuntime.Requirement(platform: .iOS, version: "27.1", build: "24B91").validate(
+    configuration)
+  try XcodeRuntime.Requirement(platform: .watchOS, version: "27.0", build: "24R360").validate(
+    configuration)
+  #expect(throws: MisoError.self) { try runtimeRequirement.validate(configuration) }
 }
 
 @Test func simulatorRestoreInspectionRequiresTheArm64ImageDigest() throws {

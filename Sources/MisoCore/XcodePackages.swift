@@ -12,13 +12,26 @@ public enum XcodePackages {
 
     static func standard(_ configuration: XcodeConfiguration) throws -> [Policy] {
       try configuration.validate()
-      guard configuration.build == "27A266a",
-        try StableVersion(configuration.version) == StableVersion("27.0")
-      else { throw MisoError.unsupported("Xcode first-launch package policy") }
+      let coreTypesIdentifier: String
+      let coreTypesVersion: String
+      let resourcesVersion: String
+      let version = try StableVersion(configuration.version)
+      if configuration.build == "27A266a", version == (try StableVersion("27.0")) {
+        coreTypesIdentifier = "com.apple.pkg.CoreTypes.2000A36c"
+        coreTypesVersion = "1.0.0.0.1788417388"
+        resourcesVersion = "27.0.0.0.1788430725"
+      } else if configuration.build == "27A9275", version == (try StableVersion("27.1")) {
+        coreTypesIdentifier = "com.apple.pkg.CoreTypes"
+        coreTypesVersion = "27.1.0.9000000000.1788505170"
+        resourcesVersion = "27.1.0.0.1790739719"
+      } else {
+        throw MisoError.unsupported(
+          "Xcode first-launch package policy for \(configuration.version) (\(configuration.build))")
+      }
       return [
         Policy(
-          filename: "CoreTypes.pkg", identifier: "com.apple.pkg.CoreTypes.2000A36c",
-          version: "1.0.0.0.1788417388", prefix: "",
+          filename: "CoreTypes.pkg", identifier: coreTypesIdentifier,
+          version: coreTypesVersion, prefix: "",
           roots: ["System/Library/CoreServices/CoreTypes.bundle/Contents/Library"],
           linkRoot: "System/Library/CoreServices/CoreTypes.bundle/Contents/Library"),
         Policy(
@@ -32,7 +45,7 @@ public enum XcodePackages {
           roots: ["System/Library", "usr"], linkRoot: "System/Library"),
         Policy(
           filename: "XcodeSystemResources.pkg", identifier: "com.apple.pkg.XcodeSystemResources",
-          version: "27.0.0.0.1788430725", prefix: "", roots: ["Library/Developer"],
+          version: resourcesVersion, prefix: "", roots: ["Library/Developer"],
           linkRoot: "Library/Developer"),
       ]
     }

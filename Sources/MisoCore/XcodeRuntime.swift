@@ -20,9 +20,21 @@ public enum XcodeRuntime {
       var buildValidation = configuration
       buildValidation.build = build
       try buildValidation.validate()
-      guard configuration.platforms.contains(platform), configuration.build == "27A266a",
-        try StableVersion(configuration.version) == StableVersion("27.0"),
-        try StableVersion(version) == StableVersion("27.0")
+      let expected: String
+      if configuration.build == "27A266a",
+        try StableVersion(configuration.version) == StableVersion("27.0")
+      {
+        expected = "27.0"
+      } else if configuration.build == "27A9275",
+        try StableVersion(configuration.version) == StableVersion("27.1")
+      {
+        expected = platform == .iOS ? "27.1" : "27.0"
+      } else {
+        throw MisoError.unsupported(
+          "Xcode simulator policy for \(configuration.version) (\(configuration.build))")
+      }
+      guard configuration.platforms.contains(platform),
+        try StableVersion(version) == StableVersion(expected)
       else { throw MisoError.unsupported("Xcode simulator runtime requirement") }
     }
   }

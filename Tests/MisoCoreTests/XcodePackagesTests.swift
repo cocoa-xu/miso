@@ -3,6 +3,29 @@ import Testing
 
 @testable import MisoCore
 
+@Test func xcodeRCUsesItsOwnSignedPackageIdentities() throws {
+  var configuration = XcodeConfiguration()
+  configuration.version = "27.1"
+  configuration.build = "27A9275"
+  let policies = try XcodePackages.Policy.standard(configuration)
+  let core = Data(
+    """
+    <pkg-info identifier="com.apple.pkg.CoreTypes" version="27.1.0.9000000000.1788505170" useHFSPlusCompression="true" auth="root" />
+    """.utf8)
+  let resources = Data(
+    """
+    <pkg-info identifier="com.apple.pkg.XcodeSystemResources" version="27.1.0.0.1790739719" useHFSPlusCompression="true" auth="root" />
+    """.utf8)
+  try policies[0].validateInfo(core)
+  try policies[3].validateInfo(resources)
+  #expect(throws: MisoError.self) {
+    try XcodePackages.Policy.standard(.init())[0].validateInfo(core)
+  }
+  #expect(throws: MisoError.self) {
+    try XcodePackages.Policy.standard(.init())[3].validateInfo(resources)
+  }
+}
+
 @Test func xcodePackagePolicySeparatesFirmlinksFromRelocatedSystemFiles() throws {
   let policies = try XcodePackages.Policy.standard(.init())
   #expect(policies.count == 4)
