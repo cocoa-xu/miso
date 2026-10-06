@@ -9,9 +9,24 @@ struct Base: AsyncParsableCommand {
       Defaults.self, Prepare.self, Resolve.self, Archive.self, Static.self, Bootstrap.self,
       Bottles.self,
       Ruby.self, Packages.self, Taps.self, GCM.self, Runner.self, Security.self, Settings.self,
-      CA.self,
+      CA.self, PrepareParent.self,
       Cleanup.self, Recipe.self, Build.self,
     ])
+
+  struct PrepareParent: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Recover Base boot inputs from an unbooted Vanilla parent without an IPSW or VM.")
+    @Option var source: String
+    @Option var output: String
+
+    @MainActor func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        BaseParentInputs.run(
+          source: fileURL(source), output: fileURL(output), cancellation: cancellation.token))
+    }
+  }
 
   struct Build: AsyncParsableCommand {
     static let configuration = CommandConfiguration(

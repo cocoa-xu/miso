@@ -20,35 +20,42 @@ public enum KernelCollection {
     return try journal.perform {
       try journal.setMetadata("target", value: inputs.receipt.profile.release)
       try journal.setMetadata("preparedJournal", value: inputs.journalRecord)
-      let encoded = try SafeFile.read(source, limit: 128 << 20)
-      let fields = try Image4.payloadFields(encoded)
-      guard fields[1].content == Data("krnl".utf8) else {
-        throw MisoError.invalid("Expected kernelcache payload")
-      }
-      let kernel = journal.output.appendingPathComponent("kernel.macho")
-      try decompress(fields[3].content, output: kernel, cancellation: journal.cancellation)
-      let collection = try MachOImage(SafeFile.read(kernel, limit: 512 << 20))
-      guard collection.type == 12 else { throw MisoError.invalid("Expected a kernel fileset") }
-      let policy = try collection.member("com.apple.security.AppleVPBootPolicy")
-      let payload = try policy.bytes("__policy_payload", count: 22)
-      guard
-        Data(SHA384.hash(data: payload)) == (try policy.bytes("__policy_payload_digest", count: 48))
-      else {
-        throw MisoError.invalid("Virtual policy payload digest mismatch")
-      }
-      var blobs: [String: ImageBundle.FileRecord] = [:]
-      for (name, data) in [
-        ("key", try policy.blob("_hacktivation_oik")),
-        ("certificates", try policy.blob("_hacktivation_oic")), ("payload", payload),
-      ] {
-        let destination = journal.output.appendingPathComponent(name + ".der")
-        try SafeFile.writeNew(data, to: destination)
-        blobs[name] = try Artifacts.record(destination, relativeTo: journal.output)
-      }
+      let extracted = try extract(
+        SafeFile.read(source, limit: 128 << 20), journal: journal)
       return Receipt(
         profile: inputs.receipt.profile, preparedJournal: inputs.journalRecord,
-        kernel: try Artifacts.record(kernel, relativeTo: journal.output), blobs: blobs)
+        kernel: extracted.kernel, blobs: extracted.blobs)
     }
+  }
+
+  static func extract(_ encoded: Data, journal: ExecutionJournal) throws -> (
+    kernel: ImageBundle.FileRecord, blobs: [String: ImageBundle.FileRecord]
+  ) {
+    let fields = try Image4.payloadFields(encoded)
+    guard fields[1].content == Data("krnl".utf8) else {
+      throw MisoError.invalid("Expected kernelcache payload")
+    }
+    let kernel = journal.output.appendingPathComponent("kernel.macho")
+    try decompress(fields[3].content, output: kernel, cancellation: journal.cancellation)
+    let collection = try MachOImage(SafeFile.read(kernel, limit: 512 << 20))
+    guard collection.type == 12 else { throw MisoError.invalid("Expected a kernel fileset") }
+    let policy = try collection.member("com.apple.security.AppleVPBootPolicy")
+    let payload = try policy.bytes("__policy_payload", count: 22)
+    guard
+      Data(SHA384.hash(data: payload)) == (try policy.bytes("__policy_payload_digest", count: 48))
+    else {
+      throw MisoError.invalid("Virtual policy payload digest mismatch")
+    }
+    var blobs: [String: ImageBundle.FileRecord] = [:]
+    for (name, data) in [
+      ("key", try policy.blob("_hacktivation_oik")),
+      ("certificates", try policy.blob("_hacktivation_oic")), ("payload", payload),
+    ] {
+      let destination = journal.output.appendingPathComponent(name + ".der")
+      try SafeFile.writeNew(data, to: destination)
+      blobs[name] = try Artifacts.record(destination, relativeTo: journal.output)
+    }
+    return (try Artifacts.record(kernel, relativeTo: journal.output), blobs)
   }
 
   static func decompress(

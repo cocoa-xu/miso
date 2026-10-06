@@ -3,12 +3,21 @@ import Foundation
 
 @MainActor
 enum BaseBootSecurity {
+  struct Boot: Codable, Sendable {
+    let target: MacOSRelease
+    let volumeGroup: UUID
+    let nsih: String
+    let spih: String
+    let files: [ImageBundle.FileRecord]
+  }
+
   struct Inputs {
-    let boot: BootPersonalization.Receipt
+    let boot: Boot
     let bootRoot: URL
     let materialRoot: URL
-    let material: KernelCollection.Receipt
+    let blobs: [String: ImageBundle.FileRecord]
     let bootJournal: ImageBundle.FileRecord
+    let materialJournal: ImageBundle.FileRecord
 
     init(boot: URL, material: URL, target: MacOSRelease) throws {
       func result<T: Decodable>(_ type: T.Type, root: URL, operation: String) throws -> T {
@@ -21,20 +30,36 @@ enum BaseBootSecurity {
         }
         return try JSONDecoder().decode(type, from: JSON.encode(result))
       }
-      self.boot = try result(
-        BootPersonalization.Receipt.self, root: boot, operation: "personalize-boot")
-      self.material = try result(
-        KernelCollection.Receipt.self, root: material, operation: "prepare-policy-material")
       bootRoot = boot
       materialRoot = material
       bootJournal = try Artifacts.record(
         boot.appendingPathComponent("journal.json"), relativeTo: boot)
-      guard self.boot.profile.release == target, self.material.profile == self.boot.profile,
-        self.material.preparedJournal == self.boot.preparedJournal,
-        try Artifacts.record(material.appendingPathComponent("journal.json"), relativeTo: material)
-          == self.boot.materialJournal
-      else {
-        throw MisoError.invalid("Base security material does not belong to target boot inputs")
+      materialJournal = try Artifacts.record(
+        material.appendingPathComponent("journal.json"), relativeTo: material)
+      if boot.standardized == material.standardized {
+        let recovered = try result(
+          BaseParentInputs.Receipt.self, root: boot, operation: "prepare-base-parent")
+        guard recovered.schemaVersion == 1, recovered.boot.target == target,
+          !recovered.vmStarted, recovered.originalsUnchanged,
+          Set(recovered.blobs.keys) == ["key", "certificates", "payload"]
+        else { throw MisoError.invalid("Invalid recovered Base parent inputs") }
+        self.boot = recovered.boot
+        blobs = recovered.blobs
+      } else {
+        let original = try result(
+          BootPersonalization.Receipt.self, root: boot, operation: "personalize-boot")
+        let policyMaterial = try result(
+          KernelCollection.Receipt.self, root: material, operation: "prepare-policy-material")
+        guard original.profile.release == target, policyMaterial.profile == original.profile,
+          policyMaterial.preparedJournal == original.preparedJournal,
+          materialJournal == original.materialJournal
+        else {
+          throw MisoError.invalid("Base security material does not belong to target boot inputs")
+        }
+        self.boot = Boot(
+          target: target, volumeGroup: original.volumeGroup, nsih: original.nsih,
+          spih: original.spih, files: original.files)
+        blobs = policyMaterial.blobs
       }
       guard Set(self.boot.files.map(\.path)).count == self.boot.files.count else {
         throw MisoError.invalid("Duplicate boot records")
@@ -46,7 +71,7 @@ enum BaseBootSecurity {
     }
 
     func blob(_ name: String) throws -> Data {
-      guard let record = material.blobs[name] else {
+      guard let record = blobs[name] else {
         throw MisoError.invalid("Missing policy material")
       }
       return try SafeFile.read(Artifacts.resolve(record, under: materialRoot), limit: 1 << 20)
@@ -58,7 +83,7 @@ enum BaseBootSecurity {
           == bootJournal,
         try Artifacts.record(
           materialRoot.appendingPathComponent("journal.json"), relativeTo: materialRoot)
-          == boot.materialJournal
+          == materialJournal
       else {
         throw MisoError.invalid("Base security input journal changed")
       }

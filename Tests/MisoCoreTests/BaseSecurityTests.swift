@@ -210,3 +210,35 @@ private let securitySchema = """
     try BaseBootSecurity.readBound(record, mounts: mounts, limit: 128)
   }
 }
+
+@MainActor
+@Test func recoveredParentInputsBindTargetBlobsAndJournal() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let output = temporary.url.appendingPathComponent("parent")
+  let journal = try ExecutionJournal(output: output, operation: "prepare-base-parent")
+  var blobs: [String: ImageBundle.FileRecord] = [:]
+  for name in ["key", "certificates", "payload"] {
+    let file = output.appendingPathComponent(name + ".der")
+    try SafeFile.writeNew(Data(name.utf8), to: file)
+    blobs[name] = try Artifacts.record(file, relativeTo: output)
+  }
+  let target = MacOSRelease(version: "27.0.1", build: "26A434")
+  let receipt = BaseParentInputs.Receipt(
+    schemaVersion: 1, sourceManifest: blobs["payload"]!,
+    boot: .init(
+      target: target, volumeGroup: UUID(), nsih: String(repeating: "A", count: 96),
+      spih: String(repeating: "B", count: 96), files: []),
+    blobs: blobs, originalsUnchanged: true, vmStarted: false)
+  try journal.finish(receipt)
+  let inputs = try BaseBootSecurity.Inputs(boot: output, material: output, target: target)
+  #expect(try inputs.blob("key") == Data("key".utf8))
+  #expect(throws: (any Error).self) {
+    try BaseBootSecurity.Inputs(
+      boot: output, material: output, target: .init(version: "26.6", build: "25G83"))
+  }
+  try SafeFile.replace(Data("changed".utf8), at: output.appendingPathComponent("key.der"))
+  #expect(throws: (any Error).self) { try inputs.blob("key") }
+  try SafeFile.replace(Data("{}".utf8), at: output.appendingPathComponent("journal.json"))
+  #expect(throws: (any Error).self) { try inputs.verifyJournal() }
+}
