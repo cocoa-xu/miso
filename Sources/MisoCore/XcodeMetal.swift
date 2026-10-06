@@ -24,6 +24,7 @@ public enum XcodeMetal {
     output: URL, cancellation: CancellationToken? = nil
   ) async throws -> Receipt {
     try configuration.validate()
+    let assetBuild = configuration.build == "27A9275" ? "27A266a" : configuration.build
     guard configuration.components.contains(.metalToolchain), (catalog == nil) == (archive == nil)
     else { throw MisoError.invalid("Metal replay requires both a signed catalog and its archive") }
     let journal = try ExecutionJournal(
@@ -36,11 +37,11 @@ public enum XcodeMetal {
         let signed = try SafeFile.read(catalog, limit: 8 << 20)
         let payload = try AppleAssetCatalog.verify(signed)
         asset = try AppleAssetCatalog.select(
-          payload, assetType: "com.apple.MobileAsset.MetalToolchain", build: configuration.build)
+          payload, assetType: "com.apple.MobileAsset.MetalToolchain", build: assetBuild)
         try SafeFile.writeNew(signed, to: output.appendingPathComponent("catalog.jwt"))
         try SafeFile.writeNew(payload, to: output.appendingPathComponent("catalog.json"))
       } else {
-        asset = try await AppleAssetCatalog.fetchMetal(build: configuration.build, journal: journal)
+        asset = try await AppleAssetCatalog.fetchMetal(build: assetBuild, journal: journal)
       }
       try journal.setMetadata("asset", value: asset)
       let encrypted = output.appendingPathComponent("asset.aar")
@@ -70,7 +71,7 @@ public enum XcodeMetal {
             arguments: ["patch", "-i", decoded.path, "-dst", expanded.path, "-t", "2"],
             timeout: 900))
         let disk = try inspect(
-          expanded, build: configuration.build, cancellation: journal.cancellation)
+          expanded, build: assetBuild, cancellation: journal.cancellation)
         var files: [ImageBundle.FileRecord] = []
         var bytes: UInt64 = 0
         try FileMetadata.walk(expanded) { path, info in
@@ -105,7 +106,7 @@ public enum XcodeMetal {
           throw MisoError.invalid("Metal archive changed during preparation")
         }
         let result = Receipt(
-          schemaVersion: 1, build: configuration.build,
+          schemaVersion: 1, build: assetBuild,
           catalog: try Artifacts.record(
             output.appendingPathComponent("catalog.jwt"), relativeTo: output),
           archive: archiveRecord, files: files.sorted { $0.path < $1.path },
