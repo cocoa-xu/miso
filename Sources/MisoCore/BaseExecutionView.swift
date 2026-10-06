@@ -23,12 +23,6 @@ enum BaseExecutionView {
     let mode: Mode
   }
 
-  struct Executable: Codable {
-    let path: String
-    let originalSHA256: String
-    let executionSHA256: String
-  }
-
   static func prepare(image: URL, target: MacOSRelease, journal: ExecutionJournal) throws
     -> Prepared
   {
@@ -93,8 +87,8 @@ enum BaseExecutionView {
         throw MisoError.invalid("Invalid firmlink table")
       }
       let bindings = try firmlinks(firmlinkText)
-      var originals: [(String, String)] = []
-      var compilerTools: [Executable] = []
+      var executionTools: [String] = []
+      var compilerTools: [String] = []
       let resign = ["25G83", "26A434"].contains(target.build)
       if !resign {
         throw MisoError.unsupported("Base execution view for target build \(target.build)")
@@ -157,21 +151,15 @@ enum BaseExecutionView {
           if localSignature || compilerTool,
             try isExecutable(destination)
           {
-            let digest = try SafeFile.sha256(source)
             do {
-              try AppleCode.validate(source, scope: .executable)
+              try AppleCode.validate(localSignature ? source : destination, scope: .executable)
             } catch {
               throw MisoError.invalid("Execution tool signature rejected at \(relative): \(error)")
             }
-            guard try SafeFile.sha256(destination) == digest else {
-              throw MisoError.invalid("Execution copy hash mismatch")
-            }
             if localSignature {
-              originals.append((relative, digest))
+              executionTools.append(relative)
             } else {
-              try AppleCode.validate(destination, scope: .executable)
-              compilerTools.append(
-                Executable(path: relative, originalSHA256: digest, executionSHA256: digest))
+              compilerTools.append(relative)
             }
           }
           copiedFiles += 1
@@ -218,53 +206,48 @@ enum BaseExecutionView {
         if bindings["opt"] == nil { try linkData("opt", target: "opt", root: view) }
       }
       try journal.measure("executionSignSeconds", progress: "Sign temporary execution tools") {
-        for offset in stride(from: 0, to: originals.count, by: 48) {
-          let group = originals[offset..<min(offset + 48, originals.count)]
+        for offset in stride(from: 0, to: executionTools.count, by: 48) {
+          let group = executionTools[offset..<min(offset + 48, executionTools.count)]
           try BuildProgress.run(
-            "Sign temporary tools \(offset + 1)-\(offset + group.count)/\(originals.count)"
+            "Sign temporary tools \(offset + 1)-\(offset + group.count)/\(executionTools.count)"
           ) {
             try journal.run(
               "remove-execution-signatures",
               NativeCommand(
                 .codesign,
                 arguments: ["--remove-signature"]
-                  + group.map { root.appendingPathComponent($0.0).path }, timeout: 180))
+                  + group.map { root.appendingPathComponent($0).path }, timeout: 180))
             try journal.run(
               "sign-execution-tools",
               NativeCommand(
                 .codesign,
                 arguments: ["--sign", "-", "--timestamp=none"]
-                  + group.map { root.appendingPathComponent($0.0).path }, timeout: 180))
+                  + group.map { root.appendingPathComponent($0).path }, timeout: 180))
           }
         }
       }
-      let executableRecords = try journal.measure(
+      try journal.measure(
         "executionValidationSeconds", progress: "Validate temporary tools and save inventory"
       ) {
-        let records = try originals.enumerated().map { index, original in
-          let executable = root.appendingPathComponent(original.0)
+        for (index, path) in executionTools.enumerated() {
+          let executable = root.appendingPathComponent(path)
           try renewSignedExecutable(executable)
           try AppleCode.validateLocalTool(executable, scope: .executable)
-          let record = Executable(
-            path: original.0, originalSHA256: original.1,
-            executionSHA256: try SafeFile.sha256(executable))
-          if (index + 1).isMultiple(of: 48) || index + 1 == originals.count {
-            BuildProgress.write("Validated temporary tools: \(index + 1)/\(originals.count)")
+          if (index + 1).isMultiple(of: 48) || index + 1 == executionTools.count {
+            BuildProgress.write("Validated temporary tools: \(index + 1)/\(executionTools.count)")
           }
-          return record
         }
         try SafeFile.writeNew(
-          JSON.encode(records),
+          JSON.encode(executionTools),
           to: journal.output.appendingPathComponent("execution-tools.json"))
         try SafeFile.writeNew(
           JSON.encode(compilerTools),
           to: journal.output.appendingPathComponent("execution-compiler-tools.json"))
-        return records
       }
       guard chown(root.path, 0, 0) == 0, chmod(root.path, 0o755) == 0 else {
         throw MisoError.system("Finalize execution root", errno)
       }
-      try journal.setMetadata("executionTools", value: executableRecords.count)
+      try journal.setMetadata("executionTools", value: executionTools.count)
       try journal.setMetadata("outputSystemModified", value: false)
       return root
     }
@@ -281,7 +264,6 @@ enum BaseExecutionView {
     guard original.st_mode & S_IFMT == S_IFREG, original.st_nlink == 1 else {
       throw MisoError.invalid("Unexpected signed execution file")
     }
-    let digest = try SafeFile.sha256(executable)
     let temporary = executable.deletingLastPathComponent()
       .appendingPathComponent(".miso-signed-" + UUID().uuidString)
     try Artifacts.copy(executable, to: temporary, maximumBytes: UInt64(original.st_size))
@@ -292,7 +274,7 @@ enum BaseExecutionView {
     let replacement = try FileMetadata.inspect(temporary)
     guard replacement.st_ino != original.st_ino, replacement.st_dev == original.st_dev,
       replacement.st_mode == original.st_mode, replacement.st_uid == original.st_uid,
-      replacement.st_gid == original.st_gid, try SafeFile.sha256(temporary) == digest,
+      replacement.st_gid == original.st_gid, replacement.st_size == original.st_size,
       try FileMetadata.inspect(executable).st_ino == original.st_ino
     else { throw MisoError.invalid("Signed execution copy changed") }
     guard rename(temporary.path, executable.path) == 0 else {

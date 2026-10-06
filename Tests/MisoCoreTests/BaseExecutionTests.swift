@@ -233,6 +233,22 @@ import Testing
   try AppleCode.validate(executable, scope: .executable)
   let temporary = try TemporaryDirectory()
   defer { temporary.remove() }
+  let copied = temporary.url.appendingPathComponent("copied-tool")
+  try Artifacts.copy(
+    executable, to: copied, maximumBytes: UInt64(try FileMetadata.inspect(executable).st_size))
+  let journal = try ExecutionJournal(
+    output: temporary.url.appendingPathComponent("signing"), operation: "test-execution-tool")
+  try journal.run(
+    "remove-signature", NativeCommand(.codesign, arguments: ["--remove-signature", copied.path]))
+  try journal.run(
+    "sign-tool",
+    NativeCommand(.codesign, arguments: ["--sign", "-", "--timestamp=none", copied.path]))
+  try BaseExecutionView.renewSignedExecutable(copied)
+  try AppleCode.validateLocalTool(copied, scope: .executable)
+  let handle = try SafeFile.openRegular(copied, writable: true)
+  try handle.write(contentsOf: Data([0]))
+  try handle.close()
+  #expect(throws: MisoError.self) { try AppleCode.validateLocalTool(copied, scope: .executable) }
   #expect(throws: MisoError.self) { try AppleCode.validate(temporary.url, scope: .executable) }
   let file = temporary.url.appendingPathComponent("unsigned")
   try SafeFile.writeNew(Data("untrusted".utf8), to: file)
