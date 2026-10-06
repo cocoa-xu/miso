@@ -82,6 +82,11 @@ public enum BundleAssembly {
       }
       try ImageChecks.filesystems(
         session, volumes: source.receipt.volumes, inputs: inputs, journal: journal)
+      let configuration = try ImageConfiguration.read(
+        Artifacts.resolve(
+          inputs.receipt.configuration, under: prepared, cancellation: journal.cancellation))
+      let optimization = try ImageOptimization.apply(
+        bundle: bundle, username: configuration.username, journal: journal)
       let audit = try DiskImageSession(image: session.image, readOnly: true, journal: journal)
       try audit.withAttachment { session in
         let mounts = try BootInstallation.mounts(
@@ -110,11 +115,6 @@ public enum BundleAssembly {
           readOnly: true)
         try Artifacts.requireSpace(8 << 30, at: data.root)
       }
-      let configuration = try ImageConfiguration.read(
-        Artifacts.resolve(
-          inputs.receipt.configuration, under: prepared, cancellation: journal.cancellation))
-      let optimization = try ImageOptimization.apply(
-        bundle: bundle, username: configuration.username, journal: journal)
       let files = try ImageBundle.requiredFiles.sorted().map {
         try Artifacts.record(
           bundle.appendingPathComponent($0), relativeTo: bundle, cancellation: journal.cancellation)
