@@ -1,0 +1,19 @@
+name: MISO
+description: Install MISO for offline macOS image construction on Apple silicon
+inputs:
+  version:
+    description: MISO release version, latest, or source to build this Action's revision
+    default: latest
+  xcode-base-url:
+    description: Secret HTTPS directory containing Apple's original Xcode filenames
+    required: false
+runs:
+  using: composite
+  steps:
+    - name: Install MISO
+      shell: bash
+      env:
+        MISO_ACTION_VERSION: ${{ inputs.version }}
+        MISO_ACTION_XCODE_BASE_URL: ${{ inputs.xcode-base-url }}
+        GH_TOKEN: ${{ github.token }}
+      run: bash "$GITHUB_ACTION_PATH/Scripts/setup-action.sh"

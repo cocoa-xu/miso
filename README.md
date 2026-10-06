@@ -67,36 +67,35 @@ only reclaim free blocks, or `--username NAME` for a different guest account.
 
 ## GitHub Actions
 
-Install a release in an Apple silicon macOS job, then run MISO in later steps:
+Use the Action in an Apple silicon macOS job:
 
 ```yaml
-name: MISO
-on: workflow_dispatch
-
-permissions:
-  contents: read
-
-jobs:
-  miso:
-    runs-on: xcode-27
-    steps:
-      - name: Install MISO
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/miso"
-          gh release download v0.2.1 --repo cocoa-xu/miso \
-            --pattern 'miso.tar.gz*' --dir "$RUNNER_TEMP/miso"
-          cd "$RUNNER_TEMP/miso"
-          shasum -a 256 -c miso.tar.gz.sha256
-          tar -xzf miso.tar.gz
-          echo "$RUNNER_TEMP/miso" >> "$GITHUB_PATH"
-      - run: miso --version
+steps:
+  - uses: cocoa-xu/miso@main
+    with:
+      version: source
+      xcode-base-url: ${{ secrets.XCODE_BASE_URL }}
+  - run: miso --version
 ```
 
-For image-building jobs, supply the inputs and APFS workspace described above.
-The manual [image workflow](.github/workflows/image-test.yml) builds macOS 27.0.1
-Vanilla on the official `xcode-27` runner, publishes to GHCR, and verifies a fresh
-download without starting a VM. It removes unused runner software to provide at
-least 89 GiB of free workspace. Base and Xcode builds on hosted runners are not yet
-validated.
+`version` accepts a release number, `latest` (default), or `source` to build the
+Action revision. Xcode mirror support currently requires `source`.
+Omit `xcode-base-url` when using local XIPs. The Action passes it to MISO through
+`MISO_XCODE_BASE_URL` and masks it; MISO also masks the complete download URL.
+
+To download and prepare Xcode from that mirror:
+
+```sh
+miso xcode prepare-archive --config xcode.json \
+  --target-version 27.0.1 --target-build 26A434 --output xcode-input
+```
+
+The configuration selects the Xcode version and build. MISO resolves the original
+Apple filename from the public Xcode Releases catalog, verifies Apple signatures
+and the selected version, then removes its downloaded XIP. Use `--keep-downloads`
+to retain it. Local files supplied with `--archive` and `--sha256` are preserved.
+Mirror URLs are excluded from receipts. Configure the base URL as a repository
+secret; MISO provides no shared mirror.
+
+Image construction needs an APFS workspace, administrator privileges and enough
+free space for its inputs and output. The Action does not remove runner software.

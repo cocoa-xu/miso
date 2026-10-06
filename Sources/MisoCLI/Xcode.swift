@@ -446,27 +446,41 @@ struct Xcode: AsyncParsableCommand {
     func run() throws { try printJSON(XcodeConfiguration()) }
   }
 
-  struct PrepareArchive: ParsableCommand {
+  struct PrepareArchive: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
       commandName: "prepare-archive", abstract: "Verify and expand an Apple-signed Xcode XIP.")
-    @Option var archive: String
-    @Option var sha256: String
+    @Option(help: "Local XIP; omit to download using MISO_XCODE_BASE_URL.") var archive: String?
+    @Option(help: "Required SHA-256 for a local XIP.") var sha256: String?
+    @Flag(help: "Retain MISO's download after successful preparation; local files are always kept.")
+    var keepDownloads = false
     @Option var targetVersion: String
     @Option var targetBuild: String
     @Option var config: String?
     @Option var output: String
 
-    func run() throws {
+    func run() async throws {
       let cancellation = try CancellationScope()
       defer { withExtendedLifetime(cancellation) {} }
       let settings =
         try config.map { try JSON.read(XcodeConfiguration.self, from: fileURL($0)) }
         ?? XcodeConfiguration()
-      try printJSON(
-        XcodeArchive.prepare(
-          archive: fileURL(archive), sha256: sha256,
-          target: .init(version: targetVersion, build: targetBuild), configuration: settings,
-          output: fileURL(output), cancellation: cancellation.token))
+      let target = MacOSRelease(version: targetVersion, build: targetBuild)
+      if let archive {
+        guard let sha256 else { throw ValidationError("A local --archive requires --sha256") }
+        try printJSON(
+          XcodeArchive.prepare(
+            archive: fileURL(archive), sha256: sha256, target: target, configuration: settings,
+            output: fileURL(output), cancellation: cancellation.token))
+      } else {
+        guard sha256 == nil else { throw ValidationError("--sha256 requires a local --archive") }
+        guard let baseURL = ProcessInfo.processInfo.environment["MISO_XCODE_BASE_URL"],
+          !baseURL.isEmpty
+        else { throw ValidationError("Provide --archive and --sha256, or set MISO_XCODE_BASE_URL") }
+        try printJSON(
+          await XcodeArchive.prepare(
+            baseURL: baseURL, target: target, configuration: settings, output: fileURL(output),
+            keepDownloads: keepDownloads, cancellation: cancellation.token))
+      }
     }
   }
 }

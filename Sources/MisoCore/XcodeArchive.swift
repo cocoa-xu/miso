@@ -42,35 +42,88 @@ public enum XcodeArchive {
     let journal = try ExecutionJournal(
       output: output, operation: "prepare-xcode-archive", cancellation: cancellation)
     return try journal.perform {
-      try journal.setMetadata("target", value: target)
-      try journal.setMetadata("configuration", value: configuration)
-      try journal.setMetadata("archive", value: record)
-      try Artifacts.requireSpace(24 << 30, at: output)
-      let expanded = output.appendingPathComponent("expanded")
-      try SafeFile.makeDirectory(expanded)
-      try journal.run(
-        "expand-apple-xip",
-        NativeCommand(
-          .xip, arguments: ["--expand", archive.path], timeout: 3600,
-          workingDirectory: expanded))
-      guard try FileManager.default.contentsOfDirectory(atPath: expanded.path) == ["Xcode.app"]
-      else { throw MisoError.invalid("Unexpected Xcode archive contents") }
-      let app = expanded.appendingPathComponent("Xcode.app")
-      try AppleCode.validate(app)
-      try journal.run(
-        "verify-xcode-signature",
-        NativeCommand(
-          .codesign, arguments: ["--verify", "--deep", "--strict", app.path], timeout: 900))
-      let application = try inspect(app, target: target, configuration: configuration)
-      guard try Artifacts.record(archive, relativeTo: archive.deletingLastPathComponent()) == record
-      else { throw MisoError.invalid("Xcode archive changed during preparation") }
-      let receipt = Receipt(
-        schemaVersion: 1, target: target, configuration: configuration, archive: record,
-        application: application, payload: "expanded/Xcode.app", xcodeImageComplete: false,
-        runtimeVerified: false, vmStarted: false)
-      try SafeFile.writeNew(JSON.encode(receipt), to: output.appendingPathComponent("archive.json"))
-      return receipt
+      try expand(
+        archive: archive, record: record, target: target, configuration: configuration,
+        output: output, journal: journal)
     }
+  }
+
+  public static func prepare(
+    baseURL: String, target: MacOSRelease, configuration: XcodeConfiguration = .init(),
+    output: URL, keepDownloads: Bool = false, cancellation: CancellationToken? = nil
+  ) async throws -> Receipt {
+    try configuration.validate()
+    _ = try RestoreProfile.select(target)
+    _ = try XcodeDownload.source(baseURL: baseURL, filename: "Xcode_validation.xip")
+    let journal = try ExecutionJournal(
+      output: output, operation: "prepare-xcode-archive", cancellation: cancellation)
+    do {
+      try Artifacts.requireSpace(32 << 30, at: output)
+      let archive = try await XcodeDownload.acquire(
+        baseURL: baseURL, configuration: configuration, workspace: output,
+        cancellation: cancellation)
+      let input = try SafeFile.openRegular(archive)
+      defer { try? input.close() }
+      var identity = stat()
+      guard fstat(input.fileDescriptor, &identity) == 0 else {
+        throw MisoError.system("Inspect downloaded Xcode archive", errno)
+      }
+      let record = try Artifacts.record(
+        archive, relativeTo: archive.deletingLastPathComponent(), cancellation: cancellation)
+      let receipt = try expand(
+        archive: archive, record: record, target: target, configuration: configuration,
+        output: output, journal: journal)
+      if !keepDownloads {
+        var current = stat()
+        guard lstat(archive.path, &current) == 0,
+          current.st_dev == identity.st_dev, current.st_ino == identity.st_ino,
+          current.st_mode & S_IFMT == S_IFREG
+        else {
+          throw MisoError.invalid("Downloaded Xcode archive was replaced; refusing to remove it")
+        }
+        try FileManager.default.removeItem(at: archive)
+      }
+      try journal.setMetadata("downloadRetained", value: keepDownloads)
+      try journal.finish(receipt)
+      return receipt
+    } catch {
+      if journal.record.status == .running { try journal.fail(error) }
+      throw error
+    }
+  }
+
+  private static func expand(
+    archive: URL, record: ImageBundle.FileRecord, target: MacOSRelease,
+    configuration: XcodeConfiguration, output: URL, journal: ExecutionJournal
+  ) throws -> Receipt {
+    try journal.setMetadata("target", value: target)
+    try journal.setMetadata("configuration", value: configuration)
+    try journal.setMetadata("archive", value: record)
+    try Artifacts.requireSpace(24 << 30, at: output)
+    let expanded = output.appendingPathComponent("expanded")
+    try SafeFile.makeDirectory(expanded)
+    try journal.run(
+      "expand-apple-xip",
+      NativeCommand(
+        .xip, arguments: ["--expand", archive.path], timeout: 3600,
+        workingDirectory: expanded))
+    guard try FileManager.default.contentsOfDirectory(atPath: expanded.path) == ["Xcode.app"]
+    else { throw MisoError.invalid("Unexpected Xcode archive contents") }
+    let app = expanded.appendingPathComponent("Xcode.app")
+    try AppleCode.validate(app)
+    try journal.run(
+      "verify-xcode-signature",
+      NativeCommand(
+        .codesign, arguments: ["--verify", "--deep", "--strict", app.path], timeout: 900))
+    let application = try inspect(app, target: target, configuration: configuration)
+    guard try Artifacts.record(archive, relativeTo: archive.deletingLastPathComponent()) == record
+    else { throw MisoError.invalid("Xcode archive changed during preparation") }
+    let receipt = Receipt(
+      schemaVersion: 1, target: target, configuration: configuration, archive: record,
+      application: application, payload: "expanded/Xcode.app", xcodeImageComplete: false,
+      runtimeVerified: false, vmStarted: false)
+    try SafeFile.writeNew(JSON.encode(receipt), to: output.appendingPathComponent("archive.json"))
+    return receipt
   }
 
   static func inspect(

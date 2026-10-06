@@ -11,6 +11,17 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
   override func startLoading() {
     let url = request.url!
     let path = url.lastPathComponent
+    if path == "private-error.xip" {
+      client?.urlProtocol(
+        self,
+        didFailWithError: NSError(
+          domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost,
+          userInfo: [
+            NSLocalizedDescriptionKey: "Failed to download \(url.absoluteString)",
+            NSURLErrorFailingURLErrorKey: url,
+          ]))
+      return
+    }
     if path == "protocol" || url.host == "ghcr.io" {
       let value =
         path == "protocol"
@@ -79,6 +90,25 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
     }
     client?.urlProtocolDidFinishLoading(self)
   }
+}
+
+@Test func xcodeDownloadDoesNotExposeItsPrivateURLInErrors() async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let output = temporary.url.appendingPathComponent("download.xip")
+  do {
+    try await HTTPFile.xcodeArchive(
+      URL(string: "https://private.example/secret/private-error.xip")!, to: output,
+      configuration: stubConfiguration())
+    Issue.record("Expected a transport failure")
+  } catch {
+    #expect(error.localizedDescription == "Xcode download failed (error code -1004)")
+    #expect(!FileManager.default.fileExists(atPath: output.path))
+  }
+  try await HTTPFile.xcodeArchive(
+    URL(string: "https://private.example/secret/archive.xip")!, to: output,
+    configuration: stubConfiguration())
+  #expect(try SafeFile.read(output, limit: 64) == Data(repeating: 42, count: 64))
 }
 
 @Test func nativeHTTPDeliversTheRegistryAcceptHeader() async throws {
