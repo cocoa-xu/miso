@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Virtualization
 
@@ -44,7 +45,7 @@ public enum TartBundle {
 
   public static func importImage(
     source: URL, manifest manifestURL: URL, output: URL,
-    cancellation: CancellationToken? = nil
+    diskBytes: UInt64? = nil, cancellation: CancellationToken? = nil
   ) throws -> ImportReceipt {
     _ = try GuestVolume(source)
     let bytes = try SafeFile.read(manifestURL, limit: 1 << 20)
@@ -52,13 +53,22 @@ public enum TartBundle {
     let manifest = try JSONDecoder().decode(ImageBundle.Manifest.self, from: bytes)
     try manifest.validate()
     _ = try RestoreProfile.select(metadata.target)
-    let fields = try JSONSerialization.jsonObject(with: bytes) as? [String: Any]
-    guard !metadata.constructionVMStarted, fields?["runtime_verified"] as? Bool == false else {
+    guard let fields = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+      !metadata.constructionVMStarted, fields["runtime_verified"] as? Bool == false
+    else {
       throw MisoError.invalid("Tart import requires the original unbooted MISO manifest")
     }
     let configuration = try JSON.read(
       Configuration.self, from: source.appendingPathComponent("config.json"), limit: 1 << 20)
     let records = Dictionary(uniqueKeysWithValues: manifest.files.map { ($0.path, $0) })
+    if let diskBytes {
+      guard geteuid() == 0, let originalBytes = records["disk.img"]?.bytes,
+        diskBytes > originalBytes, diskBytes <= 2 << 40, diskBytes % 4096 == 0
+      else {
+        throw MisoError.invalid(
+          "Disk expansion requires administrator privileges and a larger aligned size")
+      }
+    }
     guard configuration.version == 1, configuration.os == "darwin",
       configuration.arch == "arm64", configuration.diskFormat == "raw",
       VZMacHardwareModel(dataRepresentation: configuration.hardwareModel) != nil,
@@ -82,11 +92,26 @@ public enum TartBundle {
       }
       try SafeFile.writeNew(bytes, to: bundle.appendingPathComponent("manifest.json"))
       let verification = try ImageBundle.verify(bundle, cancellation: journal.cancellation)
+      var files = verification.files
+      if let diskBytes {
+        let details = try DiskExpansion.run(
+          image: bundle.appendingPathComponent("disk.img"), bytes: diskBytes, journal: journal)
+        let disk = try Artifacts.record(
+          bundle.appendingPathComponent("disk.img"), relativeTo: bundle,
+          cancellation: journal.cancellation)
+        files = files.map { $0.path == "disk.img" ? disk : $0 }
+        var expanded = fields
+        expanded["files"] = try JSONSerialization.jsonObject(with: JSON.encode(files))
+        expanded["disk_expansion"] = try JSONSerialization.jsonObject(with: JSON.encode(details))
+        try SafeFile.replace(
+          JSONSerialization.data(withJSONObject: expanded, options: [.prettyPrinted, .sortedKeys]),
+          at: bundle.appendingPathComponent("manifest.json"))
+      }
       return ImportReceipt(
         target: metadata.target,
         sourceManifest: .init(
           path: manifestURL.lastPathComponent, bytes: UInt64(bytes.count),
-          sha256: SafeFile.sha256(bytes)), files: verification.files)
+          sha256: SafeFile.sha256(bytes)), files: files)
     }
   }
 

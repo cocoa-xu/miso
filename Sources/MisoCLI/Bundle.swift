@@ -68,6 +68,8 @@ struct Bundle: AsyncParsableCommand {
     @Argument var directory: String
     @Option var manifest: String
     @Option var output: String
+    @Option(help: "Expand the imported disk and APFS container to this size.") var diskBytes:
+      UInt64?
 
     @MainActor func run() async throws {
       let cancellation = try CancellationScope()
@@ -75,7 +77,7 @@ struct Bundle: AsyncParsableCommand {
       try printJSON(
         TartBundle.importImage(
           source: fileURL(directory), manifest: fileURL(manifest), output: fileURL(output),
-          cancellation: cancellation.token))
+          diskBytes: diskBytes, cancellation: cancellation.token))
     }
   }
 
