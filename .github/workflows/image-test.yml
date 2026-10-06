@@ -52,17 +52,11 @@ jobs:
       - name: Publish OCI image
         timeout-minutes: 45
         env:
-          TART_REGISTRY_HOSTNAME: ghcr.io
-          TART_REGISTRY_USERNAME: ${{ github.actor }}
-          TART_REGISTRY_PASSWORD: ${{ github.token }}
+          MISO_REGISTRY_USERNAME: ${{ github.actor }}
+          MISO_REGISTRY_PASSWORD: ${{ github.token }}
         run: bash Scripts/ci-image.sh publish 2>&1 | tee "$RUNNER_TEMP/image-evidence/publish.log"
       - name: Download and verify published image
         timeout-minutes: 60
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TART_REGISTRY_HOSTNAME: ghcr.io
-          TART_REGISTRY_USERNAME: ${{ github.actor }}
-          TART_REGISTRY_PASSWORD: ${{ github.token }}
         run: bash Scripts/ci-image.sh verify 2>&1 | tee "$RUNNER_TEMP/image-evidence/verify.log"
       - name: Collect build status
         if: always()

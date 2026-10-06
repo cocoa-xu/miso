@@ -6,10 +6,8 @@ work="$RUNNER_TEMP/miso-image"
 evidence="$RUNNER_TEMP/image-evidence"
 mkdir -p "$evidence"
 binary="$work/bin/miso"
-tart="$work/bin/tart.app/Contents/MacOS/tart"
 export PATH="$work/bin:$PATH"
-export TART_HOME="$work/tart"
-export TART_NO_AUTO_PRUNE=1
+images="$work/images"
 
 fetch() {
   local url=$1 destination=$2 bytes=$3 digest=$4
@@ -38,7 +36,7 @@ host() {
 }
 
 prepare() {
-  mkdir -p "$work/bin" "$work/inputs/packages" "$TART_HOME/vms"
+  mkdir -p "$work/bin" "$work/inputs/packages" "$images"
   cp .build/release/miso "$binary"
   codesign --verify --strict "$binary"
   cp "$(command -v gh)" "$work/bin/gh"
@@ -48,11 +46,6 @@ prepare() {
     return 1
   fi
   /usr/bin/jq --version
-  fetch https://github.com/openai/tart/releases/download/2.40.1/tart.tar.gz \
-    "$work/tart.tar.gz" 22943905 363e2701154a8155cbc1bb6d845430c9b42697d2a186bc49574471ca2877db46
-  tar -xzf "$work/tart.tar.gz" -C "$work/bin"
-  codesign --verify --deep --strict "$work/bin/tart.app"
-  "$tart" --version
   df -k / > "$evidence/space-before-cleanup.txt"
   xcrun simctl runtime delete all || true
   local selected path
@@ -105,8 +98,8 @@ build() {
     --output "$work/export" > "$evidence/export.json"
   sudo -n cp "$work/restore/assembled/bundle/manifest.json" "$evidence/bundle-manifest.json"
   sudo -n chown -R "$(id -u):$(id -g)" "$work/export" "$evidence"
-  mv "$work/export/vm" "$TART_HOME/vms/vanilla"
-  "$tart" get vanilla --format json > "$evidence/tart-config.json"
+  mv "$work/export/vm" "$images/vanilla"
+  cp "$images/vanilla/config.json" "$evidence/source-config.json"
   collect
   hdiutil info > "$evidence/attachments.txt"
   if grep -F "$work/restore" "$evidence/attachments.txt"; then
@@ -124,34 +117,25 @@ publish() {
   local owner reference
   owner=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
   reference="ghcr.io/$owner/miso-ci-vanilla:27.0.1-26A434-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-  "$tart" push vanilla "$reference" --concurrency 2 --chunk-size 2 \
+  "$binary" bundle push "$images/vanilla" "$reference" \
+    --output "$work/upload" --concurrency "${MISO_TRANSFER_CONCURRENCY:-4}" \
     --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
     --label "org.opencontainers.image.revision=$GITHUB_SHA" \
     --label dev.macos-image.version=27.0.1 --label dev.macos-image.build=26A434 \
-    --label dev.macos-image.variant=vanilla
+    --label dev.macos-image.variant=vanilla > "$evidence/upload.json"
   printf '%s\n' "$reference" > "$evidence/reference.txt"
 }
 
 verify() {
-  local reference owner tag digest directory name expected
-  reference=$(cat "$evidence/reference.txt")
-  owner=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
-  tag=${reference##*:}
-  gh api "/users/$owner/packages/container/miso-ci-vanilla/versions" > "$evidence/package-versions.json"
-  digest=$(jq -er --arg tag "$tag" \
-    '[.[] | select(.metadata.container.tags | index($tag))] | if length == 1 then .[0].name else error("Ambiguous image tag") end' \
-    "$evidence/package-versions.json")
-  [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-  reference="${reference%:*}@$digest"
-  export TART_HOME="$work/download-check"
-  "$tart" clone "$reference" downloaded --concurrency 2
-  directory="$TART_HOME/vms/downloaded"
-  for name in disk.img nvram.bin; do
-    expected=$(jq -er --arg name "$name" '.files[] | select(.path == $name) | .sha256' "$evidence/export.json")
-    [[ $(shasum -a 256 "$directory/$name" | awk '{print $1}') == "$expected" ]]
-  done
+  unset MISO_REGISTRY_USERNAME MISO_REGISTRY_PASSWORD
+  local reference directory
+  reference=$(jq -er .reference "$evidence/upload.json")
+  rm -r "$images/vanilla"
+  "$binary" bundle pull "$reference" --output "$work/download-check" \
+    --concurrency "${MISO_TRANSFER_CONCURRENCY:-4}" > "$evidence/download.json"
+  directory="$work/download-check/vm"
   jq -S '{hardwareModel,ecid,cpuCountMin,memorySizeMin,os,arch,diskFormat}' \
-    "$work/tart/vms/vanilla/config.json" > "$evidence/source-identity.json"
+    "$evidence/source-config.json" > "$evidence/source-identity.json"
   jq -S '{hardwareModel,ecid,cpuCountMin,memorySizeMin,os,arch,diskFormat}' \
     "$directory/config.json" > "$evidence/downloaded-identity.json"
   cmp "$evidence/source-identity.json" "$evidence/downloaded-identity.json"
