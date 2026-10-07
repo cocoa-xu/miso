@@ -4,7 +4,8 @@ import Foundation
 public enum ImageOptimization {
   struct Details: Codable {
     let compression: TransparentCompression.Receipt?
-    let compaction: APFSCompaction.Receipt
+    let compaction: APFSCompaction.Receipt?
+    var cleanedPaths: [String] = []
   }
 
   public struct Receipt: Encodable {
@@ -51,17 +52,19 @@ public enum ImageOptimization {
       }
       let configuration = manifest["xcode_configuration"] as? [String: Any]
       let application: String?
+      var profile: XcodeBuildProfile?
       if let configuration {
         let xcode = try JSONDecoder().decode(
           XcodeConfiguration.self, from: JSONSerialization.data(withJSONObject: configuration))
         try xcode.validate()
         application = xcode.applicationPath
+        profile = xcode.buildProfile
       } else {
         application = nil
       }
       let result = try apply(
         bundle: bundle, username: username, application: application,
-        compress: compress, journal: journal)
+        compress: compress, profile: profile, journal: journal)
       try origin.requireDetached()
       guard try ImageBundle.snapshot(source) == snapshot,
         try SafeFile.read(manifestURL, limit: 1 << 20) == original
@@ -84,7 +87,7 @@ public enum ImageOptimization {
 
   static func apply(
     bundle: URL, username: String = "admin", application: String? = nil,
-    compress: Bool = true, journal: ExecutionJournal
+    compress: Bool = true, profile: XcodeBuildProfile? = nil, journal: ExecutionJournal
   ) throws -> Details {
     guard username.range(of: #"\A[a-z][a-z0-9_-]{0,30}\z"#, options: .regularExpression) != nil
     else {
@@ -92,27 +95,52 @@ public enum ImageOptimization {
     }
     let image = bundle.appendingPathComponent("disk.img")
     var compression: TransparentCompression.Receipt?
-    if compress {
+    var cleanedPaths: [String] = []
+    if (compress && (profile?.transparentCompression ?? true)) || profile?.cleanup == true {
       let mounted = try DiskImageSession(image: image, readOnly: false, journal: journal)
       compression = try mounted.withAttachment { session in
         let main = try BaseImageStage.mainContainer(session)
         let data = try ImageMounts.mount(
           main.volume(role: "Data"), session: session, journal: journal,
           name: "optimize-data", readOnly: false)
-        let result = try BuildProgress.run("Compress installed files") {
-          try journal.measure("compressionSeconds") {
-            try TransparentCompression.run(
-              data: data, roots: roots(username: username),
-              workspace: journal.output, cancellation: journal.cancellation)
+        var result: TransparentCompression.Receipt?
+        if compress && (profile?.transparentCompression ?? true) {
+          result = try BuildProgress.run("Compress installed files") {
+            try journal.measure("compressionSeconds") {
+              try TransparentCompression.run(
+                data: data, roots: roots(username: username),
+                workspace: journal.output, cancellation: journal.cancellation)
+            }
+          }
+        }
+        if profile?.cleanup == true {
+          try BuildProgress.run("Clean developer download and build caches") {
+            let account = try BaseImageStage.Account(username, data: data)
+            for path in [
+              "Library/Caches/Homebrew", "Library/Caches/npm",
+              "Library/Caches/org.swift.swiftpm", "Library/Developer/Xcode/DerivedData",
+              ".android/cache",
+            ] {
+              let relative = "Users/\(username)/" + path
+              if try GuestCleanup.removeDirectory(
+                relative, volume: data,
+                uid: account.uid, gid: account.gid, cancellation: journal.cancellation) > 0
+              {
+                cleanedPaths.append(relative)
+              }
+            }
           }
         }
         return result
       }
     }
     let detached = try DiskImageSession(image: image, readOnly: false, journal: journal)
-    let compaction = try BuildProgress.run("Reclaim APFS free space and punch sparse holes") {
-      try journal.measure("compactionSeconds") {
-        try APFSCompaction.run(detached, cancellation: journal.cancellation)
+    var compaction: APFSCompaction.Receipt?
+    if profile?.sparsify ?? true {
+      compaction = try BuildProgress.run("Reclaim APFS free space and punch sparse holes") {
+        try journal.measure("compactionSeconds") {
+          try APFSCompaction.run(detached, cancellation: journal.cancellation)
+        }
       }
     }
     let audit = try DiskImageSession(image: image, readOnly: true, journal: journal)
@@ -130,15 +158,28 @@ public enum ImageOptimization {
           main.volume(role: "Data"), session: session, journal: journal,
           name: "optimize-audit", readOnly: true)
         let app = try data.directory(application).url
-        try AppleCode.validate(app)
+        let modified =
+          profile?.trimIntel == true
+          || (profile.map { Set($0.platforms) != Set(XcodeConfiguration.Platform.allCases) }
+            ?? false)
+        if modified {
+          try AppleCode.validate(
+            app.appendingPathComponent("Contents/MacOS/Xcode"), scope: .executable)
+        } else {
+          try AppleCode.validate(app)
+        }
+        let signatureArguments =
+          ["--verify", "--deep", "--strict"]
+          + (modified ? ["--ignore-resources"] : []) + [app.path]
         try journal.run(
           "verify-compressed-xcode",
           NativeCommand(
             .codesign,
-            arguments: ["--verify", "--deep", "--strict", app.path], timeout: 900))
+            arguments: signatureArguments, timeout: 900))
       }
     }
-    let details = Details(compression: compression, compaction: compaction)
+    let details = Details(
+      compression: compression, compaction: compaction, cleanedPaths: cleanedPaths)
     try journal.setMetadata("optimization", value: details)
     return details
   }
@@ -150,6 +191,7 @@ public enum ImageOptimization {
       "Users/\(username)/.rbenv/versions", "Users/\(username)/.local/share/mise/installs",
       "Users/\(username)/flutter", "Users/\(username)/.pub-cache",
       "Users/\(username)/Library/Android",
+      "Users/\(username)/android-sdk",
     ]
   }
 }

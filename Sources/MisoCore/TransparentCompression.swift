@@ -205,7 +205,7 @@ enum TransparentCompression {
       && actual.st_ctimespec.tv_nsec == expected.st_ctimespec.tv_nsec
   }
 
-  private static func restoreTimes(_ path: URL, _ info: stat) throws {
+  static func restoreTimes(_ path: URL, _ info: stat) throws {
     var fields = attrlist()
     fields.bitmapcount = UInt16(ATTR_BIT_MAP_COUNT)
     fields.commonattr = attrgroup_t(ATTR_CMN_CRTIME | ATTR_CMN_MODTIME | ATTR_CMN_ACCTIME)

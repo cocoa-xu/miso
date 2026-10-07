@@ -14,6 +14,8 @@ public enum XcodeCompletion {
     public let configuration: XcodeConfiguration
     public let application: XcodeArchive.Application
     public let developerDisks: [DeveloperDisk]
+    let trimming: IntelTrimming.Receipt?
+    public let removedSDKs: [String]
     public let firstLaunchRuntimeVerified = false
   }
 
@@ -41,7 +43,8 @@ public enum XcodeCompletion {
       let image = try BaseImageStage.run(
         source: source, output: output.appendingPathComponent("image"),
         operation: "xcode-finalize", layer: .xcode, cancellation: journal.cancellation,
-        optimizationUsername: username, xcodeApplication: configuration.applicationPath
+        optimizationUsername: username, xcodeApplication: configuration.applicationPath,
+        optimizationProfile: configuration.buildProfile
       ) { bundle, target, stage in
         let session = try DiskImageSession(
           image: bundle.appendingPathComponent("disk.img"), readOnly: false, journal: stage)
@@ -62,8 +65,26 @@ public enum XcodeCompletion {
           try validateSelection(data, configuration: configuration)
           let disks = try installDeveloperDisks(
             data, application: app, configuration: configuration, journal: stage)
+          let removed = try BuildProgress.run("Remove excluded Xcode SDKs") {
+            try removeExcludedSDKs(data, configuration: configuration)
+          }
+          let trimming: IntelTrimming.Receipt?
+          if configuration.profile?.trimIntel == true {
+            trimming = try BuildProgress.run("Trim Intel architectures, preserving ARM signatures")
+            {
+              try IntelTrimming.run(
+                data: data,
+                roots: [
+                  configuration.applicationPath, "opt/homebrew", "Users/\(username)/flutter",
+                  "Users/\(username)/android-sdk", "Users/\(username)/.local/share/mise",
+                ], cancellation: stage.cancellation)
+            }
+          } else {
+            trimming = nil
+          }
           return Details(
-            configuration: configuration, application: application, developerDisks: disks)
+            configuration: configuration, application: application, developerDisks: disks,
+            trimming: trimming, removedSDKs: removed)
         }
       }
       let bundle = output.appendingPathComponent("image/bundle")
@@ -82,6 +103,25 @@ public enum XcodeCompletion {
         at: manifestURL)
       return Receipt(image: image, bundle: "image/bundle")
     }
+  }
+
+  static func removeExcludedSDKs(_ data: GuestVolume, configuration: XcodeConfiguration) throws
+    -> [String]
+  {
+    var removed: [String] = []
+    for platform in XcodeConfiguration.Platform.allCases
+    where !configuration.platforms.contains(platform) {
+      for name in platform.sdkNames.keys.sorted() {
+        let path =
+          configuration.applicationPath
+          + "/Contents/Developer/Platforms/\(name).platform/Developer/SDKs"
+        guard try data.contains(path) else { continue }
+        let directory = try data.directory(path).url
+        try FileManager.default.removeItem(at: directory)
+        removed.append(path)
+      }
+    }
+    return removed
   }
 
   static func requiredStages(_ configuration: XcodeConfiguration) -> Set<String> {

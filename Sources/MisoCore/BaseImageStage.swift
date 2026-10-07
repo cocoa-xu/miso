@@ -28,7 +28,7 @@ enum BaseImageStage {
   static func run<T: Encodable>(
     source: URL, output: URL, operation: String, layer: Layer = .base,
     cancellation: CancellationToken?, optimizationUsername: String? = nil,
-    xcodeApplication: String? = nil,
+    xcodeApplication: String? = nil, optimizationProfile: XcodeBuildProfile? = nil,
     body: (URL, MacOSRelease, ExecutionJournal) throws -> T
   ) throws -> BaseStageReceipt<T> {
     guard geteuid() == 0 else {
@@ -72,7 +72,7 @@ enum BaseImageStage {
       if let optimizationUsername {
         let optimization = try ImageOptimization.apply(
           bundle: bundle, username: optimizationUsername, application: xcodeApplication,
-          journal: journal)
+          profile: optimizationProfile, journal: journal)
         manifest["optimization"] = try JSONSerialization.jsonObject(with: JSON.encode(optimization))
       }
       try sourceSession.requireDetached()

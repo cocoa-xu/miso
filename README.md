@@ -124,5 +124,17 @@ to retain it. Local files supplied with `--archive` and `--sha256` are preserved
 Mirror URLs are excluded from receipts. Configure the base URL as a repository
 secret; MISO provides no shared mirror.
 
+For Slim, generate a configuration and use it throughout the Xcode stages:
+
+```sh
+miso xcode defaults --config xcode.json --slim > xcode-slim.json
+```
+
+Slim keeps macOS/iOS/watchOS SDKs and iOS/watchOS runtimes. It trims Intel code,
+preserves ARM signatures, then compresses, cleans caches and sparsifies the image.
+Use `--profile profile.yaml` instead for custom `platforms`, `trimIntel`,
+`transparentCompression`, `cleanup` and `sparsify` settings. The last four are
+independent booleans. Without a profile, the full installation remains the default.
+
 Image construction needs an APFS workspace, administrator privileges and enough
 free space for its inputs and output. The Action does not remove runner software.

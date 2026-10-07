@@ -462,8 +462,27 @@ struct Xcode: AsyncParsableCommand {
 
   struct Defaults: ParsableCommand {
     static let configuration = CommandConfiguration(
-      abstract: "Print the standard Xcode configuration.")
-    func run() throws { try printJSON(XcodeConfiguration()) }
+      abstract: "Print an Xcode configuration, optionally applying a build profile.")
+    @Option var config: String?
+    @Option(help: "YAML build profile.") var profile: String?
+    @Flag(help: "Keep iOS/watchOS and trim Intel code before compression.") var slim = false
+
+    func run() throws {
+      guard !slim || profile == nil else {
+        throw ValidationError("Choose --slim or --profile")
+      }
+      var settings =
+        try config.map { try JSON.read(XcodeConfiguration.self, from: fileURL($0)) }
+        ?? .init()
+      if let selected = try profile.map({ try XcodeBuildProfile.read(fileURL($0)) })
+        ?? (slim ? .slim : nil)
+      {
+        settings.profile = selected
+        settings.platforms = selected.platforms
+      }
+      try settings.validate()
+      try printJSON(settings)
+    }
   }
 
   struct PrepareArchive: AsyncParsableCommand {
