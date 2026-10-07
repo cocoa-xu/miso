@@ -129,9 +129,12 @@ enum HTTPData {
     configuration: URLSessionConfiguration
   ) async throws -> Data {
     guard url.scheme == "https", url.host != nil, url.user == nil, url.password == nil,
-      url.fragment == nil, maximumBytes > 0, maximumBytes <= 8 << 20
+      url.fragment == nil
     else {
       throw MisoError.invalid("Invalid HTTPS request")
+    }
+    guard maximumBytes > 0 else {
+      throw MisoError.invalid("HTTPS response byte limit must be positive")
     }
     try cancellation?.check()
     if let accept {
@@ -171,12 +174,15 @@ enum HTTPData {
           throw MisoError.invalid("HTTPS response destination changed")
         }
         guard response.expectedContentLength <= maximumBytes else {
-          throw MisoError.invalid("HTTPS response exceeds size limit")
+          throw MisoError.invalid(
+            "HTTPS response declares \(response.expectedContentLength) bytes, exceeding the requested \(maximumBytes)-byte limit"
+          )
         }
         var result = Data()
         for try await byte in bytes {
           guard result.count < maximumBytes else {
-            throw MisoError.invalid("HTTPS response exceeds size limit")
+            throw MisoError.invalid(
+              "HTTPS response exceeds the requested \(maximumBytes)-byte limit")
           }
           result.append(byte)
         }

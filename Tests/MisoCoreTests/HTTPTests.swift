@@ -417,9 +417,11 @@ private func stubConfiguration() -> URLSessionConfiguration {
   }
 }
 
-@Test func boundedNativeHTTP() async throws {
+@Test(arguments: [64, 16 << 20])
+func boundedNativeHTTP(_ maximumBytes: Int) async throws {
   let result = try await HTTPData.get(
-    URL(string: "https://fixture.test/ok")!, maximumBytes: 64, configuration: stubConfiguration())
+    URL(string: "https://fixture.test/ok")!, maximumBytes: maximumBytes,
+    configuration: stubConfiguration())
   #expect(result == Data(repeating: 42, count: 64))
 }
 
