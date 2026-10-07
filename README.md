@@ -109,6 +109,7 @@ steps:
 Action revision. Xcode mirror support requires MISO 0.2.3 or later.
 Omit `xcode-base-url` when using local XIPs. The Action passes it to MISO through
 `MISO_XCODE_BASE_URL` and masks it; MISO also masks the complete download URL.
+Base preparation uses `GH_TOKEN` or `GITHUB_TOKEN` for GitHub metadata when available.
 
 To download and prepare Xcode from that mirror:
 

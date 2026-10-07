@@ -110,6 +110,25 @@ enum HTTPData {
       gitProtocolV2: false, authorization: nil, configuration: configuration)
   }
 
+  static func githubAPI(
+    _ url: URL, maximumBytes: Int, cancellation: CancellationToken? = nil,
+    environment: [String: String] = ProcessInfo.processInfo.environment,
+    configuration: URLSessionConfiguration = .ephemeral
+  ) async throws -> Data {
+    guard url.scheme == "https", url.host == "api.github.com", url.user == nil,
+      url.password == nil, url.fragment == nil, url.port == nil || url.port == 443
+    else { throw MisoError.invalid("Invalid GitHub API URL") }
+    let token = ["GH_TOKEN", "GITHUB_TOKEN"].compactMap { environment[$0] }.first { !$0.isEmpty }
+    guard token?.utf8.allSatisfy({ (33...126).contains($0) }) ?? true else {
+      throw MisoError.invalid("Invalid GitHub API token")
+    }
+    return try await fetch(
+      url, method: "GET", body: nil, maximumBytes: maximumBytes,
+      cancellation: cancellation, redirects: .reject, accept: "application/vnd.github+json",
+      gitProtocolV2: false, authorization: token.map { "Bearer " + $0 },
+      configuration: configuration)
+  }
+
   static func homebrewIndex(
     _ url: URL, cancellation: CancellationToken? = nil,
     configuration: URLSessionConfiguration = .ephemeral

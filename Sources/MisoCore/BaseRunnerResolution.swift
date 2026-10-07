@@ -104,7 +104,7 @@ public enum BaseRunnerResolution {
         bytes = try SafeFile.read(cached.path("release.json"), limit: 2 << 20)
       } else {
         let selector = version.map { "tags/v" + $0 } ?? "latest"
-        bytes = try await HTTPData.get(
+        bytes = try await HTTPData.githubAPI(
           URL(string: "https://api.github.com/repos/actions/runner/releases/" + selector)!,
           maximumBytes: 2 << 20, cancellation: journal.cancellation)
       }

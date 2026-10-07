@@ -268,7 +268,7 @@ public enum BaseTapResolution {
           .init(name: "sha", value: head), .init(name: "path", value: profile.path),
           .init(name: "per_page", value: "100"), .init(name: "page", value: String(page)),
         ]
-        let data = try await HTTPData.get(
+        let data = try await HTTPData.githubAPI(
           url.url!, maximumBytes: 4 << 20, cancellation: cancellation)
         metadata.append(try preserve(data, name: "history-\(page).json"))
         let history = try commits(data)

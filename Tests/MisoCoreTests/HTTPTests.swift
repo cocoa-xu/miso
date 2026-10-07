@@ -22,7 +22,9 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
           ]))
       return
     }
-    if path == "protocol" || url.host == "ghcr.io" {
+    if path == "protocol" || url.host == "ghcr.io"
+      || (url.host == "api.github.com" && path != "redirect")
+    {
       let value =
         path == "protocol"
         ? request.value(forHTTPHeaderField: "Git-Protocol")
@@ -135,6 +137,36 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
     url, body: Data([1]), contentType: "application/x-git-upload-pack-request",
     to: path, maximumBytes: 64, gitProtocolV2: true, configuration: stubConfiguration())
   #expect(try SafeFile.read(path, limit: 64) == Data("version=2".utf8))
+}
+
+@Test func githubMetadataUsesOnlyExplicitEnvironmentCredentials() async throws {
+  let url = URL(string: "https://api.github.com/repos/actions/runner/releases/latest")!
+  for (environment, expected) in [
+    ([:], "missing"),
+    (["GH_TOKEN": "fixture-gh", "GITHUB_TOKEN": "fixture-fallback"], "Bearer fixture-gh"),
+    (["GH_TOKEN": "", "GITHUB_TOKEN": "fixture-fallback"], "Bearer fixture-fallback"),
+  ] {
+    let data = try await HTTPData.githubAPI(
+      url, maximumBytes: 64, environment: environment, configuration: stubConfiguration())
+    #expect(String(data: data, encoding: .utf8) == expected)
+  }
+  #expect(
+    try await HTTPData.get(url, maximumBytes: 64, configuration: stubConfiguration())
+      == Data("missing".utf8))
+}
+
+@Test func githubMetadataRejectsCredentialDestinationsAndRedirects() async {
+  for value in [
+    "https://other.test/releases/latest", "http://api.github.com/releases/latest",
+    "https://api.github.com:444/releases/latest", "https://api.github.com@other.test/latest",
+    "https://api.github.com/redirect",
+  ] {
+    await #expect(throws: (any Error).self) {
+      try await HTTPData.githubAPI(
+        URL(string: value)!, maximumBytes: 64, environment: ["GH_TOKEN": "fixture-gh"],
+        configuration: stubConfiguration())
+    }
+  }
 }
 
 @Test func portableRubyUsesOnlyAnonymousRegistryAuthorization() async throws {
