@@ -29,6 +29,7 @@ enum BaseImageStage {
     source: URL, output: URL, operation: String, layer: Layer = .base,
     cancellation: CancellationToken?, optimizationUsername: String? = nil,
     xcodeApplication: String? = nil, optimizationProfile: XcodeBuildProfile? = nil,
+    reapply: Bool = false,
     body: (URL, MacOSRelease, ExecutionJournal) throws -> T
   ) throws -> BaseStageReceipt<T> {
     guard geteuid() == 0 else {
@@ -46,7 +47,7 @@ enum BaseImageStage {
       let targetFields = manifest["target"] as? [String: String],
       let version = targetFields["version"], let build = targetFields["build"]
     else { throw MisoError.invalid("A never-booted native source bundle is required") }
-    try advanceManifest(&manifest, operation: operation, layer: layer)
+    try advanceManifest(&manifest, operation: operation, layer: layer, reapply: reapply)
     let target = try RestoreProfile.select(.init(version: version, build: build)).release
     let sourceState = try ImageBundle.snapshot(source)
     let verificationStarted = ProcessInfo.processInfo.systemUptime
@@ -117,20 +118,29 @@ enum BaseImageStage {
   }
 
   static func advanceManifest(
-    _ manifest: inout [String: Any], operation: String, layer: Layer
+    _ manifest: inout [String: Any], operation: String, layer: Layer, reapply: Bool = false
   ) throws {
     let key: String
     switch layer {
     case .base:
-      guard manifest["xcode_stages"] == nil else {
+      guard !reapply, manifest["xcode_stages"] == nil else {
         throw MisoError.invalid("Base stages cannot replace an Xcode layer")
       }
       manifest["base_complete"] = false
       key = "base_stages"
     case .xcode:
       guard manifest["base_complete"] as? Bool == true,
-        manifest["xcode_complete"] as? Bool != true, operation.hasPrefix("xcode-")
+        reapply || manifest["xcode_complete"] as? Bool != true, operation.hasPrefix("xcode-")
       else { throw MisoError.invalid("Xcode construction requires a complete Base source") }
+      if reapply {
+        guard operation == "xcode-android",
+          manifest["xcode_complete"] as? Bool == true,
+          manifest["xcode_configuration"] is [String: Any],
+          let stages = manifest["xcode_stages"] as? [String],
+          stages.contains(operation), stages.contains("xcode-finalize")
+        else { throw MisoError.invalid("Android replacement requires a completed Xcode source") }
+        manifest["xcode_stages"] = stages.filter { $0 != operation && $0 != "xcode-finalize" }
+      }
       manifest["xcode_complete"] = false
       key = "xcode_stages"
     }

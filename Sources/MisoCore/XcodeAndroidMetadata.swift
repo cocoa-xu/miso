@@ -38,7 +38,14 @@ enum XcodeAndroidMetadata {
   }
 
   static func licenseDigest(_ terms: String) -> String {
-    SafeFile.hex(
-      Insecure.SHA1.hash(data: Data(terms.utf8)))
+    let normalized =
+      terms
+      .replacingOccurrences(
+        of: #"(?<=[ \t\n\x0B\f\r])[ \t]*"#, with: "", options: .regularExpression
+      )
+      .replacingOccurrences(of: #"(?<!\n)\n(?!\n)"#, with: " ", options: .regularExpression)
+      .replacingOccurrences(of: " +", with: " ", options: .regularExpression)
+      .trimmingCharacters(in: CharacterSet(charactersIn: "\u{0}"..."\u{20}"))
+    return SafeFile.hex(Insecure.SHA1.hash(data: Data(normalized.utf8)))
   }
 }

@@ -34,9 +34,21 @@ public enum XcodeCompletion {
     cancellation: CancellationToken? = nil
   ) throws -> Receipt {
     try configuration.validate()
-    try requireStages(
-      SafeFile.read(source.appendingPathComponent("manifest.json"), limit: 1 << 20),
-      configuration: configuration, finalized: false)
+    let sourceData = try SafeFile.read(
+      source.appendingPathComponent("manifest.json"), limit: 1 << 20)
+    try requireStages(sourceData, configuration: configuration, finalized: false)
+    let sourceManifest = try JSONSerialization.jsonObject(with: sourceData) as! [String: Any]
+    let previousConfiguration = try sourceManifest["xcode_configuration"].map {
+      try JSONDecoder().decode(
+        XcodeConfiguration.self, from: JSONSerialization.data(withJSONObject: $0))
+    }
+    guard previousConfiguration == nil || previousConfiguration == configuration else {
+      throw MisoError.invalid("Xcode replacement cannot change the completed image profile")
+    }
+    let modified =
+      previousConfiguration != nil
+      && (configuration.buildProfile.trimIntel
+        || Set(configuration.platforms) != Set(XcodeConfiguration.Platform.allCases))
     let journal = try ExecutionJournal(
       output: output, operation: "complete-xcode-image", cancellation: cancellation)
     return try journal.perform {
@@ -56,15 +68,23 @@ public enum XcodeCompletion {
           let app = try data.directory(configuration.applicationPath).url
           let application = try XcodeArchive.inspect(
             app, target: target, configuration: configuration)
-          try AppleCode.validate(app)
+          if modified {
+            try AppleCode.validate(
+              app.appendingPathComponent("Contents/MacOS/Xcode"), scope: .executable)
+          } else {
+            try AppleCode.validate(app)
+          }
           try stage.run(
             "verify-final-xcode",
             NativeCommand(
-              .codesign, arguments: ["--verify", "--deep", "--strict", app.path], timeout: 900))
+              .codesign,
+              arguments: ["--verify", "--deep", "--strict"]
+                + (modified ? ["--ignore-resources"] : []) + [app.path], timeout: 900))
           try XcodeMetalInstallation.finalizeRegistration(configuration: configuration, data: data)
           try validateSelection(data, configuration: configuration)
           let disks = try installDeveloperDisks(
-            data, application: app, configuration: configuration, journal: stage)
+            data, application: app, configuration: configuration, journal: stage,
+            reuseExisting: previousConfiguration != nil)
           let removed = try BuildProgress.run("Remove excluded Xcode SDKs") {
             try removeExcludedSDKs(data, configuration: configuration)
           }
@@ -182,8 +202,16 @@ public enum XcodeCompletion {
 
   static func installDeveloperDisks(
     _ data: GuestVolume, application: URL, configuration: XcodeConfiguration,
-    journal: ExecutionJournal
+    journal: ExecutionJournal, reuseExisting: Bool = false
   ) throws -> [DeveloperDisk] {
+    if reuseExisting {
+      for platform in ["iOS", "watchOS", "tvOS", "xrOS"] {
+        try validateDeveloperDisk(
+          GuestVolume(data.directory("Library/Developer/DeveloperDiskImages/\(platform)_DDI").url),
+          platform: platform, configuration: configuration)
+      }
+      return []
+    }
     let package = try GuestVolume(application).path(
       "Contents/Resources/Packages/XcodeSystemResources.pkg")
     let expanded = journal.output.appendingPathComponent("system-resources")

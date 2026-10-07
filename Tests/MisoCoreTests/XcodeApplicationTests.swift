@@ -44,6 +44,36 @@ import Testing
   }
 }
 
+@Test func androidReplacementRequiresFinalizedSourceAndInvalidatesCompletion() throws {
+  let configuration = XcodeConfiguration()
+  let stages = XcodeCompletion.requiredStages(configuration).sorted() + ["xcode-finalize"]
+  let original: [String: Any] = [
+    "base_complete": true, "construction_vm_started": false, "runtime_verified": false,
+    "xcode_complete": true, "xcode_stages": stages,
+    "xcode_configuration": try JSONSerialization.jsonObject(with: JSON.encode(configuration)),
+  ]
+  var manifest = original
+  try BaseImageStage.advanceManifest(
+    &manifest, operation: "xcode-android", layer: .xcode, reapply: true)
+  try XcodeCompletion.requireStages(
+    JSONSerialization.data(withJSONObject: manifest), configuration: configuration, finalized: false
+  )
+  #expect(
+    manifest["xcode_configuration"] as? NSDictionary == original["xcode_configuration"]
+      as? NSDictionary)
+  #expect(throws: MisoError.self) {
+    try BaseImageStage.advanceManifest(
+      &manifest, operation: "xcode-android", layer: .xcode, reapply: true)
+  }
+  for operation in ["xcode-application", "xcode-packages", "xcode-finalize"] {
+    var invalid = original
+    #expect(throws: MisoError.self) {
+      try BaseImageStage.advanceManifest(
+        &invalid, operation: operation, layer: .xcode, reapply: true)
+    }
+  }
+}
+
 @Test func xcodeSelectionRejectsUnrelatedLinksAndRegularFiles() throws {
   let temporary = try TemporaryDirectory()
   defer { temporary.remove() }

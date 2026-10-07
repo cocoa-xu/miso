@@ -3,8 +3,8 @@ import Testing
 
 @testable import MisoCore
 
-@Test(.enabled(if: ProcessInfo.processInfo.environment["MISO_LIVE_ANDROID_LICENSES"] == "1"))
-func liveAndroidLicenseCatalogPreparationAndOfflineReplay() async throws {
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MISO_SDKMANAGER"] != nil))
+func liveAndroidLicenseCatalogPreparationAndSDKAcceptance() async throws {
   let directory = try TemporaryDirectory()
   defer { directory.remove() }
   let fresh = directory.url.appendingPathComponent("fresh")
@@ -18,13 +18,45 @@ func liveAndroidLicenseCatalogPreparationAndOfflineReplay() async throws {
   let replay = try await XcodeAndroidLicenses.prepare(
     output: cached, previous: records, cache: fresh, cancellation: cancellation)
   #expect(replay == records)
-  var names = Set<String>()
+  let repository = try await HTTPData.get(
+    URL(string: "https://dl.google.com/android/repository/repository2-3.xml")!,
+    maximumBytes: 8 << 20)
+  var hashes = try XcodeAndroidLicenses.hashes(repository)
   for record in records {
     let licenses = try XcodeAndroidLicenses.hashes(
       SafeFile.read(Artifacts.resolve(record, under: fresh), limit: 8 << 20))
-    names.formUnion(licenses.keys)
+    for (name, values) in licenses { hashes[name, default: []].formUnion(values) }
   }
-  #expect(names.contains("android-sdk-license"))
+  let sdk = directory.url.appendingPathComponent("sdk")
+  let licenses = sdk.appendingPathComponent("licenses")
+  try SafeFile.makeDirectory(sdk)
+  try SafeFile.makeDirectory(licenses)
+  for (name, values) in hashes {
+    try SafeFile.writeNew(
+      Data((values.sorted().joined(separator: "\n") + "\n").utf8),
+      to: licenses.appendingPathComponent(name))
+  }
+  let log = directory.url.appendingPathComponent("sdkmanager.log")
+  try SafeFile.writeNew(Data(), to: log)
+  let output = try FileHandle(forWritingTo: log)
+  defer { try? output.close() }
+  let process = Process()
+  process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+  process.arguments = [
+    "-e", "alarm 120; exec @ARGV", ProcessInfo.processInfo.environment["MISO_SDKMANAGER"]!,
+    "--sdk_root=\(sdk.path)", "--licenses",
+  ]
+  var environment = ProcessInfo.processInfo.environment
+  environment["ANDROID_USER_HOME"] = directory.url.appendingPathComponent("android-user").path
+  process.environment = environment
+  process.standardInput = FileHandle.nullDevice
+  process.standardOutput = output
+  process.standardError = output
+  try process.run()
+  process.waitUntilExit()
+  let text = String(decoding: try Data(contentsOf: log), as: UTF8.self)
+  #expect(process.terminationStatus == 0, "\(text)")
+  #expect(text.contains("All SDK package licenses accepted"), "\(text)")
 }
 
 private func androidRepository() -> String {
@@ -98,7 +130,12 @@ private func androidRepository() -> String {
   #expect(root.elements(forName: "license").first?.stringValue == "License terms")
   #expect(
     XcodeAndroidMetadata.licenseDigest("abc") == "a9993e364706816aba3e25717850c26c9cd0d89d")
-  #expect(XcodeAndroidMetadata.licenseDigest("abc\n") != XcodeAndroidMetadata.licenseDigest("abc"))
+  #expect(XcodeAndroidMetadata.licenseDigest("abc\n") == XcodeAndroidMetadata.licenseDigest("abc"))
+  #expect(
+    XcodeAndroidMetadata.licenseDigest(" First  paragraph\n  continued.\n\n  Second paragraph. \n")
+      == XcodeAndroidMetadata.licenseDigest("First paragraph continued.\n\nSecond paragraph."))
+  #expect(
+    XcodeAndroidMetadata.licenseDigest("a\nb") != XcodeAndroidMetadata.licenseDigest("a\n\nb"))
   let rows = selection.packages.map {
     "\($0.identifier) | \($0.revision) | Tool | \($0.identifier.replacingOccurrences(of: ";", with: "/"))"
   }.joined(separator: "\n")
@@ -115,14 +152,12 @@ private func androidRepository() -> String {
   #expect(String(decoding: profile, as: UTF8.self).contains("cmdline-tools/20.0/bin"))
 }
 
-@Test func androidCatalogLicensesPreserveExactTextAndRejectUnsafeSources() throws {
+@Test func androidCatalogLicensesNormalizeTermsAndRejectUnsafeSources() throws {
   let xml = Data(
     "<repository><license id=\"android-sdk-license\">abc\n</license></repository>".utf8)
   let hashes = try XcodeAndroidLicenses.hashes(xml)
   #expect(
-    hashes["android-sdk-license"] == [
-      XcodeAndroidMetadata.licenseDigest("abc"), XcodeAndroidMetadata.licenseDigest("abc\n"),
-    ])
+    hashes["android-sdk-license"] == ["a9993e364706816aba3e25717850c26c9cd0d89d"])
   let prefix =
     "<common:site-list xmlns:common=\"http://schemas.android.com/repository/android/sites-common/1\">"
   for path in ["../escape.xml", "https://example.com/catalog.xml", "/absolute.xml"] {

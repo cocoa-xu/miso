@@ -20,7 +20,7 @@ public enum XcodeAndroidInstallation {
 
   public static func install(
     source: URL, prepared: URL, configuration: XcodeConfiguration = .init(),
-    output: URL, username: String = "admin",
+    output: URL, username: String = "admin", replaceExisting: Bool = false,
     cancellation: CancellationToken? = nil
   ) async throws -> Receipt {
     guard geteuid() == 0 else {
@@ -38,14 +38,15 @@ public enum XcodeAndroidInstallation {
       )
       let image = try BaseImageStage.run(
         source: source, output: output.appendingPathComponent("image"), operation: "xcode-android",
-        layer: .xcode, cancellation: journal.cancellation
+        layer: .xcode, cancellation: journal.cancellation, reapply: replaceExisting
       ) { bundle, target, stage in
         guard target == input.target else {
           throw MisoError.invalid("Android target differs from image")
         }
         return try install(
           input, inputs: inputs, image: bundle.appendingPathComponent("disk.img"),
-          configuration: configuration, username: username, journal: stage)
+          configuration: configuration, username: username, replaceExisting: replaceExisting,
+          journal: stage)
       }
       try BaseStageWorkspace.requireUnmounted(inputs)
       for item in input.items {
@@ -64,7 +65,7 @@ public enum XcodeAndroidInstallation {
 
   private static func install(
     _ input: XcodeAndroidInputs.Receipt, inputs: URL, image: URL, configuration: XcodeConfiguration,
-    username: String,
+    username: String, replaceExisting: Bool,
     journal: ExecutionJournal
   ) throws -> Details {
     let root = try BaseExecutionView.prepare(image: image, target: input.target, journal: journal)
@@ -85,8 +86,11 @@ public enum XcodeAndroidInstallation {
         guest.data.directory(configuration.applicationPath).url, target: input.target,
         configuration: configuration)
       for path in paths {
-        guard try !guest.data.contains(path) else {
-          throw MisoError.invalid("Android destination already exists: \(path)")
+        if try guest.data.contains(path) {
+          guard replaceExisting else {
+            throw MisoError.invalid("Android destination already exists: \(path)")
+          }
+          try FileManager.default.removeItem(at: guest.data.directory(path).url)
         }
         try guest.data.makeDirectories(path, uid: guest.account.uid, gid: guest.account.gid)
       }
@@ -158,11 +162,6 @@ public enum XcodeAndroidInstallation {
       probes["installed"] = try run(
         "android-installed", [manager, "--sdk_root=/" + sdk, "--list_installed"])
       try verifyInstalled(probes["installed"] ?? "", selection: input.selection)
-      probes["licenses"] = try run(
-        "android-licenses", [manager, "--sdk_root=/" + sdk, "--licenses"])
-      guard probes["licenses"]?.contains("All SDK package licenses accepted.") == true else {
-        throw MisoError.invalid("Android SDK licenses were not accepted")
-      }
       let probe = "private/tmp/miso-android-" + UUID().uuidString
       try guest.data.makeDirectories(
         probe + "/classes", uid: guest.account.uid, gid: guest.account.gid)

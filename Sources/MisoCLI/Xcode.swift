@@ -87,6 +87,7 @@ struct Xcode: AsyncParsableCommand {
     @Option var output: String
     @Option var config: String?
     @Option var username = "admin"
+    @Flag(help: "Replace Android in an existing Xcode image.") var replaceExisting = false
 
     func run() async throws {
       let cancellation = try CancellationScope()
@@ -97,7 +98,7 @@ struct Xcode: AsyncParsableCommand {
           configuration: try config.map {
             try JSON.read(XcodeConfiguration.self, from: fileURL($0))
           } ?? .init(), output: fileURL(output),
-          username: username, cancellation: cancellation.token))
+          username: username, replaceExisting: replaceExisting, cancellation: cancellation.token))
     }
   }
 

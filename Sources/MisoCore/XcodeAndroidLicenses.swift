@@ -45,9 +45,6 @@ enum XcodeAndroidLicenses {
         let text = license.stringValue, !text.isEmpty, text.utf8.count <= 1 << 20
       else { throw MisoError.invalid("Invalid Android license identity or terms") }
       result[id, default: []].insert(XcodeAndroidMetadata.licenseDigest(text))
-      result[id, default: []].insert(
-        XcodeAndroidMetadata.licenseDigest(
-          text.trimmingCharacters(in: .whitespacesAndNewlines)))
     }
     return result
   }
