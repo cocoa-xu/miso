@@ -88,7 +88,12 @@ enum ImageMounts {
         $0.identifier == volume.identifier && $0.device == volume.device
       })
     else { throw MisoError.invalid("Image volume mounted at an unexpected location") }
-    try verifyAttachment(session.attachment, volume: volume, mountPoint: mount.path)
+    try waitForAttachment(
+      volume: volume, mountPoint: mount.path,
+      refresh: {
+        try session.verifyOwnership()
+        return session.attachment
+      })
     var filesystem = statfs()
     guard statfs(mount.path, &filesystem) == 0,
       (filesystem.f_flags & UInt32(MNT_RDONLY) != 0) == readOnly,
@@ -111,7 +116,31 @@ enum ImageMounts {
   ) throws {
     let entries = attachment?.entities.filter { $0.device == "/dev/" + volume.device } ?? []
     guard entries.count == 1, entries[0].mountPoint == mountPoint else {
-      throw MisoError.invalid("Owned image volume mount point mismatch")
+      let observed = entries.map { $0.mountPoint ?? "<unmounted>" }.joined(separator: ", ")
+      throw MisoError.invalid(
+        "Owned image volume \(volume.device) mount point mismatch: expected "
+          + "\(mountPoint ?? "<unmounted>"), observed \(entries.count) entries [\(observed)]")
+    }
+  }
+
+  static func waitForAttachment(
+    volume: APFSTopology.Volume, mountPoint: String,
+    refresh: () throws -> DiskImageAttachment?,
+    pause: () -> Void = { Thread.sleep(forTimeInterval: 0.1) }
+  ) throws {
+    for attempt in 0..<10 {
+      let attachment = try refresh()
+      guard let attachment else { throw MisoError.invalid("Owned image disappeared after mount") }
+      let entries = attachment.entities.filter { $0.device == "/dev/" + volume.device }
+      let pending = entries.isEmpty || (entries.count == 1 && entries[0].mountPoint == nil)
+      if !pending || attempt == 9 {
+        try verifyAttachment(attachment, volume: volume, mountPoint: mountPoint)
+        return
+      }
+      if attempt == 0 {
+        BuildProgress.write("Waiting for mount metadata: \(volume.device) at \(mountPoint)")
+      }
+      pause()
     }
   }
 }
