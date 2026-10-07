@@ -6,6 +6,7 @@ public enum XcodeMetal {
   public struct Receipt: Codable {
     let schemaVersion: Int
     let build: String
+    let componentIndex: ImageBundle.FileRecord
     let catalog: ImageBundle.FileRecord
     let archive: ImageBundle.FileRecord
     let files: [ImageBundle.FileRecord]
@@ -20,17 +21,31 @@ public enum XcodeMetal {
   }
 
   public static func prepare(
-    configuration: XcodeConfiguration = .init(), catalog: URL? = nil, archive: URL? = nil,
+    configuration: XcodeConfiguration = .init(), index: URL? = nil,
+    catalog: URL? = nil, archive: URL? = nil,
     output: URL, cancellation: CancellationToken? = nil
   ) async throws -> Receipt {
     try configuration.validate()
-    let assetBuild = configuration.build == "27A9275" ? "27A266a" : configuration.build
-    guard configuration.components.contains(.metalToolchain), (catalog == nil) == (archive == nil)
-    else { throw MisoError.invalid("Metal replay requires both a signed catalog and its archive") }
+    guard configuration.components.contains(.metalToolchain), (catalog == nil) == (archive == nil),
+      catalog == nil || index != nil
+    else {
+      throw MisoError.invalid(
+        "Metal replay requires its component index, signed catalog and archive")
+    }
     let journal = try ExecutionJournal(
       output: output, operation: "prepare-xcode-metal", cancellation: cancellation)
     do {
       try journal.setMetadata("configuration", value: configuration)
+      let indexData: Data
+      if let index {
+        indexData = try SafeFile.read(index, limit: 8 << 20)
+      } else {
+        indexData = try await HTTPData.get(
+          XcodeComponentIndex.url, maximumBytes: 8 << 20, cancellation: journal.cancellation)
+      }
+      let assetBuild = try XcodeComponentIndex.metalBuild(indexData, configuration: configuration)
+      let indexURL = output.appendingPathComponent("index.plist")
+      try SafeFile.writeNew(indexData, to: indexURL)
       try Artifacts.requireSpace(4 << 30, at: output)
       let asset: AppleAssetCatalog.Asset
       if let catalog {
@@ -107,6 +122,7 @@ public enum XcodeMetal {
         }
         let result = Receipt(
           schemaVersion: 1, build: assetBuild,
+          componentIndex: try Artifacts.record(indexURL, relativeTo: output),
           catalog: try Artifacts.record(
             output.appendingPathComponent("catalog.jwt"), relativeTo: output),
           archive: archiveRecord, files: files.sorted { $0.path < $1.path },

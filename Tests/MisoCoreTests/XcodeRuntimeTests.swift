@@ -36,13 +36,12 @@ private func runtimeCatalog() throws -> Data {
   }
 }
 
-@Test func simulatorPreparationRejectsUnconfiguredOrUnreviewedVersions() throws {
+@Test func simulatorPreparationUsesExplicitRuntimeSelectionsAcrossXcodeVersions() throws {
   try runtimeRequirement.validate(.init())
   var configuration = XcodeConfiguration()
   configuration.platforms = [.watchOS]
   #expect(throws: MisoError.self) { try runtimeRequirement.validate(configuration) }
   for requirement in [
-    XcodeRuntime.Requirement(platform: .iOS, version: "27.1", build: "24B001"),
     XcodeRuntime.Requirement(platform: .iOS, version: "latest", build: "24A434"),
     XcodeRuntime.Requirement(platform: .iOS, version: "27.0", build: "../24A434"),
   ] {
@@ -55,7 +54,11 @@ private func runtimeCatalog() throws -> Data {
     configuration)
   try XcodeRuntime.Requirement(platform: .watchOS, version: "27.0", build: "24R360").validate(
     configuration)
-  #expect(throws: MisoError.self) { try runtimeRequirement.validate(configuration) }
+  try runtimeRequirement.validate(configuration)
+  configuration.version = "27.2"
+  configuration.build = "27B5028f"
+  try XcodeRuntime.Requirement(platform: .iOS, version: "27.2", build: "24B5089g").validate(
+    configuration)
 }
 
 @Test func simulatorRestoreInspectionRequiresTheArm64ImageDigest() throws {

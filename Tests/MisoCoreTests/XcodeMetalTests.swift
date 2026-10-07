@@ -5,6 +5,65 @@ import Testing
 
 @testable import MisoCore
 
+@Test func metalBuildFollowsApplesXcodeComponentMapping() throws {
+  var configuration = XcodeConfiguration()
+  configuration.version = "27.2"
+  configuration.build = "27B5028f"
+  let mapping: [String: Any] = [
+    "affinity": "available", "assetType": "metalToolchain",
+    "xcodeBuildUpdate": "27B5028f", "assetBuildUpdate": "27B5028e",
+  ]
+  let asset: [String: Any] = [
+    "assetType": "metalToolchain", "assetBuildUpdate": "27B5028e",
+    "downloadMethod": "mobileAsset", "contentType": "cryptexDiskImage",
+  ]
+  func index(_ mappings: [[String: Any]], _ assets: [[String: Any]]) throws -> Data {
+    try PropertyListSerialization.data(
+      fromPropertyList: [
+        "xcodeToOtherDownloadablesMappings": mappings, "otherDownloadables": assets,
+      ],
+      format: .xml, options: 0)
+  }
+  #expect(
+    try XcodeComponentIndex.metalBuild(index([mapping], [asset]), configuration: configuration)
+      == "27B5028e")
+  var ambiguous = mapping
+  ambiguous["assetBuildUpdate"] = "27B5019j"
+  for data in [
+    try index([], [asset]), try index([mapping], []), try index([mapping, ambiguous], [asset]),
+  ] {
+    #expect(throws: MisoError.self) {
+      try XcodeComponentIndex.metalBuild(data, configuration: configuration)
+    }
+  }
+  var preferred = mapping
+  preferred["affinity"] = "preferred"
+  #expect(
+    try XcodeComponentIndex.metalBuild(
+      index([preferred, ambiguous], [asset]), configuration: configuration)
+      == "27B5028e")
+}
+
+@Test func nativeXcodeComponentIndexProbe() throws {
+  guard let path = ProcessInfo.processInfo.environment["MISO_XCODE_COMPONENT_INDEX_PROBE"] else {
+    return
+  }
+  let data = try Data(contentsOf: URL(fileURLWithPath: path))
+  for (version, build, metal) in [
+    ("27.0", "27A5194q", "27A5194o"), ("27.0", "27A5209h", "27A5209h"),
+    ("27.0", "27A5218g", "27A5218h"), ("27.0", "27A5228h", "27A5228f"),
+    ("27.0", "27A5237l", "27A5237l"), ("27.0", "27A5252f", "27A5252f"),
+    ("27.0", "27A266a", "27A266a"), ("27.1", "27A9269", "27A266a"),
+    ("27.1", "27A9275", "27A266a"), ("27.2", "27B5019j", "27B5019j"),
+    ("27.2", "27B5028f", "27B5028e"),
+  ] {
+    var configuration = XcodeConfiguration()
+    configuration.version = version
+    configuration.build = build
+    #expect(try XcodeComponentIndex.metalBuild(data, configuration: configuration) == metal)
+  }
+}
+
 @Test func metalAssetInspectionBindsBuildAndContainsDiskPaths() throws {
   let directory = try TemporaryDirectory()
   defer { directory.remove() }

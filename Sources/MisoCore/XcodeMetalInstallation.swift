@@ -38,7 +38,8 @@ public enum XcodeMetalInstallation {
     do {
       let inputs = output.appendingPathComponent("inputs")
       let authenticated = try await XcodeMetal.prepare(
-        configuration: configuration, catalog: original.path("catalog.jwt"),
+        configuration: configuration, index: original.path("index.plist"),
+        catalog: original.path("catalog.jwt"),
         archive: original.path("asset.aar"), output: inputs, cancellation: journal.cancellation)
       let image = try BaseImageStage.run(
         source: source, output: output.appendingPathComponent("image"), operation: "xcode-metal",

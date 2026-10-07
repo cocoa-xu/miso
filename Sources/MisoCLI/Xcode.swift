@@ -443,7 +443,9 @@ struct Xcode: AsyncParsableCommand {
       abstract: "Download and verify the exact Xcode Metal asset without installing it on the host."
     )
     @Option var config: String?
-    @Option(help: "Signed catalog for offline replay; requires --archive.") var catalog: String?
+    @Option(help: "Apple component index for offline replay.") var index: String?
+    @Option(help: "Signed catalog for offline replay; requires --index and --archive.") var catalog:
+      String?
     @Option(help: "Encrypted Apple asset for offline replay; requires --catalog.") var archive:
       String?
     @Option var output: String
@@ -456,7 +458,8 @@ struct Xcode: AsyncParsableCommand {
         ?? XcodeConfiguration()
       try printJSON(
         await XcodeMetal.prepare(
-          configuration: settings, catalog: catalog.map(fileURL), archive: archive.map(fileURL),
+          configuration: settings, index: index.map(fileURL),
+          catalog: catalog.map(fileURL), archive: archive.map(fileURL),
           output: fileURL(output), cancellation: cancellation.token))
     }
   }

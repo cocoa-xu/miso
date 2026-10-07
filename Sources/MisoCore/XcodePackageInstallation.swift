@@ -178,16 +178,21 @@ public enum XcodePackageInstallation {
     -> String
   {
     let license = try GuestVolume(app).plist("Contents/Resources/LicenseInfo.plist")
-    guard license["licenseType"] as? String == "GM", license["licenseID"] as? String == "EA2002"
-    else {
-      throw MisoError.invalid("Unreviewed Xcode license identity")
-    }
+    let values = try licenseValues(license, configuration: configuration)
     try data.mergePlist(
-      "Library/Preferences/com.apple.dt.Xcode.plist",
-      values: [
-        "IDELastGMLicenseAgreedTo": "EA2002",
-        "IDEXcodeVersionForAgreedToGMLicense": configuration.version,
-      ])
-    return "EA2002"
+      "Library/Preferences/com.apple.dt.Xcode.plist", values: values)
+    return license["licenseID"] as! String
+  }
+
+  static func licenseValues(_ license: [String: Any], configuration: XcodeConfiguration) throws
+    -> [String: String]
+  {
+    guard let type = license["licenseType"] as? String, ["GM", "Beta"].contains(type),
+      let identifier = license["licenseID"] as? String, !identifier.isEmpty
+    else { throw MisoError.invalid("Unsupported Xcode license metadata") }
+    return [
+      "IDELast\(type)LicenseAgreedTo": identifier,
+      "IDEXcodeVersionForAgreedTo\(type)License": configuration.version,
+    ]
   }
 }

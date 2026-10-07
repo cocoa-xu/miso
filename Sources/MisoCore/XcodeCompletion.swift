@@ -81,7 +81,7 @@ public enum XcodeCompletion {
               arguments: ["--verify", "--deep", "--strict"]
                 + (modified ? ["--ignore-resources"] : []) + [app.path], timeout: 900))
           try XcodeMetalInstallation.finalizeRegistration(configuration: configuration, data: data)
-          try validateSelection(data, configuration: configuration)
+          try validateSelection(data, configuration: configuration, journal: stage)
           let disks = try installDeveloperDisks(
             data, application: app, configuration: configuration, journal: stage,
             reuseExisting: previousConfiguration != nil)
@@ -171,18 +171,24 @@ public enum XcodeCompletion {
     else { throw MisoError.invalid("Incomplete or previously booted Xcode image") }
   }
 
-  static func validateSelection(_ data: GuestVolume, configuration: XcodeConfiguration) throws {
+  static func validateSelection(
+    _ data: GuestVolume, configuration: XcodeConfiguration, journal: ExecutionJournal
+  ) throws {
     try XcodeApplication.requireSelection(
       "/" + configuration.applicationPath + "/Contents/Developer", data: data)
     let license = try data.plist("Library/Preferences/com.apple.dt.Xcode.plist")
-    guard license["IDELastGMLicenseAgreedTo"] as? String == "EA2002",
-      license["IDEXcodeVersionForAgreedToGMLicense"] as? String == configuration.version
-    else { throw MisoError.invalid("Final Xcode license differs") }
+    let app = try GuestVolume(data.directory(configuration.applicationPath).url)
+    let expected = try XcodePackageInstallation.licenseValues(
+      app.plist("Contents/Resources/LicenseInfo.plist"), configuration: configuration)
+    for (key, value) in expected where license[key] as? String != value {
+      throw MisoError.invalid("Final Xcode license differs: \(key)")
+    }
     for policy in try XcodePackages.Policy.standard(configuration) {
+      let identity = try policy.identity(in: app.root, journal: journal)
       let receipt = try data.plist(
-        "Library/Apple/System/Library/Receipts/" + policy.identifier + ".plist")
-      guard receipt["PackageIdentifier"] as? String == policy.identifier,
-        receipt["PackageVersion"] as? String == policy.version
+        "Library/Apple/System/Library/Receipts/" + identity.identifier + ".plist")
+      guard receipt["PackageIdentifier"] as? String == identity.identifier,
+        receipt["PackageVersion"] as? String == identity.version
       else { throw MisoError.invalid("Final first-launch package receipt differs") }
     }
   }

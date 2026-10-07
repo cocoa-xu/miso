@@ -2,50 +2,37 @@ import Darwin
 import Foundation
 
 public enum XcodePackages {
+  struct Identity: Equatable, Sendable {
+    let identifier: String
+    let version: String
+  }
+
   struct Policy: Sendable {
     let filename: String
     let identifier: String
-    let version: String
     let prefix: String
     let roots: Set<String>
     let linkRoot: String
 
     static func standard(_ configuration: XcodeConfiguration) throws -> [Policy] {
       try configuration.validate()
-      let coreTypesIdentifier: String
-      let coreTypesVersion: String
-      let resourcesVersion: String
-      let version = try StableVersion(configuration.version)
-      if configuration.build == "27A266a", version == (try StableVersion("27.0")) {
-        coreTypesIdentifier = "com.apple.pkg.CoreTypes.2000A36c"
-        coreTypesVersion = "1.0.0.0.1788417388"
-        resourcesVersion = "27.0.0.0.1788430725"
-      } else if configuration.build == "27A9275", version == (try StableVersion("27.1")) {
-        coreTypesIdentifier = "com.apple.pkg.CoreTypes"
-        coreTypesVersion = "27.1.0.9000000000.1788505170"
-        resourcesVersion = "27.1.0.0.1790739719"
-      } else {
-        throw MisoError.unsupported(
-          "Xcode first-launch package policy for \(configuration.version) (\(configuration.build))")
-      }
       return [
         Policy(
-          filename: "CoreTypes.pkg", identifier: coreTypesIdentifier,
-          version: coreTypesVersion, prefix: "",
+          filename: "CoreTypes.pkg", identifier: "com.apple.pkg.CoreTypes", prefix: "",
           roots: ["System/Library/CoreServices/CoreTypes.bundle/Contents/Library"],
           linkRoot: "System/Library/CoreServices/CoreTypes.bundle/Contents/Library"),
         Policy(
           filename: "MobileDevice.pkg", identifier: "com.apple.pkg.MobileDevice",
-          version: "4.0.0.0.1788417373", prefix: "Library/Apple", roots: ["System/Library"],
+          prefix: "Library/Apple", roots: ["System/Library"],
           linkRoot: "System/Library"),
         Policy(
           filename: "MobileDeviceDevelopment.pkg",
           identifier: "com.apple.pkg.MobileDeviceDevelopment",
-          version: "16.4.0.9000000001.1667398374", prefix: "Library/Apple",
+          prefix: "Library/Apple",
           roots: ["System/Library", "usr"], linkRoot: "System/Library"),
         Policy(
           filename: "XcodeSystemResources.pkg", identifier: "com.apple.pkg.XcodeSystemResources",
-          version: resourcesVersion, prefix: "", roots: ["Library/Developer"],
+          prefix: "", roots: ["Library/Developer"],
           linkRoot: "Library/Developer"),
       ]
     }
@@ -58,7 +45,8 @@ public enum XcodePackages {
       return prefix.isEmpty ? path : prefix + "/" + path
     }
 
-    func validateInfo(_ data: Data) throws {
+    @discardableResult
+    func validateInfo(_ data: Data) throws -> Identity {
       final class Delegate: NSObject, XMLParserDelegate {
         var root: (String, [String: String])?
         func parser(
@@ -74,12 +62,29 @@ public enum XcodePackages {
       parser.externalEntityResolvingPolicy = .never
       parser.delegate = delegate
       guard parser.parse(), let (name, fields) = delegate.root, name == "pkg-info",
-        fields["identifier"] == identifier, fields["version"] == version,
+        let actualIdentifier = fields["identifier"], let version = fields["version"],
+        version.range(of: #"\A[0-9]+(\.[0-9]+)*\z"#, options: .regularExpression) != nil,
         fields["useHFSPlusCompression"] == "true", fields["auth"] == "root",
         fields["system-volume-group-install-location"]
           == (prefix.isEmpty ? nil : "/" + prefix + "/"),
         fields["install-location"] == nil
       else { throw MisoError.invalid("Unreviewed Xcode package metadata: \(filename)") }
+      let coreTypesVariant =
+        filename == "CoreTypes.pkg"
+        && actualIdentifier.range(
+          of: #"\Acom\.apple\.pkg\.CoreTypes\.[A-Za-z0-9]+\z"#, options: .regularExpression) != nil
+      guard actualIdentifier == identifier || coreTypesVariant else {
+        throw MisoError.invalid("Unexpected Xcode package identifier: \(actualIdentifier)")
+      }
+      return Identity(identifier: actualIdentifier, version: version)
+    }
+
+    func identity(in application: URL, journal: ExecutionJournal) throws -> Identity {
+      let package = try GuestVolume(application).path("Contents/Resources/Packages/" + filename)
+      let info = try journal.run(
+        "read-package-info-" + filename.lowercased().replacingOccurrences(of: ".", with: "-"),
+        NativeCommand(.tar, arguments: ["-xOf", package.path, "PackageInfo"]))
+      return try validateInfo(SafeFile.read(info, limit: 2 << 20))
     }
   }
 
@@ -155,7 +160,7 @@ public enum XcodePackages {
             .packages, arguments: ["--expand-full", copy.path, expanded.path], timeout: 900))
         let tree = try GuestVolume(expanded)
         let info = try tree.path("PackageInfo")
-        try policy.validateInfo(SafeFile.read(info, limit: 2 << 20))
+        let identity = try policy.validateInfo(SafeFile.read(info, limit: 2 << 20))
         let bom = try tree.path("Bom")
         let listing = try journal.run(
           "package-bom-\(index)", NativeCommand(.bom, arguments: ["-p", "fmugsl", bom.path]))
@@ -186,7 +191,7 @@ public enum XcodePackages {
         }
         records.append(
           Package(
-            filename: policy.filename, identifier: policy.identifier, version: policy.version,
+            filename: policy.filename, identifier: identity.identifier, version: identity.version,
             prefix: policy.prefix,
             archive: copied, info: try Artifacts.record(info, relativeTo: output),
             bom: try Artifacts.record(bom, relativeTo: output),

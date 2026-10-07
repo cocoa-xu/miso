@@ -26,6 +26,7 @@ public struct NativeCommand: Sendable {
     case disks = "/usr/sbin/diskutil"
     case checkSeal = "/System/Library/Filesystems/apfs.fs/Contents/Resources/apfs_checkseal"
     case packages = "/usr/sbin/pkgutil"
+    case tar = "/usr/bin/tar"
     case bom = "/usr/bin/lsbom"
     case copy = "/usr/bin/ditto"
     case manualIndex = "/usr/libexec/makewhatis"
