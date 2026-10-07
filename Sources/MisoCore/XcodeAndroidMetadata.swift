@@ -39,6 +39,6 @@ enum XcodeAndroidMetadata {
 
   static func licenseDigest(_ terms: String) -> String {
     SafeFile.hex(
-      Insecure.SHA1.hash(data: Data(terms.trimmingCharacters(in: .whitespacesAndNewlines).utf8)))
+      Insecure.SHA1.hash(data: Data(terms.utf8)))
   }
 }

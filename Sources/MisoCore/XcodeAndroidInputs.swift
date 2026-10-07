@@ -34,6 +34,7 @@ public enum XcodeAndroidInputs {
     let metadata: ImageBundle.FileRecord
     let selection: Selection
     let items: [Item]
+    let licenseCatalogs: [ImageBundle.FileRecord]?
     let vmStarted: Bool
     let installationVerified: Bool
   }
@@ -206,6 +207,9 @@ public enum XcodeAndroidInputs {
       }
       let metadata = output.appendingPathComponent("repository.xml")
       try SafeFile.writeNew(data, to: metadata)
+      let licenseCatalogs = try await XcodeAndroidLicenses.prepare(
+        output: output, previous: previous?.licenseCatalogs, cache: cache,
+        cancellation: journal.cancellation)
       var items: [Item] = []
       for package in selection.packages {
         let directory = output.appendingPathComponent(package.directory)
@@ -280,7 +284,8 @@ public enum XcodeAndroidInputs {
       }
       let result = Receipt(
         target: target, metadata: try Artifacts.record(metadata, relativeTo: output),
-        selection: selection, items: items, vmStarted: false, installationVerified: false)
+        selection: selection, items: items, licenseCatalogs: licenseCatalogs,
+        vmStarted: false, installationVerified: false)
       try SafeFile.writeNew(JSON.encode(result), to: output.appendingPathComponent("android.json"))
       try journal.finish(result)
       return result

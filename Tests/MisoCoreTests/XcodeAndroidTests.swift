@@ -73,7 +73,8 @@ private func androidRepository() -> String {
   #expect(local.elements(forName: "channelRef").isEmpty)
   #expect(root.elements(forName: "license").first?.stringValue == "License terms")
   #expect(
-    XcodeAndroidMetadata.licenseDigest(" abc\n") == "a9993e364706816aba3e25717850c26c9cd0d89d")
+    XcodeAndroidMetadata.licenseDigest("abc") == "a9993e364706816aba3e25717850c26c9cd0d89d")
+  #expect(XcodeAndroidMetadata.licenseDigest("abc\n") != XcodeAndroidMetadata.licenseDigest("abc"))
   let rows = selection.packages.map {
     "\($0.identifier) | \($0.revision) | Tool | \($0.identifier.replacingOccurrences(of: ";", with: "/"))"
   }.joined(separator: "\n")
@@ -88,4 +89,25 @@ private func androidRepository() -> String {
   let profile = try XcodeAndroidInstallation.shellProfile(Data("export OTHER=1\n".utf8))
   #expect(try XcodeAndroidInstallation.shellProfile(profile) == profile)
   #expect(String(decoding: profile, as: UTF8.self).contains("cmdline-tools/20.0/bin"))
+}
+
+@Test func androidCatalogLicensesPreserveExactTextAndRejectUnsafeSources() throws {
+  let xml = Data(
+    "<repository><license id=\"android-sdk-license\">abc\n</license></repository>".utf8)
+  let hashes = try XcodeAndroidLicenses.hashes(xml)
+  #expect(
+    hashes["android-sdk-license"] == [
+      XcodeAndroidMetadata.licenseDigest("abc"), XcodeAndroidMetadata.licenseDigest("abc\n"),
+    ])
+  let prefix =
+    "<common:site-list xmlns:common=\"http://schemas.android.com/repository/android/sites-common/1\">"
+  for path in ["../escape.xml", "https://example.com/catalog.xml", "/absolute.xml"] {
+    #expect(throws: MisoError.self) {
+      try XcodeAndroidLicenses.sites(
+        Data((prefix + "<site><url>\(path)</url></site></common:site-list>").utf8))
+    }
+  }
+  #expect(throws: MisoError.self) {
+    try XcodeAndroidLicenses.hashes(Data("<!DOCTYPE x><repository/>".utf8))
+  }
 }

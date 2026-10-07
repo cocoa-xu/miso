@@ -123,10 +123,16 @@ public enum XcodeAndroidInstallation {
       }
       try guest.data.makeDirectories(
         sdk + "/licenses", uid: guest.account.uid, gid: guest.account.gid)
-      for (name, terms) in input.selection.licenses {
+      var licenses = try XcodeAndroidLicenses.hashes(repository)
+      for catalog in input.licenseCatalogs ?? [] {
+        let additional = try XcodeAndroidLicenses.hashes(
+          SafeFile.read(Artifacts.resolve(catalog, under: inputs), limit: 16 << 20))
+        for (name, hashes) in additional { licenses[name, default: []].formUnion(hashes) }
+      }
+      for (name, hashes) in licenses {
         try guest.data.write(
           sdk + "/licenses/" + name,
-          data: Data((XcodeAndroidMetadata.licenseDigest(terms) + "\n").utf8),
+          data: Data((hashes.sorted().joined(separator: "\n") + "\n").utf8),
           uid: guest.account.uid, gid: guest.account.gid, mode: 0o644)
       }
       let denied = home + "/.miso-android-outside"
