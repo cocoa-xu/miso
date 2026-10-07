@@ -36,4 +36,3 @@ import Testing
   #expect(
     try JSONDecoder().decode(XcodeConfiguration.self, from: JSON.encode(original)).profile == nil)
 }
-

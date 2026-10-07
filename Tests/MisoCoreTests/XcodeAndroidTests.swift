@@ -3,6 +3,30 @@ import Testing
 
 @testable import MisoCore
 
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MISO_LIVE_ANDROID_LICENSES"] == "1"))
+func liveAndroidLicenseCatalogPreparationAndOfflineReplay() async throws {
+  let directory = try TemporaryDirectory()
+  defer { directory.remove() }
+  let fresh = directory.url.appendingPathComponent("fresh")
+  let cached = directory.url.appendingPathComponent("cached")
+  try SafeFile.makeDirectory(fresh)
+  try SafeFile.makeDirectory(cached)
+  let cancellation = try CancellationToken()
+  let records = try await XcodeAndroidLicenses.prepare(
+    output: fresh, previous: nil, cache: nil, cancellation: cancellation)
+  #expect(!records.isEmpty)
+  let replay = try await XcodeAndroidLicenses.prepare(
+    output: cached, previous: records, cache: fresh, cancellation: cancellation)
+  #expect(replay == records)
+  var names = Set<String>()
+  for record in records {
+    let licenses = try XcodeAndroidLicenses.hashes(
+      SafeFile.read(Artifacts.resolve(record, under: fresh), limit: 8 << 20))
+    names.formUnion(licenses.keys)
+  }
+  #expect(names.contains("android-sdk-license"))
+}
+
 private func androidRepository() -> String {
   let versions = ["20.0", "37.0.1", "2", "36.0.0", "28.2.13676358"]
   let packages = zip(XcodeAndroidInputs.identifiers, versions).map { identifier, version in

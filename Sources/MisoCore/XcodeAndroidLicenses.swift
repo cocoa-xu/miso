@@ -4,7 +4,7 @@ enum XcodeAndroidLicenses {
   static let base = URL(string: "https://dl.google.com/android/repository/")!
 
   static func document(_ data: Data) throws -> XMLElement {
-    guard data.count <= 16 << 20, let text = String(data: data, encoding: .utf8),
+    guard data.count <= 8 << 20, let text = String(data: data, encoding: .utf8),
       !text.contains("<!DOCTYPE"), !text.contains("<!ENTITY"),
       let root = try XMLDocument(
         data: data,
@@ -63,7 +63,7 @@ enum XcodeAndroidLicenses {
         throw MisoError.invalid("Android cache predates license catalogs; prepare fresh inputs")
       }
       return try previous.map { record in
-        let data = try SafeFile.read(Artifacts.resolve(record, under: cache), limit: 16 << 20)
+        let data = try SafeFile.read(Artifacts.resolve(record, under: cache), limit: 8 << 20)
         let target = directory.appendingPathComponent(
           URL(fileURLWithPath: record.path).lastPathComponent)
         try SafeFile.writeNew(data, to: target)
@@ -82,7 +82,7 @@ enum XcodeAndroidLicenses {
     for (index, path) in paths.enumerated() {
       let data = try await HTTPData.get(
         base.appendingPathComponent(path),
-        maximumBytes: 16 << 20, cancellation: cancellation)
+        maximumBytes: 8 << 20, cancellation: cancellation)
       _ = try hashes(data)
       let target = directory.appendingPathComponent("\(index).xml")
       try SafeFile.writeNew(data, to: target)

@@ -126,7 +126,7 @@ public enum XcodeAndroidInstallation {
       var licenses = try XcodeAndroidLicenses.hashes(repository)
       for catalog in input.licenseCatalogs ?? [] {
         let additional = try XcodeAndroidLicenses.hashes(
-          SafeFile.read(Artifacts.resolve(catalog, under: inputs), limit: 16 << 20))
+          SafeFile.read(Artifacts.resolve(catalog, under: inputs), limit: 8 << 20))
         for (name, hashes) in additional { licenses[name, default: []].formUnion(hashes) }
       }
       for (name, hashes) in licenses {
