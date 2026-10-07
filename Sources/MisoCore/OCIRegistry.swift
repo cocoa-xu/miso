@@ -4,7 +4,9 @@ struct OCIRegistryError: LocalizedError {
   let status: Int
   let retryAfter: Int
   var errorDescription: String? { "GHCR request failed (status \(status))" }
-  var retryable: Bool { status < 0 || [408, 429, 500, 502, 503, 504].contains(status) }
+  var retryable: Bool {
+    [-1001, -1003, -1004, -1005, -1006, -1009, 408, 429, 500, 502, 503, 504].contains(status)
+  }
 }
 
 final class OCIRegistry: @unchecked Sendable {
@@ -294,7 +296,7 @@ final class OCIRegistry: @unchecked Sendable {
       throw OCIRegistryError(
         status: response.statusCode,
         retryAfter: min(
-          60, max(1, Int(response.value(forHTTPHeaderField: "Retry-After") ?? "2") ?? 2)))
+          300, max(1, Int(response.value(forHTTPHeaderField: "Retry-After") ?? "2") ?? 2)))
     }
   }
 
@@ -327,18 +329,24 @@ final class OCIRegistry: @unchecked Sendable {
     return url
   }
 
-  func retry<T>(progress: TransferProgress?, id: UUID, body: () async throws -> T) async throws -> T
-  {
-    for attempt in 1...3 {
+  func retry<T>(
+    progress: TransferProgress?, id: UUID,
+    sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+    body: () async throws -> T
+  ) async throws -> T {
+    let maximumAttempts = 10
+    for attempt in 1...maximumAttempts {
       try cancellation.check()
       do { return try await body() } catch let error as OCIRegistryError
-        where error.retryable && attempt < 3
+        where error.retryable && attempt < maximumAttempts
       {
         progress?.reset(id)
+        let delay = min(300, max(error.retryAfter, 2 << (attempt - 1)))
         BuildProgress.write(
-          "Retry registry transfer (attempt \(attempt + 1)/3, status \(error.status))")
+          "Retry registry transfer in \(delay)s (attempt \(attempt + 1)/\(maximumAttempts), status \(error.status))"
+        )
         try await cancellable {
-          try await Task.sleep(for: .seconds(error.retryAfter * attempt))
+          try await sleep(.seconds(delay))
         }
       }
     }

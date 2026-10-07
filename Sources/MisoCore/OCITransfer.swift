@@ -29,8 +29,10 @@ public enum OCITransfer {
       let registry = try OCIRegistry(
         reference: reference, username: username, password: password, pushing: true,
         cancellation: journal.cancellation, configuration: configuration)
-      let probe = try await registry.request("GET", url: reference.url("tags/list?n=1"))
-      try registry.require(probe.http, codes: [200, 404])
+      try await registry.retry(progress: nil, id: UUID()) {
+        let probe = try await registry.request("GET", url: reference.url("tags/list?n=1"))
+        try registry.require(probe.http, codes: [200, 404])
+      }
       let manifest = try OCIPack.run(
         source: source, blobs: blobs, labels: labels, cancellation: journal.cancellation)
       _ = try manifest.validate()
