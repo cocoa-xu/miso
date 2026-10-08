@@ -153,19 +153,23 @@ private func runtimeCatalog() throws -> Data {
   try journal.finish(receipt)
 }
 
-@Test func metalEnvironmentPreservesProfilesAndRejectsConflictingSelection() throws {
-  let identifier = try XcodeMetalInstallation.identifier(.init())
-  let original = Data("export EXAMPLE=value".utf8)
-  let expected = "export EXAMPLE=value\nexport TOOLCHAINS='moe.uwucocoa.miso.metal.27A266a'\n"
+@Test func metalMigrationRemovesOnlyItsExactLegacySelection() throws {
+  let configuration = XcodeConfiguration()
+  let original = "export EXAMPLE=value\nexport TOOLCHAINS='moe.uwucocoa.miso.metal.27A266a'\n"
   #expect(
-    try XcodeMetalInstallation.shellProfile(original, identifier: identifier) == Data(expected.utf8)
-  )
-  for previous in [Data("export TOOLCHAINS=custom\n".utf8), Data([0xFF])] {
-    #expect(throws: MisoError.self) {
-      try XcodeMetalInstallation.shellProfile(previous, identifier: identifier)
-    }
+    try XcodeMetalInstallation.removingLegacySelection(
+      Data(original.utf8), configuration: configuration)
+      == Data("export EXAMPLE=value\n".utf8))
+  for text in [
+    "export TOOLCHAINS=custom\n", "# export TOOLCHAINS='moe.uwucocoa.miso.metal.27A266a'\n",
+    "export EXAMPLE=value",
+  ] {
+    #expect(
+      try XcodeMetalInstallation.removingLegacySelection(
+        Data(text.utf8), configuration: configuration)
+        == Data(text.utf8))
   }
   #expect(throws: MisoError.self) {
-    try XcodeMetalInstallation.shellProfile(Data(), identifier: "invalid'\ncommand")
+    try XcodeMetalInstallation.removingLegacySelection(Data([0xFF]), configuration: configuration)
   }
 }

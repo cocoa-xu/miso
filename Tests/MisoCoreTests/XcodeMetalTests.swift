@@ -121,32 +121,102 @@ import Testing
   #expect(!FileManager.default.fileExists(atPath: output.path))
 }
 
-@Test func metalFinalizationMakesOnlyTheOwnedRegistrationTraversable() throws {
+@Test func nativeMetalRegistrationMatchesApplesCatalog() throws {
+  guard ProcessInfo.processInfo.environment["MISO_NATIVE_METAL_PROBE"] == "1" else { return }
+  let fixture = try #require(
+    Bundle.module.url(
+      forResource: "metal-27A266a", withExtension: "jwt", subdirectory: "Fixtures"))
+  let payload = try AppleAssetCatalog.verify(
+    Data(contentsOf: fixture), at: Date(timeIntervalSince1970: 1_791_000_000))
+  let catalog = try MetalAssetRegistration.catalog(payload, build: "27A266a")
+  #expect(catalog.identifier == "389a215aea89fda945178f9fb8bcdc6aa0e20570")
+  #expect(catalog.attributes["_Measurement"] is Data)
+  #expect(catalog.attributes["_Measurement-SHA256"] is Data)
+  #expect(catalog.attributes["AssetType"] as? String == MetalAssetRegistration.type)
+  #expect(catalog.assetPath.hasSuffix("/389a215aea89fda945178f9fb8bcdc6aa0e20570.asset"))
+  var changed = try #require(JSONSerialization.jsonObject(with: payload) as? [String: Any])
+  changed["Transformations"] = ["_Measurement": "unsupported"]
+  #expect(throws: MisoError.self) {
+    try MetalAssetRegistration.catalog(
+      JSONSerialization.data(withJSONObject: changed), build: "27A266a")
+  }
+  #expect(throws: MisoError.self) {
+    try MetalAssetRegistration.catalog(payload, build: "27B5019j")
+  }
+}
+
+@Test func nativeMetalInstallationInMountedGuest() throws {
+  guard let path = ProcessInfo.processInfo.environment["MISO_METAL_INSTALLATION_PROBE"] else {
+    return
+  }
+  try #require(geteuid() == 0)
+  let settings = try JSON.read([String: String].self, from: URL(fileURLWithPath: path))
+  let inputs = URL(fileURLWithPath: try #require(settings["inputs"]))
+  let data = try GuestVolume(URL(fileURLWithPath: try #require(settings["data"])))
+  let output = URL(fileURLWithPath: try #require(settings["output"]))
+  let input = try JSON.read(
+    XcodeMetal.Receipt.self, from: inputs.appendingPathComponent("metal.json"))
+  let account = try BaseImageStage.Account("admin", data: data)
+  let journal = try ExecutionJournal(output: output, operation: "metal-installation-probe")
+  let result = try XcodeMetalInstallation.copy(
+    input, configuration: .init(), inputs: inputs, data: data, account: account, journal: journal)
+  #expect(result.toolchainIdentifier == input.toolchainIdentifier)
+  #expect(try !data.contains("Library/Developer/Toolchains/MISO-Metal-27A266a.xctoolchain"))
+  #expect(
+    try !data.contains("Users/admin/Library/LaunchAgents/moe.uwucocoa.miso.metal.environment.plist")
+  )
+  for profile in [".zshenv", ".zprofile"] {
+    let bytes = try SafeFile.read(data.path("Users/admin/" + profile), limit: 1 << 20)
+    #expect(!String(decoding: bytes, as: UTF8.self).contains("TOOLCHAINS"))
+  }
+  try journal.finish(result)
+}
+
+@Test func metalMigrationPreservesUnrelatedGuestSettings() throws {
   let directory = try TemporaryDirectory()
   defer { directory.remove() }
   let data = try GuestVolume(directory.url)
-  let configuration = XcodeConfiguration()
-  let payload = "Library/Developer/MISO/Metal/27A266a/Metal.xctoolchain/usr"
-  let registration = "Library/Developer/Toolchains/MISO-Metal-27A266a.xctoolchain"
-  try data.makeDirectories(payload, uid: geteuid(), gid: getegid())
+  let uid = max(geteuid(), 501)
+  let gid = max(getegid(), 20)
   try data.mergePlist(
-    registration + "/Info.plist",
+    "private/var/db/dslocal/nodes/Default/users/admin.plist",
+    values: ["uid": [String(uid)], "gid": [String(gid)], "home": ["/Users/admin"]],
+    uid: geteuid(), gid: getegid())
+  let account = try BaseImageStage.Account("admin", data: data)
+  let payload = "Library/Developer/MISO/Metal/27A266a"
+  let wrapper = "Library/Developer/Toolchains/MISO-Metal-27A266a.xctoolchain"
+  let identifier = "moe.uwucocoa.miso.metal.27A266a"
+  try data.makeDirectories(payload + "/Metal.xctoolchain/usr", uid: geteuid(), gid: getegid())
+  try data.mergePlist(
+    wrapper + "/Info.plist",
+    values: ["CFBundleIdentifier": identifier, "CompatibilityVersion": 2],
+    uid: geteuid(), gid: getegid())
+  #expect(
+    symlink("/" + payload + "/Metal.xctoolchain/usr", try data.path(wrapper + "/usr").path) == 0)
+  let profile = "Users/admin/.zprofile"
+  try data.write(
+    profile, data: Data("export OTHER=1\nexport TOOLCHAINS='\(identifier)'\n".utf8), uid: uid,
+    gid: gid)
+  let agent = "Users/admin/Library/LaunchAgents/moe.uwucocoa.miso.metal.environment.plist"
+  try data.mergePlist(
+    agent,
     values: [
-      "CFBundleIdentifier": try XcodeMetalInstallation.identifier(configuration),
-      "CompatibilityVersion": 2,
-    ], uid: geteuid(), gid: getegid())
-  let link = try data.path(registration + "/usr")
-  #expect(chmod(try data.path(payload).path, 0o700) == 0)
-  #expect(symlink("/" + payload, link.path) == 0)
-  #expect(lchmod(link.path, 0o700) == 0)
-  try XcodeMetalInstallation.finalizeRegistration(configuration: configuration, data: data)
-  #expect(try FileMetadata.inspect(link).st_mode & 0o777 == 0o755)
-  #expect(try FileMetadata.inspect(data.path(payload)).st_mode & 0o777 == 0o700)
-  #expect(unlink(link.path) == 0)
-  #expect(symlink("/unrelated", link.path) == 0)
-  #expect(lchmod(link.path, 0o700) == 0)
-  #expect(throws: MisoError.self) {
-    try XcodeMetalInstallation.finalizeRegistration(configuration: configuration, data: data)
+      "Label": "moe.uwucocoa.miso.metal.environment",
+      "ProgramArguments": ["/bin/launchctl", "setenv", "TOOLCHAINS", identifier],
+    ],
+    uid: uid, gid: gid)
+  try XcodeMetalInstallation.removeLegacyRegistration(
+    configuration: .init(), data: data, account: account)
+  #expect(try !data.contains(wrapper))
+  #expect(try !data.contains(payload))
+  #expect(try !data.contains(agent))
+  #expect(try SafeFile.read(data.path(profile), limit: 1024) == Data("export OTHER=1\n".utf8))
+  try data.mergePlist(
+    wrapper + "/Info.plist", values: ["CFBundleIdentifier": "unrelated"], uid: geteuid(),
+    gid: getegid())
+  #expect(throws: (any Error).self) {
+    try XcodeMetalInstallation.removeLegacyRegistration(
+      configuration: .init(), data: data, account: account)
   }
-  #expect(try FileMetadata.inspect(link).st_mode & 0o777 == 0o700)
+  #expect(try data.contains(wrapper))
 }

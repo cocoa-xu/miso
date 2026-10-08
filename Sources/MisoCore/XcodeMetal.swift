@@ -143,6 +143,14 @@ public enum XcodeMetal {
   static func inspect(_ root: URL, build: String, cancellation: CancellationToken? = nil) throws
     -> URL
   {
+    let image = try diskImage(root, build: build)
+    guard try BootTree.hash384(image.url, cancellation: cancellation) == image.digest else {
+      throw MisoError.invalid("Metal disk image digest mismatch")
+    }
+    return image.url
+  }
+
+  static func diskImage(_ root: URL, build: String) throws -> (url: URL, digest: Data) {
     let volume = try GuestVolume(root)
     let info = try volume.plist("Info.plist")
     guard info["CFBundleIdentifier"] as? String == "com.apple.MobileAsset.MetalToolchain",
@@ -169,9 +177,11 @@ public enum XcodeMetal {
       digest.count == 48
     else { throw MisoError.invalid("Unsupported Metal restore manifest") }
     let disk = try GuestVolume(restore).path(path)
-    guard try BootTree.hash384(disk, cancellation: cancellation) == digest else {
-      throw MisoError.invalid("Metal disk image digest mismatch")
+    let file = try SafeFile.openRegular(disk)
+    defer { try? file.close() }
+    guard try SafeFile.size(file) > 0 else {
+      throw MisoError.invalid("Empty Metal disk image")
     }
-    return disk
+    return (disk, digest)
   }
 }

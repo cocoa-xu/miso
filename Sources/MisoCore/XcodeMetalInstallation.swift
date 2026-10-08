@@ -9,7 +9,7 @@ public enum XcodeMetalInstallation {
     public let payloadPath: String
     public let registrationPath: String
     public let entries: Int
-    public let contentSHA256: String
+    public let assetIdentifier: String
     public let xcodeImageComplete = false
   }
 
@@ -80,123 +80,119 @@ public enum XcodeMetalInstallation {
     }
   }
 
-  static func identifier(_ configuration: XcodeConfiguration) throws -> String {
-    try configuration.validate()
-    return "moe.uwucocoa.miso.metal." + configuration.build
-  }
-
   static func copy(
     _ input: XcodeMetal.Receipt, configuration: XcodeConfiguration, inputs: URL,
     data: GuestVolume, account: BaseImageStage.Account, journal: ExecutionJournal
   ) throws -> Details {
-    let disk = try GuestVolume(inputs).path(input.diskImage)
-    let session = try DiskImageSession(image: disk, readOnly: true, journal: journal)
-    let mount = journal.output.appendingPathComponent("metal-input")
-    return try session.withAttachment(requireGPT: false, mountPoint: mount) { _ in
-      let original = try GuestVolume(mount).directory("Metal.xctoolchain").url
-      let info = try GuestVolume(original).plist("ToolchainInfo.plist")
-      guard info["Identifier"] as? String == input.toolchainIdentifier else {
-        throw MisoError.invalid("Authenticated Metal toolchain identity changed")
-      }
-      let path = "Library/Developer/MISO/Metal/\(configuration.build)/Metal.xctoolchain"
-      let audit = try XcodeComponentPayload.copy(original, to: data, path: path, journal: journal)
-      let executable = try data.path(path + "/usr/bin/metal")
-      guard try SafeFile.sha256(executable) == input.metalSHA256 else {
-        throw MisoError.invalid("Installed Metal executable differs")
-      }
-      try AppleCode.validate(executable)
-      let registration = try register(
-        configuration: configuration, payload: path, data: data, account: account)
-      return Details(
-        configuration: configuration, appleToolchainIdentifier: input.toolchainIdentifier,
-        toolchainIdentifier: try identifier(configuration), payloadPath: path,
-        registrationPath: registration, entries: audit.entries, contentSHA256: audit.contentSHA256)
-    }
-  }
-
-  static func register(
-    configuration: XcodeConfiguration, payload: String, data: GuestVolume,
-    account: BaseImageStage.Account
-  ) throws -> String {
-    let identifier = try identifier(configuration)
-    let path = "Library/Developer/Toolchains/MISO-Metal-\(configuration.build).xctoolchain"
-    guard try !data.contains(path) else {
-      throw MisoError.invalid("Metal toolchain registration already exists")
-    }
-    _ = try data.directory(payload + "/usr")
-    let wrapper = try data.path(path, createParents: true)
-    try SafeFile.makeDirectory(wrapper, mode: 0o755)
-    try data.mergePlist(
-      path + "/Info.plist",
-      values: ["CFBundleIdentifier": identifier, "CompatibilityVersion": 2])
-    let link = try data.path(path + "/usr")
-    guard symlink("/" + payload + "/usr", link.path) == 0, lchmod(link.path, 0o755) == 0 else {
-      throw MisoError.system("Register Metal toolchain payload", errno)
-    }
-    let home = "Users/" + account.username
-    for profile in [".zshenv", ".zprofile"] {
-      let relative = home + "/" + profile
-      let present = try data.contains(relative)
-      let previous = try present ? SafeFile.read(data.path(relative), limit: 1 << 20) : Data()
-      let mode = try present ? FileMetadata.inspect(data.path(relative)).st_mode & 0o777 : 0o644
-      try data.write(
-        relative, data: shellProfile(previous, identifier: identifier),
-        uid: account.uid, gid: account.gid, mode: mode)
-    }
-    let agent = "moe.uwucocoa.miso.metal.environment"
-    let agentPath = home + "/Library/LaunchAgents/" + agent + ".plist"
-    guard try !data.contains(agentPath) else {
-      throw MisoError.invalid("Metal environment agent already exists")
-    }
-    for directory in [home + "/Library", home + "/Library/LaunchAgents"] {
-      if try !data.contains(directory) {
-        let url = try data.path(directory)
-        try SafeFile.makeDirectory(url, mode: 0o755)
-        guard chown(url.path, account.uid, account.gid) == 0 else {
-          throw MisoError.system("Set Metal environment directory ownership", errno)
+    let prepared = try GuestVolume(inputs)
+    let catalog = try MetalAssetRegistration.catalog(
+      SafeFile.read(prepared.path("catalog.json"), limit: 8 << 20), build: input.build)
+    guard try !data.contains(catalog.assetPath),
+      try !data.contains(MetalAssetRegistration.catalogPath)
+    else { throw MisoError.invalid("Metal MobileAsset registration already exists") }
+    try Artifacts.requireSpace(input.files.reduce(0) { $0 + $1.bytes }, at: data.root)
+    try BuildProgress.run("Install Apple Metal MobileAsset") {
+      for file in input.files {
+        try journal.cancellation.check()
+        guard file.path.hasPrefix("expanded/") else {
+          throw MisoError.invalid("Metal file is outside its authenticated asset")
+        }
+        let relative = try SafeFile.relativePath(String(file.path.dropFirst("expanded/".count)))
+        let source = try prepared.path(file.path)
+        guard try FileMetadata.inspect(source).st_size == file.bytes else {
+          throw MisoError.invalid("Prepared Metal asset size changed: \(relative)")
+        }
+        let destination = try data.path(catalog.assetPath + "/" + relative, createParents: true)
+        try Artifacts.copy(
+          source, to: destination, maximumBytes: file.bytes, cancellation: journal.cancellation)
+        guard chmod(destination.path, 0o644) == 0 else {
+          throw MisoError.system("Set Metal asset permissions", errno)
         }
       }
-      _ = try data.directory(directory)
+      try data.write(
+        MetalAssetRegistration.catalogPath,
+        data: PropertyListSerialization.data(
+          fromPropertyList: catalog.properties, format: .xml, options: 0))
+      try XcodeComponentIndex.install(
+        SafeFile.read(prepared.path("index.plist"), limit: 8 << 20),
+        configuration: configuration, build: input.build, data: data, account: account)
+      try finalizeRegistration(configuration: configuration, data: data)
+      try removeLegacyRegistration(configuration: configuration, data: data, account: account)
     }
-    let properties: [String: Any] = [
-      "Label": agent,
-      "ProgramArguments": ["/bin/launchctl", "setenv", "TOOLCHAINS", identifier],
-      "RunAtLoad": true, "LimitLoadToSessionType": "Aqua",
-    ]
-    try data.write(
-      agentPath,
-      data: PropertyListSerialization.data(
-        fromPropertyList: properties, format: .binary, options: 0),
-      uid: account.uid, gid: account.gid)
-    return path
+    return Details(
+      configuration: configuration, appleToolchainIdentifier: input.toolchainIdentifier,
+      toolchainIdentifier: input.toolchainIdentifier, payloadPath: catalog.assetPath,
+      registrationPath: MetalAssetRegistration.catalogPath, entries: input.files.count,
+      assetIdentifier: catalog.identifier)
   }
 
   static func finalizeRegistration(configuration: XcodeConfiguration, data: GuestVolume) throws {
     guard configuration.components.contains(.metalToolchain) else { return }
-    let identifier = try identifier(configuration)
-    let payload = "Library/Developer/MISO/Metal/\(configuration.build)/Metal.xctoolchain/usr"
+    let catalog = try data.plist(MetalAssetRegistration.catalogPath)
+    guard catalog["AssetType"] as? String == MetalAssetRegistration.type,
+      let assets = catalog["Assets"] as? [[String: Any]], assets.count == 1,
+      let attributes = assets.first, let build = attributes["Build"] as? String,
+      attributes["AssetType"] as? String == MetalAssetRegistration.type
+    else { throw MisoError.invalid("Invalid installed Metal MobileAsset catalog") }
+    let identifier = try MetalAssetRegistration.identifier(attributes)
+    let path = MetalAssetRegistration.directory + "/" + identifier + ".asset"
+    _ = try XcodeMetal.diskImage(data.directory(path).url, build: build)
+  }
+
+  static func removeLegacyRegistration(
+    configuration: XcodeConfiguration, data: GuestVolume, account: BaseImageStage.Account
+  ) throws {
+    try configuration.validate()
+    let identifier = "moe.uwucocoa.miso.metal." + configuration.build
+    let payload = "Library/Developer/MISO/Metal/\(configuration.build)"
     let registration = "Library/Developer/Toolchains/MISO-Metal-\(configuration.build).xctoolchain"
-    _ = try data.directory(payload)
-    let properties = try data.plist(registration + "/Info.plist")
-    let link = try data.path(registration + "/usr", allowLeafLink: true)
-    let info = try FileMetadata.inspect(link)
-    guard properties["CFBundleIdentifier"] as? String == identifier,
-      properties["CompatibilityVersion"] as? Int == 2,
-      info.st_mode & S_IFMT == S_IFLNK, info.st_uid == geteuid(), info.st_nlink == 1,
-      try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == "/" + payload
-    else { throw MisoError.invalid("Metal registration differs from its configured payload") }
-    guard lchmod(link.path, 0o755) == 0 else {
-      throw MisoError.system("Set Metal registration permissions", errno)
+    if try data.contains(registration) {
+      let info = try data.plist(registration + "/Info.plist")
+      let link = try data.path(registration + "/usr", allowLeafLink: true)
+      guard info["CFBundleIdentifier"] as? String == identifier,
+        info["CompatibilityVersion"] as? Int == 2,
+        try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
+          == "/" + payload + "/Metal.xctoolchain/usr"
+      else { throw MisoError.invalid("Refusing to remove an unrecognized Metal registration") }
+      try FileManager.default.removeItem(at: data.directory(registration).url)
+      if try data.contains(payload) {
+        try FileManager.default.removeItem(at: data.directory(payload).url)
+      }
+    }
+    let home = "Users/" + account.username
+    for name in [".zshenv", ".zprofile"] {
+      let path = home + "/" + name
+      guard try data.contains(path) else { continue }
+      let url = try data.path(path)
+      let previous = try SafeFile.read(url, limit: 1 << 20)
+      let cleaned = try removingLegacySelection(previous, configuration: configuration)
+      if cleaned != previous {
+        try data.write(
+          path, data: cleaned, uid: account.uid, gid: account.gid,
+          mode: FileMetadata.inspect(url).st_mode & 0o777)
+      }
+    }
+    let label = "moe.uwucocoa.miso.metal.environment"
+    let agent = home + "/Library/LaunchAgents/" + label + ".plist"
+    if try data.contains(agent) {
+      let properties = try data.plist(agent)
+      guard properties["Label"] as? String == label,
+        properties["ProgramArguments"] as? [String]
+          == ["/bin/launchctl", "setenv", "TOOLCHAINS", identifier]
+      else { throw MisoError.invalid("Refusing to remove an unrecognized Metal environment agent") }
+      try FileManager.default.removeItem(at: data.path(agent))
     }
   }
 
-  static func shellProfile(_ existing: Data, identifier: String) throws -> Data {
-    guard let text = String(data: existing, encoding: .utf8), !text.contains("TOOLCHAINS"),
-      identifier.range(
-        of: #"\Amoe\.uwucocoa\.miso\.metal\.[0-9]{2}[A-Z][0-9]{1,6}[a-z]?\z"#,
-        options: .regularExpression) != nil
-    else { throw MisoError.invalid("Invalid or conflicting Metal shell configuration") }
-    let separator = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
-    return Data((text + separator + "export TOOLCHAINS='\(identifier)'\n").utf8)
+  static func removingLegacySelection(_ existing: Data, configuration: XcodeConfiguration) throws
+    -> Data
+  {
+    try configuration.validate()
+    guard let text = String(data: existing, encoding: .utf8) else {
+      throw MisoError.invalid("Invalid Metal shell configuration encoding")
+    }
+    let selection = "export TOOLCHAINS='moe.uwucocoa.miso.metal.\(configuration.build)'"
+    return Data(
+      text.components(separatedBy: "\n").filter { $0 != selection }.joined(separator: "\n").utf8)
   }
 }
