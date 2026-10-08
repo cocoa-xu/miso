@@ -7,7 +7,7 @@ struct Miso: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "miso",
     abstract: "Offline macOS image tools.",
-    version: "0.4.2",
+    version: "0.4.3",
     subcommands: [
       Profiles.self, Configuration.self, IPSW.self, Disk.self, Decode.self, Identity.self,
       Bundle.self, Upgrade.self, Prepare.self, Personalize.self, Restore.self, Base.self,
