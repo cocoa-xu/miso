@@ -198,6 +198,18 @@ enum TarPayload {
   private static func read(
     _ source: URL, cancellation: CancellationToken?, body: (Entry, OpaquePointer) throws -> Void
   ) throws {
+    guard let locale = newlocale(LC_CTYPE_MASK, "UTF-8", nil) else {
+      throw MisoError.system("Create UTF-8 archive locale", errno)
+    }
+    guard let previousLocale = uselocale(locale) else {
+      let error = errno
+      freelocale(locale)
+      throw MisoError.system("Select UTF-8 archive locale", error)
+    }
+    defer {
+      uselocale(previousLocale)
+      freelocale(locale)
+    }
     guard (3_000_000..<4_000_000).contains(archive_version_number()) else {
       throw MisoError.unsupported("system archive ABI")
     }
@@ -217,9 +229,14 @@ enum TarPayload {
       try cancellation?.check()
       let status = archive_read_next_header(reader, &header)
       if status == ARCHIVE_EOF { break }
-      guard status == ARCHIVE_OK, let header, let rawPath = archive_entry_pathname(header),
+      guard status == ARCHIVE_OK else {
+        let detail =
+          archive_error_string(reader).map { String(cString: $0) } ?? "Unknown archive error"
+        throw MisoError.invalid("Read tar header (status \(status)): \(detail)")
+      }
+      guard let header, let rawPath = archive_entry_pathname(header),
         let original = String(validatingCString: rawPath)
-      else { throw MisoError.invalid("Unsupported tar header") }
+      else { throw MisoError.invalid("Tar header has no valid UTF-8 path") }
       var hardlink = archive_entry_hardlink(header).flatMap { String(validatingCString: $0) }
       if hardlink?.hasPrefix("./") == true { hardlink?.removeFirst(2) }
       let rawKind = UInt16(archive_entry_filetype(header))

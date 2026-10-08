@@ -9,6 +9,7 @@ struct archive;
 struct archive_entry;
 enum { ARCHIVE_OK = 0, ARCHIVE_EOF = 1 };
 int archive_version_number(void);
+const char *archive_error_string(struct archive *);
 struct archive *archive_read_new(void);
 int archive_read_free(struct archive *);
 int archive_read_close(struct archive *);

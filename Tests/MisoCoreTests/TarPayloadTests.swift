@@ -1,3 +1,4 @@
+import CMiso
 import Darwin
 import Foundation
 import Testing
@@ -100,6 +101,49 @@ func tarEntry(
     try SafeFile.writeNew(bytes + Data(repeating: 0, count: 1024), to: path)
     #expect(throws: (any Error).self) { try TarPayload.inspect(path) }
   }
+}
+
+@Test func nativeTarReadsUnicodePAXPathsWithoutChangingTheCallerLocale() throws {
+  let locale = try #require(newlocale(LC_CTYPE_MASK, "C", nil))
+  let previous = try #require(uselocale(locale))
+  defer {
+    uselocale(previous)
+    freelocale(locale)
+  }
+  let directory = try TemporaryDirectory()
+  defer { directory.remove() }
+  let source = directory.url.appendingPathComponent("unicode.tar")
+  let path = "awscli/bin/𝜋thon"
+  let attribute = "path=\(path)\n"
+  var length = attribute.utf8.count + 2
+  while String(length).utf8.count + 1 + attribute.utf8.count != length {
+    length = String(length).utf8.count + 1 + attribute.utf8.count
+  }
+  let payload = Data("unicode payload".utf8)
+  try SafeFile.writeNew(
+    tarEntry(path: "PaxHeader", type: 120, content: Data("\(length) \(attribute)".utf8))
+      + tarEntry(path: "placeholder", content: payload) + Data(repeating: 0, count: 1024),
+    to: source)
+  let entries = try TarPayload.inspect(source)
+  #expect(entries.map(\.path) == [path])
+  #expect(uselocale(nil) == locale)
+  let output = directory.url.appendingPathComponent("output")
+  try SafeFile.makeDirectory(output)
+  try TarPayload.extract(source, into: output, entries: entries, uid: getuid(), gid: getgid())
+  #expect(try SafeFile.read(output.appendingPathComponent(path), limit: 128) == payload)
+  #expect(uselocale(nil) == locale)
+  let invalid = directory.url.appendingPathComponent("invalid.tar")
+  try SafeFile.writeNew(Data(repeating: 42, count: 512), to: invalid)
+  #expect(throws: (any Error).self) { try TarPayload.inspect(invalid) }
+  #expect(uselocale(nil) == locale)
+}
+
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MISO_BOTTLE_ARCHIVE"] != nil))
+func nativeTarReadsRetainedUnicodeBottle() throws {
+  let source = URL(
+    fileURLWithPath: try #require(ProcessInfo.processInfo.environment["MISO_BOTTLE_ARCHIVE"]))
+  let entries = try TarPayload.inspect(source, pathPrefix: "Cellar")
+  #expect(entries.contains { $0.path.hasSuffix("/bin/𝜋thon") && $0.kind == S_IFLNK })
 }
 
 @Test(.enabled(if: ProcessInfo.processInfo.environment["MISO_RUNNER_ARCHIVE"] != nil))
