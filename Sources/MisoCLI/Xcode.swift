@@ -8,7 +8,8 @@ struct Xcode: AsyncParsableCommand {
     subcommands: [
       Defaults.self, PrepareArchive.self, PrepareMetal.self, PreparePackages.self,
       PrepareRuntime.self,
-      InstallApplication.self, InstallPackages.self, InstallBottles.self, InstallRuntime.self,
+      InstallHomebrew.self, InstallApplication.self, InstallPackages.self, InstallBottles.self,
+      InstallRuntime.self,
       InstallMetal.self, PrepareGems.self, InstallGems.self, PrepareCasks.self, InstallCasks.self,
       PrepareSimulatorTools.self, InstallSimulatorTools.self,
       PrepareTuist.self, InstallTuist.self, PrepareAndroid.self, InstallAndroid.self,
@@ -369,6 +370,25 @@ struct Xcode: AsyncParsableCommand {
           source: fileURL(source), resolution: fileURL(resolution), bottles: fileURL(bottles),
           names: formula,
           output: fileURL(output), username: username, cancellation: cancellation.token))
+    }
+  }
+
+  struct InstallHomebrew: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "install-homebrew",
+      abstract: "Refresh Homebrew from prepared sources while preserving installed formulae.")
+    @Option var source: String
+    @Option var prepared: String
+    @Option var output: String
+    @Option var username = "admin"
+
+    func run() throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        XcodeHomebrew.install(
+          source: fileURL(source), prepared: fileURL(prepared), output: fileURL(output),
+          username: username, cancellation: cancellation.token))
     }
   }
 

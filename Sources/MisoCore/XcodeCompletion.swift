@@ -166,9 +166,12 @@ public enum XcodeCompletion {
       manifest["construction_vm_started"] as? Bool == false,
       manifest["runtime_verified"] as? Bool == false,
       manifest["xcode_complete"] as? Bool == false,
-      let stages = manifest["xcode_stages"] as? [String],
-      stages.count == expected.count, Set(stages) == expected
+      let stages = manifest["xcode_stages"] as? [String]
     else { throw MisoError.invalid("Incomplete or previously booted Xcode image") }
+    if stages.contains("xcode-homebrew") { expected.insert("xcode-homebrew") }
+    guard stages.count == expected.count, Set(stages) == expected else {
+      throw MisoError.invalid("Incomplete or previously booted Xcode image")
+    }
   }
 
   static func validateSelection(

@@ -17,6 +17,11 @@ import Testing
       finalized: finalized)
   }
   try check(original)
+  var refreshed = original
+  refreshed["xcode_stages"] = stages + ["xcode-homebrew"]
+  try check(refreshed)
+  refreshed["xcode_stages"] = stages + ["xcode-homebrew", "xcode-homebrew"]
+  #expect(throws: MisoError.self) { try check(refreshed) }
   #expect(throws: MisoError.self) { try check(original, finalized: true) }
   for missing in stages {
     var value = original
