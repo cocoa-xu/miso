@@ -5,7 +5,7 @@ struct OCIRegistryError: LocalizedError {
   let retryAfter: Int
   var errorDescription: String? { "GHCR request failed (status \(status))" }
   var retryable: Bool {
-    [-1001, -1003, -1004, -1005, -1006, -1009, 408, 429, 500, 502, 503, 504].contains(status)
+    HTTPRetry.isRetryable(status)
   }
 }
 
@@ -341,7 +341,7 @@ final class OCIRegistry: @unchecked Sendable {
         where error.retryable && attempt < maximumAttempts
       {
         progress?.reset(id)
-        let delay = min(300, max(error.retryAfter, 2 << (attempt - 1)))
+        let delay = HTTPRetry.delay(attempt: attempt, retryAfter: error.retryAfter)
         BuildProgress.write(
           "Retry registry transfer in \(delay)s (attempt \(attempt + 1)/\(maximumAttempts), status \(error.status))"
         )

@@ -179,34 +179,34 @@ enum HTTPData {
     request.setValue(body == nil ? "miso" : "InetURL/1.0", forHTTPHeaderField: "User-Agent")
     return try await withThrowingTaskGroup(of: Data.self) { group in
       group.addTask { [request] in
-        let (bytes, response) = try await session.bytes(
-          for: request, delegate: RedirectGate(source: url, policy: redirects))
-        guard let response = response as? HTTPURLResponse else {
-          throw MisoError.invalid("Expected an HTTPS response")
-        }
-        guard response.statusCode == 200 else {
-          throw MisoError.invalid("HTTPS request failed with status \(response.statusCode)")
-        }
-        guard let destination = response.url,
-          destination == url || redirects.permits(from: url, to: destination)
-        else {
-          throw MisoError.invalid("HTTPS response destination changed")
-        }
-        guard response.expectedContentLength <= maximumBytes else {
-          throw MisoError.invalid(
-            "HTTPS response declares \(response.expectedContentLength) bytes, exceeding the requested \(maximumBytes)-byte limit"
-          )
-        }
-        var result = Data()
-        for try await byte in bytes {
-          guard result.count < maximumBytes else {
-            throw MisoError.invalid(
-              "HTTPS response exceeds the requested \(maximumBytes)-byte limit")
+        try await HTTPRetry.run(cancellation: cancellation) {
+          let (bytes, response) = try await session.bytes(
+            for: request, delegate: RedirectGate(source: url, policy: redirects))
+          guard let response = response as? HTTPURLResponse else {
+            throw MisoError.invalid("Expected an HTTPS response")
           }
-          result.append(byte)
+          try HTTPRetry.requireSuccess(response)
+          guard let destination = response.url,
+            destination == url || redirects.permits(from: url, to: destination)
+          else {
+            throw MisoError.invalid("HTTPS response destination changed")
+          }
+          guard response.expectedContentLength <= maximumBytes else {
+            throw MisoError.invalid(
+              "HTTPS response declares \(response.expectedContentLength) bytes, exceeding the requested \(maximumBytes)-byte limit"
+            )
+          }
+          var result = Data()
+          for try await byte in bytes {
+            guard result.count < maximumBytes else {
+              throw MisoError.invalid(
+                "HTTPS response exceeds the requested \(maximumBytes)-byte limit")
+            }
+            result.append(byte)
+          }
+          guard !result.isEmpty else { throw MisoError.invalid("Empty HTTPS response") }
+          return result
         }
-        guard !result.isEmpty else { throw MisoError.invalid("Empty HTTPS response") }
-        return result
       }
       if let cancellation {
         group.addTask {

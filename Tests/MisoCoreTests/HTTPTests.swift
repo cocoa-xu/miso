@@ -4,6 +4,17 @@ import Testing
 @testable import MisoCore
 
 private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
+  private final class Counts: @unchecked Sendable {
+    let lock = NSLock()
+    var values: [URL: Int] = [:]
+    func next(_ url: URL) -> Int {
+      lock.withLock {
+        values[url, default: 0] += 1
+        return values[url]!
+      }
+    }
+  }
+  private static let counts = Counts()
   override class func canInit(with request: URLRequest) -> Bool { true }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
   override func stopLoading() {}
@@ -11,11 +22,25 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
   override func startLoading() {
     let url = request.url!
     let path = url.lastPathComponent
+    if path.hasPrefix("retry-") || path == "always-busy" {
+      let attempt = Self.counts.next(url)
+      if path == "retry-disconnected", attempt == 1 {
+        client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+        return
+      }
+      let status = path == "always-busy" || (path == "retry-502" && attempt == 1) ? 502 : 200
+      let response = HTTPURLResponse(
+        url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: Data("attempt=\(attempt)".utf8))
+      client?.urlProtocolDidFinishLoading(self)
+      return
+    }
     if path == "private-error.xip" {
       client?.urlProtocol(
         self,
         didFailWithError: NSError(
-          domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost,
+          domain: NSURLErrorDomain, code: NSURLErrorSecureConnectionFailed,
           userInfo: [
             NSLocalizedDescriptionKey: "Failed to download \(url.absoluteString)",
             NSURLErrorFailingURLErrorKey: url,
@@ -83,7 +108,7 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
     }
     let header = path == "declared-large" ? ["Content-Length": "1024"] : [:]
     let response = HTTPURLResponse(
-      url: url, statusCode: path == "error" ? 500 : 200, httpVersion: "HTTP/1.1",
+      url: url, statusCode: path == "error" ? 404 : 200, httpVersion: "HTTP/1.1",
       headerFields: header)!
     client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
     if path != "empty" {
@@ -92,6 +117,50 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
     }
     client?.urlProtocolDidFinishLoading(self)
   }
+}
+
+@Test(arguments: [false, true], ["retry-502", "retry-disconnected"])
+func nativeHTTPSRecoversFromTransientFailures(file: Bool, path: String) async throws {
+  let url = URL(string: "https://\(UUID().uuidString).test/\(path)")!
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let result: Data
+  if file {
+    let output = temporary.url.appendingPathComponent("download.xip")
+    try await HTTPFile.xcodeArchive(url, to: output, configuration: stubConfiguration())
+    result = try SafeFile.read(output, limit: 64)
+  } else {
+    result = try await HTTPData.get(url, maximumBytes: 64, configuration: stubConfiguration())
+  }
+  #expect(String(data: result, encoding: .utf8) == "attempt=2")
+}
+
+@Test(arguments: [false, true])
+func nativeHTTPSCanCancelDuringRetryBackoff(file: Bool) async throws {
+  let token = try CancellationToken()
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let output = temporary.url.appendingPathComponent("download")
+  let cancel = Task {
+    try await Task.sleep(for: .milliseconds(150))
+    token.cancel()
+  }
+  defer { cancel.cancel() }
+  let url = URL(string: "https://fixture.test/always-busy")!
+  let elapsed = await ContinuousClock().measure {
+    await #expect(throws: CancellationError.self) {
+      if file {
+        try await HTTPFile.get(
+          url, to: output, maximumBytes: 64, cancellation: token,
+          configuration: stubConfiguration())
+      } else {
+        _ = try await HTTPData.get(
+          url, maximumBytes: 64, cancellation: token, configuration: stubConfiguration())
+      }
+    }
+  }
+  #expect(elapsed < .seconds(2))
+  #expect(!FileManager.default.fileExists(atPath: output.path))
 }
 
 @Test func xcodeDownloadDoesNotExposeItsPrivateURLInErrors() async throws {
@@ -104,7 +173,7 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
       configuration: stubConfiguration())
     Issue.record("Expected a transport failure")
   } catch {
-    #expect(error.localizedDescription == "Xcode download failed (error code -1004)")
+    #expect(error.localizedDescription == "Xcode download failed (error code -1200)")
     #expect(!FileManager.default.fileExists(atPath: output.path))
   }
   try await HTTPFile.xcodeArchive(

@@ -78,6 +78,7 @@ enum XcodeDownload {
     let downloads = workspace.appendingPathComponent("downloads")
     try SafeFile.makeDirectory(downloads)
     let archive = downloads.appendingPathComponent(filename)
+    BuildProgress.write("Download Xcode archive: \(filename)")
     try await HTTPFile.xcodeArchive(source, to: archive, cancellation: cancellation)
     return archive
   }

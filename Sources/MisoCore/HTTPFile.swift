@@ -162,7 +162,6 @@ enum HTTPFile {
     configuration.timeoutIntervalForRequest = 30
     configuration.timeoutIntervalForResource =
       appleAsset || appleRestore || xcodeArchive ? 3600 : 300
-    let delegate = Delegate(url: url, maximumBytes: Int64(maximumBytes), redirects: redirects)
     let session = URLSession(configuration: configuration)
     defer { session.invalidateAndCancel() }
     var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
@@ -175,26 +174,27 @@ enum HTTPFile {
     request.setValue("miso", forHTTPHeaderField: "User-Agent")
     try await withThrowingTaskGroup(of: Void.self) { group in
       group.addTask { [request] in
-        let (temporary, response) = try await session.download(for: request, delegate: delegate)
-        defer { try? FileManager.default.removeItem(at: temporary) }
-        guard let response = response as? HTTPURLResponse else {
-          throw MisoError.invalid("Expected an HTTPS payload response")
-        }
-        guard response.statusCode == 200 else {
-          throw MisoError.invalid("HTTPS payload request failed with status \(response.statusCode)")
-        }
-        guard let destination = response.url,
-          destination == url || redirects.permits(from: url, to: destination)
-        else { throw MisoError.invalid("HTTPS payload response destination changed") }
-        guard response.expectedContentLength <= maximumBytes else {
-          throw MisoError.invalid("HTTPS payload exceeds size limit")
-        }
-        if appleRestore || xcodeArchive {
-          try Artifacts.moveDownload(
-            temporary, to: output, maximumBytes: maximumBytes, cancellation: cancellation)
-        } else {
-          try Artifacts.copy(
-            temporary, to: output, maximumBytes: maximumBytes, cancellation: cancellation)
+        try await HTTPRetry.run(cancellation: cancellation) {
+          let delegate = Delegate(url: url, maximumBytes: Int64(maximumBytes), redirects: redirects)
+          let (temporary, response) = try await session.download(for: request, delegate: delegate)
+          defer { try? FileManager.default.removeItem(at: temporary) }
+          guard let response = response as? HTTPURLResponse else {
+            throw MisoError.invalid("Expected an HTTPS payload response")
+          }
+          try HTTPRetry.requireSuccess(response)
+          guard let destination = response.url,
+            destination == url || redirects.permits(from: url, to: destination)
+          else { throw MisoError.invalid("HTTPS payload response destination changed") }
+          guard response.expectedContentLength <= maximumBytes else {
+            throw MisoError.invalid("HTTPS payload exceeds size limit")
+          }
+          if appleRestore || xcodeArchive {
+            try Artifacts.moveDownload(
+              temporary, to: output, maximumBytes: maximumBytes, cancellation: cancellation)
+          } else {
+            try Artifacts.copy(
+              temporary, to: output, maximumBytes: maximumBytes, cancellation: cancellation)
+          }
         }
       }
       group.addTask {
