@@ -98,9 +98,9 @@ Use the Action in an Apple silicon macOS job:
 
 ```yaml
 steps:
-  - uses: cocoa-xu/miso@v0.3.4
+  - uses: cocoa-xu/miso@v0.3.5
     with:
-      version: 0.3.4
+      version: 0.3.5
       xcode-base-url: ${{ secrets.XCODE_BASE_URL }}
   - run: miso --version
 ```
