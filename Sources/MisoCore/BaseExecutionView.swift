@@ -6,13 +6,10 @@ enum BaseExecutionView {
     case mountedSystem
     case copiedTools
 
-    static func select(_ target: MacOSRelease, hostBuild: String? = nil) throws -> Self {
+    static func select(_ target: MacOSRelease) throws -> Self {
       switch try RestoreProfile.select(target).family {
       case .sequoia: return .mountedSystem
-      case .tahoe: return .copiedTools
-      case .goldenGate:
-        let host = try hostBuild ?? HostInfo.current().productBuild
-        return target.build == "26A434" && host == "26A428" ? .copiedTools : .mountedSystem
+      case .tahoe, .goldenGate: return .copiedTools
       }
     }
   }
@@ -28,7 +25,7 @@ enum BaseExecutionView {
   {
     try journal.measure("executionViewSeconds", progress: "Prepare offline execution environment") {
       let host = journal.record.host.productBuild
-      let mode = try Mode.select(target, hostBuild: host)
+      let mode = try Mode.select(target)
       BuildProgress.write(
         "Execution environment: \(mode.rawValue), host \(host), target \(target.build)")
       try journal.setMetadata("executionViewMode", value: mode)
@@ -57,7 +54,8 @@ enum BaseExecutionView {
     guard chmod(root.path, 0o700) == 0 else {
       throw MisoError.system("Restrict execution root", errno)
     }
-    try Artifacts.requireSpace((target.build == "26A434" ? 20 : 12) << 30, at: journal.output)
+    let goldenGate = try RestoreProfile.select(target).family == .goldenGate
+    try Artifacts.requireSpace((goldenGate ? 20 : 12) << 30, at: journal.output)
     let session = try DiskImageSession(image: image, readOnly: true, journal: journal)
     BuildProgress.write("Attaching execution image read-only")
     return try session.withAttachment { session in
@@ -89,10 +87,6 @@ enum BaseExecutionView {
       let bindings = try firmlinks(firmlinkText)
       var executionTools: [String] = []
       var compilerTools: [String] = []
-      let resign = ["25G83", "26A434"].contains(target.build)
-      if !resign {
-        throw MisoError.unsupported("Base execution view for target build \(target.build)")
-      }
       var copiedFiles = 0
       var copiedBytes: UInt64 = 0
       var lastCopyReport = ProcessInfo.processInfo.systemUptime
@@ -146,7 +140,7 @@ enum BaseExecutionView {
           guard chmod(destination.path, info.st_mode & 0o755) == 0 else {
             throw MisoError.system("Set execution file mode", errno)
           }
-          let localSignature = resign && requiresLocalSignature(relative)
+          let localSignature = requiresLocalSignature(relative)
           let compilerTool = relative.hasPrefix("Library/Developer/CommandLineTools/usr/")
           if localSignature || compilerTool,
             try isExecutable(destination)

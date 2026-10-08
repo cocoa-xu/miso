@@ -10,7 +10,7 @@ import Testing
   #expect(
     try BaseExecutionView.Mode.select(.init(version: "26.6.2", build: "25G83")) == .copiedTools)
   #expect(
-    try BaseExecutionView.Mode.select(.init(version: "27.0", build: "26A428")) == .mountedSystem)
+    try BaseExecutionView.Mode.select(.init(version: "27.0", build: "26A428")) == .copiedTools)
   for target in [
     MacOSRelease(version: "26.6.2", build: "unknown"), .init(version: "28.0", build: "future"),
   ] {
@@ -18,13 +18,12 @@ import Testing
   }
 }
 
-@Test func goldenGateExecutionStrategyAccountsForTheValidatedHost() throws {
-  let target = MacOSRelease(version: "27.0.1", build: "26A434")
-  #expect(try BaseExecutionView.Mode.select(target, hostBuild: "26A428") == .copiedTools)
-  #expect(try BaseExecutionView.Mode.select(target, hostBuild: "26A5425a") == .mountedSystem)
-  #expect(
-    try BaseExecutionView.Mode.select(.init(version: "27.0", build: "26A428"), hostBuild: "26A428")
-      == .mountedSystem)
+@Test func goldenGateUsesTemporaryToolsAcrossSupportedBuilds() throws {
+  for target in [
+    MacOSRelease(version: "27.0", build: "26A428"), .init(version: "27.0.1", build: "26A434"),
+  ] {
+    #expect(try BaseExecutionView.Mode.select(target) == .copiedTools)
+  }
 }
 
 @Test func executionLinksHaveExplicitModesAndPreserveTargets() throws {
