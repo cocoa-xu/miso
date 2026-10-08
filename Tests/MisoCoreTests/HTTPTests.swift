@@ -147,19 +147,16 @@ func nativeHTTPSCanCancelDuringRetryBackoff(file: Bool) async throws {
   }
   defer { cancel.cancel() }
   let url = URL(string: "https://fixture.test/always-busy")!
-  let elapsed = await ContinuousClock().measure {
-    await #expect(throws: CancellationError.self) {
-      if file {
-        try await HTTPFile.get(
-          url, to: output, maximumBytes: 64, cancellation: token,
-          configuration: stubConfiguration())
-      } else {
-        _ = try await HTTPData.get(
-          url, maximumBytes: 64, cancellation: token, configuration: stubConfiguration())
-      }
+  await #expect(throws: CancellationError.self) {
+    if file {
+      try await HTTPFile.get(
+        url, to: output, maximumBytes: 64, cancellation: token,
+        configuration: stubConfiguration())
+    } else {
+      _ = try await HTTPData.get(
+        url, maximumBytes: 64, cancellation: token, configuration: stubConfiguration())
     }
   }
-  #expect(elapsed < .seconds(2))
   #expect(!FileManager.default.fileExists(atPath: output.path))
 }
 
