@@ -226,7 +226,10 @@ private final class RegistryProtocol: URLProtocol, @unchecked Sendable {
     return (source, bytes)
   }
 
-  @Test func uploadRetriesRefreshesAuthenticationAndDownloadPreservesSparseData() async throws {
+  @Test(arguments: OCIDiskCompression.allCases)
+  func uploadRetriesRefreshesAuthenticationAndDownloadPreservesSparseData(
+    compression: OCIDiskCompression
+  ) async throws {
     let temporary = try TemporaryDirectory()
     defer { temporary.remove() }
     let (fixture, configuration) = setup()
@@ -234,7 +237,8 @@ private final class RegistryProtocol: URLProtocol, @unchecked Sendable {
     let receipt = try await OCITransfer.push(
       source: source, reference: "ghcr.io/fixture/image:test",
       output: temporary.url.appendingPathComponent("push"),
-      concurrency: 3, username: "fixture", password: "secret", configuration: configuration)
+      concurrency: 3, compression: compression,
+      username: "fixture", password: "secret", configuration: configuration)
     #expect(fixture.lock.withLock { fixture.tokenRequests } >= 2)
     #expect(
       !FileManager.default.fileExists(
@@ -243,6 +247,7 @@ private final class RegistryProtocol: URLProtocol, @unchecked Sendable {
     let repeated = try await OCITransfer.push(
       source: source, reference: "ghcr.io/fixture/image:test",
       output: temporary.url.appendingPathComponent("push-again"),
+      compression: compression,
       username: "fixture", password: "secret", configuration: configuration)
     #expect(repeated.skippedBlobs == firstUploads)
     #expect(fixture.lock.withLock { fixture.uploads } == firstUploads)
@@ -286,12 +291,12 @@ private final class RegistryProtocol: URLProtocol, @unchecked Sendable {
     #expect(record.status == .failed)
   }
 
-  @Test func repeatedDiskLayersWriteEveryOffsetAndRejectConflictingMetadata() throws {
+  @Test func repeatedDiskLayersWriteEveryOffsetAndRejectConflictingMetadata() async throws {
     let temporary = try TemporaryDirectory()
     defer { temporary.remove() }
     let (source, bytes) = try source(temporary)
     let blobs = temporary.url.appendingPathComponent("blobs")
-    let manifest = try OCIPack.run(
+    let manifest = try await OCIPack.run(
       source: source, blobs: blobs, labels: [:], cancellation: CancellationToken())
     let layer = manifest.layers[1]
     let output = temporary.url.appendingPathComponent("vm")

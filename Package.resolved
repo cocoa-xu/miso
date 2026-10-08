@@ -1,6 +1,15 @@
 {
-  "originHash" : "53f5a9c09355f020843c3f2bf03e7e9de447f308d70420bda1ea53c0f374659c",
+  "originHash" : "0beda98faa97f7ff529542baecfbe205a654988e2b0f2c15ba6da3d5fd95a3c6",
   "pins" : [
+    {
+      "identity" : "libarchive.xcframework",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Lakr233/libarchive.xcframework.git",
+      "state" : {
+        "revision" : "82687c75e530917b7fbeb15cd5f9369524637155",
+        "version" : "1.0.0"
+      }
+    },
     {
       "identity" : "swift-argument-parser",
       "kind" : "remoteSourceControl",

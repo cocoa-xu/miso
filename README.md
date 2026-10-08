@@ -67,7 +67,7 @@ only reclaim free blocks, or `--username NAME` for a different guest account.
 
 ## Upload and download
 
-MISO transfers Tart-compatible images directly to GHCR. For uploads, set
+MISO transfers OCI VM images directly to GHCR. For uploads, set
 `MISO_REGISTRY_USERNAME` and `MISO_REGISTRY_PASSWORD` using credentials with package
 write access. In Actions, use `${{ github.actor }}` and `${{ github.token }}` with
 `packages: write`.
@@ -79,8 +79,9 @@ miso bundle pull ghcr.io/owner/image:tag --output downloaded
 ```
 
 Downloads produce `downloaded/vm` on an APFS workspace. Public images can be pulled
-without credentials. Transfers default to four concurrent requests; set
-`--concurrency 1` through `16` to adjust. Progress shows bytes and recent upload or
+without credentials. Uploads use Zstd level 9; use `--compression lz4` for existing
+Tart clients. Downloads accept both formats. Compression and transfers default to
+four concurrent jobs; set `--concurrency 1` through `16` to adjust. Progress shows bytes and recent upload or
 download speed. Temporary transfer data is removed automatically. No Tart executable
 or VM is needed.
 

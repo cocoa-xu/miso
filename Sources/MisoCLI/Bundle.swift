@@ -2,6 +2,8 @@ import ArgumentParser
 import Foundation
 import MisoCore
 
+extension OCIDiskCompression: ExpressibleByArgument {}
+
 struct Bundle: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     abstract: "Check bundle integrity or validate a VM configuration without creating a VM.",
@@ -12,12 +14,14 @@ struct Bundle: AsyncParsableCommand {
 
   struct Push: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-      abstract: "Upload a Tart-compatible image to GHCR.")
+      abstract: "Upload an OCI VM image to GHCR.")
     @Argument(help: "Directory containing config.json, disk.img and nvram.bin.") var directory:
       String
     @Argument(help: "ghcr.io/owner/image:tag") var reference: String
     @Option var output: String
-    @Option(help: "Concurrent transfers (1–16).") var concurrency = 4
+    @Option(help: "Concurrent compression jobs and transfers (1–16).") var concurrency = 4
+    @Option(help: "Disk compression: zstd (level 9) or lz4 (Tart-compatible).")
+    var compression: OCIDiskCompression = .zstd
     @Option(name: .customLong("label"), help: "OCI image label: key=value.") var labels: [String] =
       []
 
@@ -35,7 +39,7 @@ struct Bundle: AsyncParsableCommand {
       try printJSON(
         await OCITransfer.push(
           source: fileURL(directory), reference: reference, output: fileURL(output),
-          concurrency: concurrency, labels: parsed,
+          concurrency: concurrency, compression: compression, labels: parsed,
           username: environment["MISO_REGISTRY_USERNAME"],
           password: environment["MISO_REGISTRY_PASSWORD"],
           cancellation: cancellation.token))

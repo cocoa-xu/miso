@@ -12,6 +12,7 @@ public enum OCITransfer {
 
   public static func push(
     source: URL, reference: String, output: URL, concurrency: Int = 4,
+    compression: OCIDiskCompression = .zstd,
     labels: [String: String] = [:], username: String?, password: String?,
     cancellation: CancellationToken? = nil,
     configuration: URLSessionConfiguration = .ephemeral
@@ -33,8 +34,9 @@ public enum OCITransfer {
         let probe = try await registry.request("GET", url: reference.url("tags/list?n=1"))
         try registry.require(probe.http, codes: [200, 404])
       }
-      let manifest = try OCIPack.run(
-        source: source, blobs: blobs, labels: labels, cancellation: journal.cancellation)
+      let manifest = try await OCIPack.run(
+        source: source, blobs: blobs, labels: labels, cancellation: journal.cancellation,
+        compression: compression, concurrency: concurrency)
       _ = try manifest.validate()
       let data = try JSON.encode(manifest)
       let digest = "sha256:" + SafeFile.sha256(data)
@@ -180,7 +182,7 @@ public enum OCITransfer {
     _ blob: OCIDescriptor, file: URL, vm: URL, offsets: [UInt64]?, cancellation: CancellationToken
   ) throws {
     try cancellation.check()
-    if blob.mediaType == OCIManifest.diskType {
+    if let codec = OCIDiskCompression(mediaType: blob.mediaType) {
       guard let offsets, !offsets.isEmpty,
         let count = blob.annotations?["org.cirruslabs.tart.uncompressed-size"].flatMap(UInt64.init)
       else { throw MisoError.invalid("Missing OCI disk offsets") }
@@ -192,7 +194,7 @@ public enum OCITransfer {
       let zeroes = Data(repeating: 0, count: 1 << 20)
       var holes: [APFSCompaction.Extent] = []
       let result = try OCICompression.process(
-        input: input, bytes: blob.size, encoding: false, maximumOutput: count,
+        input: input, bytes: blob.size, encoding: false, maximumOutput: count, codec: codec,
         cancellation: cancellation
       ) { data in
         if data != zeroes.prefix(data.count) {

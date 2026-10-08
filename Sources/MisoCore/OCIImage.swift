@@ -97,7 +97,7 @@ struct OCIManifest: Codable, Sendable {
     }
     for layer in layers.dropFirst().dropLast() {
       try layer.validate(maximumSize: Self.layerBytes + (8 << 20))
-      guard layer.mediaType == Self.diskType,
+      guard OCIDiskCompression(mediaType: layer.mediaType) != nil,
         let count = layer.annotations?["org.cirruslabs.tart.uncompressed-size"].flatMap(
           UInt64.init),
         count > 0, count <= Self.layerBytes,
@@ -115,8 +115,12 @@ struct OCIManifest: Codable, Sendable {
 
 enum OCIPack {
   static func run(
-    source: URL, blobs: URL, labels: [String: String], cancellation: CancellationToken
-  ) throws -> OCIManifest {
+    source: URL, blobs: URL, labels: [String: String], cancellation: CancellationToken,
+    compression: OCIDiskCompression = .zstd, concurrency: Int = 4
+  ) async throws -> OCIManifest {
+    guard (1...16).contains(concurrency) else {
+      throw MisoError.invalid("Compression concurrency must be between 1 and 16")
+    }
     let names = ["config.json", "disk.img", "nvram.bin"]
     let before = try names.map { try FileMetadata.inspect(source.appendingPathComponent($0)) }
     let config = try SafeFile.read(source.appendingPathComponent("config.json"), limit: 1 << 20)
@@ -144,41 +148,41 @@ enum OCIPack {
     guard size > 0, size <= OCIManifest.layerBytes * 4096 else {
       throw MisoError.invalid("Unsupported OCI disk size")
     }
-    var offset: UInt64 = 0
-    while offset < size {
-      try cancellation.check()
-      try Artifacts.requireSpace(OCIManifest.layerBytes + (8 << 20), at: blobs)
-      let count = min(OCIManifest.layerBytes, size - offset)
-      let temporary = blobs.appendingPathComponent("layer-\(layers.count)")
-      let output = try SafeFile.create(temporary)
-      let result: OCICompression.Result
-      do {
-        result = try OCICompression.process(
-          input: disk, bytes: count, encoding: true,
-          maximumOutput: count + (8 << 20), cancellation: cancellation
-        ) { try output.write(contentsOf: $0) }
-        try output.close()
-      } catch {
-        try? output.close()
-        throw error
+    let layerCount = Int((size + OCIManifest.layerBytes - 1) / OCIManifest.layerBytes)
+    var compressed = [OCIDescriptor?](repeating: nil, count: layerCount)
+    try await withThrowingTaskGroup(of: (Int, OCIDescriptor).self) { group in
+      func submit(_ index: Int) {
+        group.addTask {
+          let offset = UInt64(index) * OCIManifest.layerBytes
+          let descriptor = try compressLayer(
+            source: source.appendingPathComponent("disk.img"), blobs: blobs, index: index,
+            offset: offset, count: min(OCIManifest.layerBytes, size - offset),
+            compression: compression, cancellation: cancellation)
+          return (index, descriptor)
+        }
       }
-      let descriptor = OCIDescriptor(
-        mediaType: OCIManifest.diskType, size: result.outputBytes, digest: result.outputDigest,
-        annotations: [
-          "org.cirruslabs.tart.uncompressed-size": String(count),
-          "org.cirruslabs.tart.uncompressed-content-digest": result.inputDigest,
-        ])
-      if FileManager.default.fileExists(atPath: descriptor.file(in: blobs).path) {
-        try FileManager.default.removeItem(at: temporary)
-      } else {
-        try FileManager.default.moveItem(at: temporary, to: descriptor.file(in: blobs))
+      var next = min(concurrency, layerCount)
+      for index in 0..<next { submit(index) }
+      var completed: UInt64 = 0
+      while let (index, descriptor) = try await group.next() {
+        let temporary = blobs.appendingPathComponent("layer-\(index)")
+        if FileManager.default.fileExists(atPath: descriptor.file(in: blobs).path) {
+          try FileManager.default.removeItem(at: temporary)
+        } else {
+          try FileManager.default.moveItem(at: temporary, to: descriptor.file(in: blobs))
+        }
+        compressed[index] = descriptor
+        completed += min(OCIManifest.layerBytes, size - UInt64(index) * OCIManifest.layerBytes)
+        BuildProgress.write(
+          "Compress image (\(compression.rawValue)): \(TransferProgress.size(Double(completed))) / \(TransferProgress.size(Double(size)))"
+        )
+        if next < layerCount {
+          submit(next)
+          next += 1
+        }
       }
-      layers.append(descriptor)
-      offset += count
-      BuildProgress.write(
-        "Compress image: \(TransferProgress.size(Double(offset))) / \(TransferProgress.size(Double(size)))"
-      )
     }
+    layers += compressed.map { $0! }
     layers.append(try store(nvram, type: OCIManifest.nvramType))
     for (index, name) in names.enumerated() {
       let after = try FileMetadata.inspect(source.appendingPathComponent(name))
@@ -197,6 +201,31 @@ enum OCIPack {
       annotations: [
         "org.cirruslabs.tart.uncompressed-disk-size": String(size),
         "org.cirruslabs.tart.upload-time": ISO8601DateFormatter().string(from: Date()),
+      ])
+  }
+
+  private static func compressLayer(
+    source: URL, blobs: URL, index: Int, offset: UInt64, count: UInt64,
+    compression: OCIDiskCompression, cancellation: CancellationToken
+  ) throws -> OCIDescriptor {
+    try cancellation.check()
+    try Task.checkCancellation()
+    try Artifacts.requireSpace(count + (8 << 20), at: blobs)
+    let input = try SafeFile.openRegular(source)
+    defer { try? input.close() }
+    try input.seek(toOffset: offset)
+    let output = try SafeFile.create(blobs.appendingPathComponent("layer-\(index)"))
+    defer { try? output.close() }
+    let result = try OCICompression.process(
+      input: input, bytes: count, encoding: true, maximumOutput: count + (8 << 20),
+      codec: compression, cancellation: cancellation
+    ) { try output.write(contentsOf: $0) }
+    try output.close()
+    return OCIDescriptor(
+      mediaType: compression.mediaType, size: result.outputBytes, digest: result.outputDigest,
+      annotations: [
+        "org.cirruslabs.tart.uncompressed-size": String(count),
+        "org.cirruslabs.tart.uncompressed-content-digest": result.inputDigest,
       ])
   }
 
