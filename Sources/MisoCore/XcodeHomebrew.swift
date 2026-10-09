@@ -8,6 +8,7 @@ public enum XcodeHomebrew {
     public let coreRevision: String
     public let portableRubyVersion: String
     public let installedFormulaePreserved: Bool
+    public let formulaSourcesPreserved: Bool
   }
 
   public static func install(
@@ -51,23 +52,23 @@ public enum XcodeHomebrew {
         }
         let before = try BaseBottles.installedVersions(
           brew("homebrew-formulae-before", ["list", "--formula", "--versions"]))
+        let core = gitArguments(repository: "/opt/homebrew/Library/Taps/homebrew/homebrew-core")
+        let coreRevision = try guest.run(
+          "homebrew-core-revision", arguments: core + ["rev-parse", "HEAD"])
+        let coreChanges = try guest.run(
+          "homebrew-core-changes-before", arguments: core + ["diff", "--no-ext-diff", "HEAD"])
         let relative = "private/tmp/miso-homebrew-refresh-" + UUID().uuidString
         try guest.data.makeDirectories(relative, uid: guest.account.uid, gid: guest.account.gid)
         let staging = try guest.data.directory(relative).url
         defer { try? FileManager.default.removeItem(at: staging) }
-        for name in ["brew", "core"] {
-          let origin = inputs.appendingPathComponent(name)
-          try BaseFileTree.copy(
-            origin, to: staging.appendingPathComponent(name),
-            entries: BaseInputArchive.inventory(origin, cancellation: journal.cancellation),
-            uid: guest.account.uid, gid: guest.account.gid, cancellation: journal.cancellation)
-        }
+        let origin = inputs.appendingPathComponent("brew")
+        try BaseFileTree.copy(
+          origin, to: staging.appendingPathComponent("brew"),
+          entries: BaseInputArchive.inventory(origin, cancellation: journal.cancellation),
+          uid: guest.account.uid, gid: guest.account.gid, cancellation: journal.cancellation)
         try update(
           guest: guest, repository: "/opt/homebrew", staging: "/" + relative + "/brew",
           selection: receipt.brew.selection, name: "brew")
-        try update(
-          guest: guest, repository: "/opt/homebrew/Library/Taps/homebrew/homebrew-core",
-          staging: "/" + relative + "/core", selection: receipt.core.selection, name: "core")
         let vendor = try guest.data.directory("opt/homebrew/Library/Homebrew/vendor").url
         let required = try String(
           decoding: SafeFile.read(
@@ -104,14 +105,23 @@ public enum XcodeHomebrew {
               "-e", "print RUBY_VERSION",
             ]) == ruby.version,
           try BaseBottles.installedVersions(
-            brew("homebrew-formulae-after", ["list", "--formula", "--versions"])) == before
+            brew("homebrew-formulae-after", ["list", "--formula", "--versions"])) == before,
+          try guest.run("homebrew-core-revision-after", arguments: core + ["rev-parse", "HEAD"])
+            == coreRevision,
+          try guest.run(
+            "homebrew-core-changes-after", arguments: core + ["diff", "--no-ext-diff", "HEAD"])
+            == coreChanges
         else {
-          throw MisoError.invalid("Homebrew refresh changed installed formulae or tool versions")
+          throw MisoError.invalid("Homebrew refresh changed formulae, sources or tool versions")
         }
+        try guest.run(
+          "homebrew-linkage",
+          arguments: GuestExecution.brewArguments(["linkage", "--test"], username: username),
+          capability: .brew, timeout: 300, progress: "Check preserved Homebrew library linkage")
         return Details(
           version: receipt.version, brewRevision: receipt.brew.selection.commitID,
-          coreRevision: receipt.core.selection.commitID, portableRubyVersion: ruby.version,
-          installedFormulaePreserved: true)
+          coreRevision: coreRevision, portableRubyVersion: ruby.version,
+          installedFormulaePreserved: true, formulaSourcesPreserved: true)
       }
     }
   }
