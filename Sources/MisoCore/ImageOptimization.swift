@@ -6,6 +6,7 @@ public enum ImageOptimization {
     let compression: TransparentCompression.Receipt?
     let compaction: APFSCompaction.Receipt?
     var cleanedPaths: [String] = []
+    var systemPolicy: OfflineSystemPolicy.Receipt?
   }
 
   public struct Receipt: Encodable {
@@ -19,6 +20,7 @@ public enum ImageOptimization {
 
   public static func run(
     source: URL, output: URL, username: String = "admin", compress: Bool = true,
+    systemPolicy: SystemPolicy? = nil,
     cancellation: CancellationToken? = nil
   ) throws -> Receipt {
     guard geteuid() == 0 else {
@@ -62,6 +64,19 @@ public enum ImageOptimization {
       } else {
         application = nil
       }
+      if let systemPolicy {
+        try systemPolicy.validate()
+        var selected = profile ?? XcodeBuildProfile()
+        selected.system = selected.system.merging(systemPolicy)
+        profile = selected
+        if let configuration {
+          var xcode = try JSONDecoder().decode(
+            XcodeConfiguration.self, from: JSONSerialization.data(withJSONObject: configuration))
+          xcode.profile = selected
+          manifest["xcode_configuration"] = try JSONSerialization.jsonObject(
+            with: JSON.encode(xcode))
+        }
+      }
       let result = try apply(
         bundle: bundle, username: username, application: application,
         compress: compress, profile: profile, journal: journal)
@@ -96,13 +111,35 @@ public enum ImageOptimization {
     let image = bundle.appendingPathComponent("disk.img")
     var compression: TransparentCompression.Receipt?
     var cleanedPaths: [String] = []
-    if (compress && (profile?.transparentCompression ?? true)) || profile?.cleanup == true {
+    var systemPolicy: OfflineSystemPolicy.Receipt?
+    if (compress && (profile?.transparentCompression ?? true)) || profile?.cleanup == true
+      || profile?.system.isEmpty == false
+    {
       let mounted = try DiskImageSession(image: image, readOnly: false, journal: journal)
       compression = try mounted.withAttachment { session in
         let main = try BaseImageStage.mainContainer(session)
         let data = try ImageMounts.mount(
           main.volume(role: "Data"), session: session, journal: journal,
           name: "optimize-data", readOnly: false)
+        if let policy = profile?.system, !policy.isEmpty {
+          systemPolicy = try BuildProgress.run("Configure optional system services and settings") {
+            let system = try ImageMounts.mount(
+              main.volume(role: "System"), session: session, journal: journal,
+              name: "policy-system", readOnly: true)
+            let preboot = try ImageMounts.mount(
+              main.volume(role: "Preboot"), session: session, journal: journal,
+              name: "policy-preboot", readOnly: policy.settings["spotlightIndexing"] == nil)
+            let account = try BaseImageStage.Account(username, data: data)
+            let services =
+              try policy.resolvedServices.isEmpty
+              ? [:]
+              : OfflineSystemPolicy.cryptexInventory(
+                preboot: preboot, uid: account.uid, journal: journal)
+            return try OfflineSystemPolicy.apply(
+              policy, system: system, data: data, preboot: preboot,
+              account: account, cancellation: journal.cancellation, additionalServices: services)
+          }
+        }
         var result: TransparentCompression.Receipt?
         if compress && (profile?.transparentCompression ?? true) {
           result = try BuildProgress.run("Compress installed files") {
@@ -179,7 +216,8 @@ public enum ImageOptimization {
       }
     }
     let details = Details(
-      compression: compression, compaction: compaction, cleanedPaths: cleanedPaths)
+      compression: compression, compaction: compaction, cleanedPaths: cleanedPaths,
+      systemPolicy: systemPolicy)
     try journal.setMetadata("optimization", value: details)
     return details
   }

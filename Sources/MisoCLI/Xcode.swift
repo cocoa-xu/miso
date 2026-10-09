@@ -489,7 +489,8 @@ struct Xcode: AsyncParsableCommand {
       abstract: "Print an Xcode configuration, optionally applying a build profile.")
     @Option var config: String?
     @Option(help: "YAML build profile.") var profile: String?
-    @Flag(help: "Keep iOS/watchOS and trim Intel code before compression.") var slim = false
+    @Flag(help: "Keep iOS/watchOS, trim Intel code and disable optional personal services.")
+    var slim = false
 
     func run() throws {
       guard !slim || profile == nil else {

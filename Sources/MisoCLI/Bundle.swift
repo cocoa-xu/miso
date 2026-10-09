@@ -8,7 +8,9 @@ struct Bundle: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     abstract: "Check bundle integrity or validate a VM configuration without creating a VM.",
     subcommands: [
-      Verify.self, Validate.self, Assemble.self, Optimize.self, ExportTart.self, ImportTart.self,
+      Verify.self, VerifySystemPolicy.self, SystemServices.self, Validate.self, Assemble.self,
+      Optimize.self,
+      ExportTart.self, ImportTart.self,
       Push.self, Pull.self,
     ])
 
@@ -91,6 +93,8 @@ struct Bundle: AsyncParsableCommand {
     @Argument var directory: String
     @Option var output: String
     @Option var username = "admin"
+    @Option(help: "YAML system policy to apply to the offline clone before optimization.")
+    var systemProfile: String?
     @Flag(
       inversion: .prefixedNo,
       help: "Compress eligible installed files before reclaiming free blocks.")
@@ -102,8 +106,31 @@ struct Bundle: AsyncParsableCommand {
       try printJSON(
         ImageOptimization.run(
           source: fileURL(directory), output: fileURL(output),
-          username: username, compress: compress, cancellation: cancellation.token))
+          username: username, compress: compress,
+          systemPolicy: try systemProfile.map { try SystemPolicy.read(fileURL($0)) },
+          cancellation: cancellation.token))
     }
+  }
+
+  struct VerifySystemPolicy: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Verify optional system settings and service state inside the running guest.")
+    @Option var output: String
+
+    func run() throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        SystemPolicyVerification.run(
+          output: fileURL(output), cancellation: cancellation.token))
+    }
+  }
+
+  struct SystemServices: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "List optional service groups and their individually configurable launchd labels.")
+
+    func run() throws { try printJSON(SystemPolicy.serviceCatalog) }
   }
 
   struct ExportTart: AsyncParsableCommand {

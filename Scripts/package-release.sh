@@ -31,14 +31,14 @@ staging=$(mktemp -d "${TMPDIR:-/tmp}/miso-release.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
 install -m 755 "$binary" "$staging/miso"
 cp README.md ACKNOWLEDGMENTS.md "$staging/"
-cp -R ThirdPartyLicenses "$staging/"
+cp -R ThirdPartyLicenses docs "$staging/"
 {
   printf 'Version: %s\nCommit: %s\n' "$version" "$(git rev-parse HEAD)"
   sw_vers
   swift --version
 } > "$staging/BUILD.txt"
 COPYFILE_DISABLE=1 tar -czf "$output/$archive" -C "$staging" \
-  miso README.md ACKNOWLEDGMENTS.md ThirdPartyLicenses BUILD.txt
+  miso README.md ACKNOWLEDGMENTS.md ThirdPartyLicenses docs BUILD.txt
 mkdir "$staging/verify"
 tar -xzf "$output/$archive" -C "$staging/verify"
 codesign --verify --strict "$staging/verify/miso"

@@ -137,6 +137,10 @@ preserves ARM signatures, then compresses, cleans caches and sparsifies the imag
 Use `--profile profile.yaml` instead for custom `platforms`, `trimIntel`,
 `transparentCompression`, `cleanup` and `sparsify` settings. The last four are
 independent booleans. Without a profile, the full installation remains the default.
+Slim also disables optional personal services and automatic OS/App Store updates,
+while retaining animations, local diagnostics, security-data updates and developer
+services. Use `preset: slim` in YAML to override individual choices; see
+[system settings](docs/system-settings.md).
 
 Image construction needs an APFS workspace, administrator privileges and enough
 free space for its inputs and output. The Action does not remove runner software.
