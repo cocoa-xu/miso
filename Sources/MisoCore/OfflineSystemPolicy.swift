@@ -27,7 +27,7 @@ enum OfflineSystemPolicy {
   static let receiptPath = "Library/Application Support/MISO/system-policy.json"
 
   static func apply(
-    _ policy: SystemPolicy, system: GuestVolume, data: GuestVolume, preboot: GuestVolume?,
+    _ policy: SystemPolicy, system: GuestVolume, data: GuestVolume,
     account: BaseImageStage.Account, cancellation: CancellationToken?,
     systemOwner: (uid: uid_t, gid: gid_t) = (0, 0),
     additionalServices: [String: Set<String>] = [:]
@@ -78,14 +78,12 @@ enum OfflineSystemPolicy {
     }
     var spotlightPaths: [String] = []
     if let enabled = policy.settings["spotlightIndexing"] {
-      let locations: [(GuestVolume?, String)] = [
-        (data, ".Spotlight-V100/VolumeConfiguration.plist"),
-        (data, "private/var/db/Spotlight-V100/BootVolume/VolumeConfiguration.plist"),
-        (preboot, "private/var/db/Spotlight-V100/Preboot/VolumeConfiguration.plist"),
-      ]
-      for (volume, path) in locations {
-        guard let volume, try volume.contains(path) else { continue }
-        var plist = try volume.plist(path)
+      for (_, directory) in BaseSystemSettings.spotlightStores {
+        let path = directory + "/VolumeConfiguration.plist"
+        guard try data.contains(path) else {
+          throw MisoError.invalid("Prepared Base Spotlight configuration is missing: \(path)")
+        }
+        var plist = try data.plist(path)
         guard var stores = plist["Stores"] as? [String: [String: Any]], !stores.isEmpty else {
           throw MisoError.invalid("Missing Spotlight stores: \(path)")
         }
@@ -96,15 +94,12 @@ enum OfflineSystemPolicy {
           stores[name]!["PolicyDate"] = Date()
         }
         plist["Stores"] = stores
-        try volume.write(
+        try data.write(
           path,
           data: PropertyListSerialization.data(
             fromPropertyList: plist, format: .binary, options: 0),
           uid: systemOwner.uid, gid: systemOwner.gid, mode: 0o600)
         spotlightPaths.append(path)
-      }
-      guard spotlightPaths.count == locations.count else {
-        throw MisoError.invalid("Spotlight settings require the prepared Base index configuration")
       }
     }
     let receipt = Receipt(
@@ -139,6 +134,9 @@ enum OfflineSystemPolicy {
           let url = directory.appendingPathComponent(name)
           guard try FileMetadata.inspect(url).st_mode & S_IFMT == S_IFREG else { continue }
           let plist = try volume.plist(path + "/" + name)
+          if plist["Label"] == nil && plist["Program"] == nil && plist["ProgramArguments"] == nil {
+            continue
+          }
           guard let label = plist["Label"] as? String, !label.isEmpty else {
             throw MisoError.invalid("Missing launchd Label: \(path)/\(name)")
           }
@@ -194,7 +192,7 @@ enum OfflineSystemPolicy {
     if let enabled = policy.settings["automaticAppUpdates"] {
       set("com.apple.SoftwareUpdate", "AutomaticallyInstallAppUpdates", enabled)
       for user in [false, true] {
-        for key in ["AutoUpdate", "AutoUpdateRestartRequired", "AutoDownload"] {
+        for key in ["AutoUpdate", "AutoDownload"] {
           set("com.apple.commerce", key, enabled, user: user)
         }
       }

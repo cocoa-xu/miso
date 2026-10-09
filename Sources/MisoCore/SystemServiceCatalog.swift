@@ -19,7 +19,7 @@ enum SystemServiceCatalog {
       "com.apple.intelligencetasksd", "com.apple.callintelligenced",
     ],
     "telemetryUpload": [
-      "com.apple.analyticsd", "com.apple.SubmitDiagInfo", "com.apple.diagnosticspushd",
+      "com.apple.SubmitDiagInfo", "com.apple.diagnosticspushd",
       "com.apple.geoanalyticsd",
       "com.apple.wifianalyticsd",
     ],

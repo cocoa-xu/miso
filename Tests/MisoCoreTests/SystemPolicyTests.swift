@@ -4,6 +4,33 @@ import Testing
 
 @testable import MisoCore
 
+@Test func systemPolicyVerificationUsesEffectiveDiagnosticConsentAfterMigration() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let volume = try GuestVolume(temporary.url)
+  let path = SystemPolicyVerification.diagnosticHistory
+  try volume.mergePlist(
+    path, values: ["ThirdPartyDataSubmit": false], uid: getuid(), gid: getgid())
+  let preferences = [
+    OfflineSystemPolicy.Preference(path: path, key: "AutoSubmit", value: false),
+    OfflineSystemPolicy.Preference(path: path, key: "ThirdPartyDataSubmit", value: false),
+  ]
+  let disabled = try SystemPolicyVerification.observePreferences(
+    preferences, root: temporary.url, autoSubmit: false)
+  #expect(disabled[0].stored == nil && disabled[0].actual == false)
+  #expect(disabled.allSatisfy { $0.actual == $0.expected })
+  for consent in [true, nil] as [Bool?] {
+    let observations = try SystemPolicyVerification.observePreferences(
+      preferences, root: temporary.url, autoSubmit: consent)
+    #expect(observations[0].actual != observations[0].expected)
+  }
+  try volume.mergePlist(
+    path, values: ["ThirdPartyDataSubmit": true], uid: getuid(), gid: getgid())
+  let changed = try SystemPolicyVerification.observePreferences(
+    preferences, root: temporary.url, autoSubmit: false)
+  #expect(changed[1].actual != changed[1].expected)
+}
+
 @Test func systemPolicyVerificationDistinguishesLoadedIdleAndRunningServices() throws {
   let state = """
     \tservices = {
@@ -40,7 +67,8 @@ import Testing
   let policy = XcodeBuildProfile.slim.system
   let disabled = policy.resolvedServices.filter { $0.value == .disabled }
   for label in [
-    "com.apple.ReportCrash", "com.apple.spindump", "com.apple.logd", "com.apple.Siri.agent",
+    "com.apple.ReportCrash", "com.apple.spindump", "com.apple.logd", "com.apple.analyticsd",
+    "com.apple.Siri.agent",
     "com.apple.previewsd", "com.apple.dt.AutomationModeUI", "com.apple.dt.automationmode-writer",
     "com.apple.webinspectord", "com.apple.mobileassetd", "com.apple.security.cryptexd",
     "com.apple.securityd", "com.apple.trustd", "com.apple.authd", "com.apple.akd",
@@ -112,6 +140,7 @@ import Testing
     (system, "System/Library/LaunchDaemons/unrelated-filename.plist", ["Label": "com.test.shared"]),
     (system, "System/Library/LaunchAgents/user.plist", ["Label": "com.test.shared"]),
     (data, "Library/LaunchDaemons/other.plist", ["Label": "com.test.enable"]),
+    (system, "System/Library/LaunchDaemons/com.apple.jetsamproperties.Mac.plist", ["Version": "1"]),
   ] {
     try volume.mergePlist(path, values: values, uid: user, gid: group)
   }
@@ -127,13 +156,25 @@ import Testing
   try data.mergePlist(
     "Library/Preferences/com.apple.SoftwareUpdate.plist", values: ["Existing": "preserved"],
     uid: user, gid: group)
+  let spotlightPaths = [
+    ".Spotlight-V100/VolumeConfiguration.plist",
+    "private/var/db/Spotlight-V100/BootVolume/VolumeConfiguration.plist",
+    "private/var/db/Spotlight-V100/Preboot/VolumeConfiguration.plist",
+  ]
+  for path in spotlightPaths {
+    try data.mergePlist(
+      path, values: ["Stores": ["fixture": ["PolicyLevel": "kMDConfigSearchLevelReadWrite"]]],
+      uid: user, gid: group)
+  }
   var policy = SystemPolicy()
   policy.services = [
     "com.test.shared": .disabled, "com.test.enable": .enabled, "com.test.missing": .disabled,
   ]
-  policy.settings = ["automaticOSUpdates": false, "securityDataUpdates": true]
+  policy.settings = [
+    "automaticOSUpdates": false, "securityDataUpdates": true, "spotlightIndexing": false,
+  ]
   let receipt = try OfflineSystemPolicy.apply(
-    policy, system: system, data: data, preboot: nil,
+    policy, system: system, data: data,
     account: BaseImageStage.Account("admin", data: data), cancellation: nil,
     systemOwner: (user, group))
   #expect(receipt.services.first { $0.label == "com.test.missing" }?.status == "not-present")
@@ -153,4 +194,15 @@ import Testing
       system.path("System/Library/LaunchDaemons/unrelated-filename.plist"), limit: 1 << 20)
       == source)
   #expect(!receipt.runtimeVerified)
+  #expect(Set(receipt.spotlightPaths) == Set(spotlightPaths))
+  for path in spotlightPaths {
+    let stores = try data.plist(path)["Stores"] as? [String: [String: Any]]
+    #expect(stores?["fixture"]?["PolicyLevel"] as? String == "kMDConfigSearchLevelFSSearchOnly")
+  }
+  try system.mergePlist(
+    "System/Library/LaunchDaemons/malformed.plist", values: ["Program": "/usr/libexec/example"],
+    uid: user, gid: group)
+  #expect(throws: MisoError.self) {
+    try OfflineSystemPolicy.inventory(system: system, data: data, uid: user)
+  }
 }

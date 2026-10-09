@@ -35,7 +35,7 @@ public enum BaseSystemSettings {
     "Library/LaunchDaemons/dev.macos-image.tart-guest-daemon.plist",
     "Library/LaunchAgents/dev.macos-image.tart-guest-agent.plist",
   ]
-  private static let stores = [
+  static let spotlightStores = [
     ("System", "private/var/db/Spotlight-V100/BootVolume"),
     ("Data", ".Spotlight-V100"), ("Preboot", "private/var/db/Spotlight-V100/Preboot"),
   ]
@@ -126,7 +126,7 @@ public enum BaseSystemSettings {
       guard chmod(try data.path("private/var/db/Spotlight-V100").path, 0o700) == 0 else {
         throw MisoError.system("Set Spotlight root mode", errno)
       }
-      for (role, directory) in stores {
+      for (role, directory) in spotlightStores {
         try BuildProgress.run("Disable Spotlight indexing on \(role)") {
           let path = directory + "/VolumeConfiguration.plist"
           guard !(try data.contains(path)) else {

@@ -10,9 +10,11 @@ public enum ImageBundle {
     let changed: [Int]
   }
 
-  static func snapshot(_ directory: URL) throws -> [String: FileState] {
+  static func snapshot(_ directory: URL, files: Set<String> = requiredFiles) throws -> [String:
+    FileState]
+  {
     try Dictionary(
-      uniqueKeysWithValues: requiredFiles.map { name in
+      uniqueKeysWithValues: files.map { name in
         let url = directory.appendingPathComponent(name)
         try SafeFile.requireNoSymlinks(url)
         let info = try FileMetadata.inspect(url)

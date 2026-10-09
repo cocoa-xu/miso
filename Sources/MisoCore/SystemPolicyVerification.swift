@@ -43,13 +43,15 @@ public enum SystemPolicyVerification {
           throw MisoError.invalid("Service skipped offline is registered: \(service.label)")
         }
       }
-      for preference in policy.preferences {
-        let relative = try SafeFile.relativePath(preference.path)
-        let plist = try RestoreInspection.plist(
-          SafeFile.read(URL(fileURLWithPath: "/" + relative), limit: 1 << 20))
-        guard plist[preference.key] as? Bool == preference.value else {
-          throw MisoError.invalid("System preference changed: \(relative)/\(preference.key)")
-        }
+      let autoSubmit =
+        policy.preferences.contains {
+          $0.path == diagnosticHistory && $0.key == "AutoSubmit"
+        } ? try autoSubmitEnabled() : nil
+      let observations = try observePreferences(
+        policy.preferences, root: URL(fileURLWithPath: "/"), autoSubmit: autoSubmit)
+      try journal.setMetadata("preferences", value: observations)
+      for observation in observations where observation.actual != observation.expected {
+        throw MisoError.invalid("System preference changed: \(observation.path)/\(observation.key)")
       }
       if let enabled = policy.policy.settings["spotlightIndexing"] {
         for (index, volume) in ["/", "/System/Volumes/Data"].enumerated() {
@@ -67,6 +69,42 @@ public enum SystemPolicyVerification {
         absentServices: policy.services.filter { $0.status == "not-present" }.count,
         preferences: policy.preferences.count)
     }
+  }
+
+  static let diagnosticHistory =
+    "Library/Application Support/CrashReporter/DiagnosticMessagesHistory.plist"
+
+  struct PreferenceObservation: Encodable {
+    let path: String
+    let key: String
+    let expected: Bool
+    let stored: Bool?
+    let actual: Bool?
+    let source: String
+  }
+
+  static func observePreferences(
+    _ preferences: [OfflineSystemPolicy.Preference], root: URL, autoSubmit: Bool?
+  ) throws -> [PreferenceObservation] {
+    try preferences.map { preference in
+      let relative = try SafeFile.relativePath(preference.path)
+      let plist = try RestoreInspection.plist(
+        SafeFile.read(root.appendingPathComponent(relative), limit: 1 << 20))
+      let stored = plist[preference.key] as? Bool
+      let submission = relative == diagnosticHistory && preference.key == "AutoSubmit"
+      return PreferenceObservation(
+        path: relative, key: preference.key, expected: preference.value, stored: stored,
+        actual: submission ? autoSubmit : stored,
+        source: submission ? "CRIsAutoSubmitEnabled" : "plist")
+    }
+  }
+
+  static func autoSubmitEnabled() throws -> Bool {
+    let library = try NativeLibrary(
+      "/System/Library/PrivateFrameworks/CrashReporterSupport.framework/CrashReporterSupport")
+    let query = unsafeBitCast(
+      try library.symbol("CRIsAutoSubmitEnabled"), to: (@convention(c) () -> Bool).self)
+    return withExtendedLifetime(library) { query() }
   }
 
   static func parseOverrides(_ text: String) -> [String: Bool] {

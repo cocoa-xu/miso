@@ -128,7 +128,7 @@ public enum ImageOptimization {
               name: "policy-system", readOnly: true)
             let preboot = try ImageMounts.mount(
               main.volume(role: "Preboot"), session: session, journal: journal,
-              name: "policy-preboot", readOnly: policy.settings["spotlightIndexing"] == nil)
+              name: "policy-preboot", readOnly: true)
             let account = try BaseImageStage.Account(username, data: data)
             let services =
               try policy.resolvedServices.isEmpty
@@ -136,7 +136,7 @@ public enum ImageOptimization {
               : OfflineSystemPolicy.cryptexInventory(
                 preboot: preboot, uid: account.uid, journal: journal)
             return try OfflineSystemPolicy.apply(
-              policy, system: system, data: data, preboot: preboot,
+              policy, system: system, data: data,
               account: account, cancellation: journal.cancellation, additionalServices: services)
           }
         }

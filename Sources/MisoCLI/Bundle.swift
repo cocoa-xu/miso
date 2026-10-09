@@ -8,7 +8,8 @@ struct Bundle: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     abstract: "Check bundle integrity or validate a VM configuration without creating a VM.",
     subcommands: [
-      Verify.self, VerifySystemPolicy.self, SystemServices.self, Validate.self, Assemble.self,
+      Verify.self, VerifySystemPolicy.self, ConfigureSystem.self, SystemServices.self,
+      Validate.self, Assemble.self,
       Optimize.self,
       ExportTart.self, ImportTart.self,
       Push.self, Pull.self,
@@ -123,6 +124,25 @@ struct Bundle: AsyncParsableCommand {
       try printJSON(
         SystemPolicyVerification.run(
           output: fileURL(output), cancellation: cancellation.token))
+    }
+  }
+
+  struct ConfigureSystem: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Apply system settings to a separate clone of a stopped OCI VM image.")
+    @Argument var directory: String
+    @Option var output: String
+    @Option var profile: String
+    @Option var username = "admin"
+
+    @MainActor func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        SystemPolicyImage.configure(
+          source: fileURL(directory), output: fileURL(output),
+          policy: SystemPolicy.read(fileURL(profile)), username: username,
+          cancellation: cancellation.token))
     }
   }
 

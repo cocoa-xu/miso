@@ -49,6 +49,9 @@ target image's launchd definitions rather than using the host's service list.
 Authentication, code-signing trust, networking, SSH/VNC, local crash reports,
 development automation, WebKit debugging and shared asset services are retained
 by the Slim preset. Disabling optional features can affect apps that use them.
+CoreAnalytics (`analyticsd`) is also retained for local diagnostics. The preset
+disables diagnostic submission services and automatic-sharing preferences instead
+of treating a disabled launchd override as proof that this daemon has stopped.
 
 To apply settings to an existing native bundle, put only `features`, `services`
 and `settings` in `system.yaml`, then run:
@@ -61,6 +64,17 @@ This creates a separate offline clone. Spotlight configuration requires a prepar
 Base image. A construction receipt is stored inside the guest at
 `/Library/Application Support/MISO/system-policy.json`.
 
+For an image downloaded with `miso bundle pull`, apply only the system policy to
+a separate APFS clone. Stop the source VM first:
+
+```sh
+sudo miso bundle configure-system download/vm --profile system.yaml --output configured
+```
+
+The resulting `configured/vm` retains the original installed software and disk
+compression. This operation does not import/export the image or hash the entire
+disk again; it records clone isolation and source file metadata instead.
+
 After booting a disposable acceptance clone, run inside that guest:
 
 ```sh
@@ -70,6 +84,10 @@ sudo miso bundle verify-system-policy --output /tmp/system-policy-verification
 Repeat after reboot and alongside real compiler, simulator and remote-access
 checks. The command checks launchd overrides/running services, retained preference
 values and Spotlight status; it does not replace application-level acceptance.
+Diagnostic consent uses the same `CRIsAutoSubmitEnabled` query as Apple's
+SubmitDiagInfo, because macOS can migrate the stored consent key during startup.
+The verification journal records stored and effective values; an unavailable
+query or unexpected value fails verification.
 
 Service selection draws on [mac-os-debloat](https://github.com/OleksandrKrupko/mac-os-debloat)
 ([MIT notice](../ThirdPartyLicenses/mac-os-debloat.txt)); VM settings were informed
