@@ -61,6 +61,19 @@ import Testing
   #expect(rate.perSecond(now: 140) == 0)
 }
 
+@Test func transferRateKeepsItsWindowDuringFrequentUpdates() {
+  var rate = TransferRate(now: 0)
+  for tick in 1...1200 {
+    rate.record(tick <= 600 ? 1000 : 100, now: Double(tick) / 10)
+  }
+  #expect(rate.bytes == 660_000)
+  #expect(rate.perSecond(now: 120) == 1000)
+  for tick in 1201...1800 {
+    rate.record(0, now: Double(tick) / 10)
+  }
+  #expect(rate.perSecond(now: 180) == 0)
+}
+
 @Test func ociZstdStreamsRejectTruncationTrailingDataAndOversizedOutput() throws {
   let temporary = try TemporaryDirectory()
   defer { temporary.remove() }

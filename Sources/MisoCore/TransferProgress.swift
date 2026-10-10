@@ -8,9 +8,7 @@ struct TransferRate {
 
   mutating func record(_ count: Int64, now: TimeInterval) {
     bytes += max(0, count)
-    if samples.count > 1, now - samples[samples.count - 1].time < 1 {
-      samples[samples.count - 1] = (now, bytes)
-    } else {
+    if let last = samples.last, now - last.time >= 1 {
       samples.append((now, bytes))
     }
     while samples.count > 2, samples[1].time <= now - 60 { samples.removeFirst() }
