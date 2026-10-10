@@ -15,6 +15,11 @@ private final class RegistryFixture: @unchecked Sendable {
   var rejectUpload = false
   var stall = false
   var stallDownload = false
+  var downloadFailures = 0
+  var downloadRanges: [String] = []
+  var ignoreRanges = false
+  var invalidRange = false
+  var expireResumedDownload = false
 
   func respond(_ request: URLRequest) throws -> (Int, [String: String], Data) {
     try lock.withLock {
@@ -71,6 +76,21 @@ private final class RegistryFixture: @unchecked Sendable {
       headers["Content-Length"] = String(data.count)
       headers["Docker-Content-Digest"] = url.lastPathComponent
       if method == "HEAD" { return (200, headers, empty) }
+      let range = request.value(forHTTPHeaderField: "Range")
+      downloadRanges.append(range ?? "none")
+      if range != nil, expireResumedDownload {
+        expireResumedDownload = false
+        return (401, [:], empty)
+      }
+      if let range, !ignoreRanges {
+        let offset = Int(range.dropFirst(6).dropLast())!
+        headers["Content-Range"] =
+          invalidRange
+          ? "bytes 0-\(data.count - 1)/\(data.count)"
+          : "bytes \(offset)-\(data.count - 1)/\(data.count)"
+        headers["Content-Length"] = String(data.count - offset)
+        return (206, headers, Data(data.dropFirst(offset)))
+      }
       return (200, headers, corruptDownload ? Data(repeating: 1, count: data.count) : data)
     }
   }
@@ -105,6 +125,23 @@ private final class RegistryProtocol: URLProtocol, @unchecked Sendable {
       let response = HTTPURLResponse(
         url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
       client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      let disconnect = fixture.lock.withLock {
+        guard fixture.downloadFailures > 0, [200, 206].contains(status),
+          request.url!.path.contains("/blobs/")
+        else {
+          return false
+        }
+        fixture.downloadFailures -= 1
+        return true
+      }
+      if disconnect {
+        client?.urlProtocol(self, didLoad: data.prefix(64 << 10))
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
+          guard let self else { return }
+          self.client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+        }
+        return
+      }
       if fixture.lock.withLock({ fixture.stallDownload }), request.url!.path.contains("/blobs/") {
         client?.urlProtocol(self, didLoad: data.prefix(64 << 10))
         return
@@ -118,6 +155,73 @@ private final class RegistryProtocol: URLProtocol, @unchecked Sendable {
 }
 
 @Suite(.serialized) struct OCITransferTests {
+  @Test(arguments: [false, true])
+  func interruptedDownloadsResumeWithoutRepeatingBytes(expireToken: Bool) async throws {
+    let temporary = try TemporaryDirectory()
+    defer { temporary.remove() }
+    let (fixture, configuration) = setup()
+    let bytes = Data((0..<(1 << 20)).map { UInt8($0 % 251) })
+    let blob = OCIDescriptor(
+      mediaType: OCIManifest.nvramType, size: UInt64(bytes.count),
+      digest: "sha256:" + SafeFile.sha256(bytes))
+    fixture.blobs[blob.digest] = bytes
+    fixture.downloadFailures = 2
+    fixture.expireResumedDownload = expireToken
+    let registry = try OCIRegistry(
+      reference: OCIReference("ghcr.io/fixture/image:test"), username: nil, password: nil,
+      pushing: false, cancellation: CancellationToken(), configuration: configuration)
+    let progress = TransferProgress("Test", total: Int64(blob.size))
+    let destination = temporary.url.appendingPathComponent("blob")
+    let id = UUID()
+    try await registry.retry(progress: nil, id: id, sleep: { _ in }) {
+      try await registry.download(blob, to: destination, progress: progress, id: id)
+    }
+    #expect(try SafeFile.read(destination, limit: bytes.count) == bytes)
+    #expect(progress.transferredBytes == blob.size)
+    #expect(
+      fixture.downloadRanges
+        == (expireToken
+          ? ["none", "bytes=65536-", "bytes=65536-", "bytes=131072-"]
+          : ["none", "bytes=65536-", "bytes=131072-"]))
+    #expect(
+      !FileManager.default.fileExists(atPath: destination.appendingPathExtension("partial").path))
+  }
+
+  @Test(arguments: [false, true])
+  func resumedDownloadHandlesIgnoredOrInvalidRanges(invalid: Bool) async throws {
+    let temporary = try TemporaryDirectory()
+    defer { temporary.remove() }
+    let (fixture, configuration) = setup()
+    let bytes = Data(repeating: 3, count: 1 << 20)
+    let blob = OCIDescriptor(
+      mediaType: OCIManifest.nvramType, size: UInt64(bytes.count),
+      digest: "sha256:" + SafeFile.sha256(bytes))
+    fixture.blobs[blob.digest] = bytes
+    fixture.downloadFailures = 1
+    fixture.ignoreRanges = !invalid
+    fixture.invalidRange = invalid
+    let registry = try OCIRegistry(
+      reference: OCIReference("ghcr.io/fixture/image:test"), username: nil, password: nil,
+      pushing: false, cancellation: CancellationToken(), configuration: configuration)
+    let progress = TransferProgress("Test", total: Int64(blob.size))
+    let destination = temporary.url.appendingPathComponent("blob")
+    let id = UUID()
+    do {
+      try await registry.retry(progress: nil, id: id, sleep: { _ in }) {
+        try await registry.download(blob, to: destination, progress: progress, id: id)
+      }
+      #expect(!invalid)
+      #expect(try SafeFile.read(destination, limit: bytes.count) == bytes)
+      #expect(progress.transferredBytes == blob.size + (64 << 10))
+    } catch is MisoError {
+      #expect(invalid)
+      #expect(!FileManager.default.fileExists(atPath: destination.path))
+    }
+    #expect(fixture.downloadRanges == ["none", "bytes=65536-"])
+    #expect(
+      !FileManager.default.fileExists(atPath: destination.appendingPathExtension("partial").path))
+  }
+
   @Test func downloadReportsBytesBeforeTheLayerCompletes() async throws {
     let temporary = try TemporaryDirectory()
     defer { temporary.remove() }
@@ -156,11 +260,13 @@ private final class RegistryProtocol: URLProtocol, @unchecked Sendable {
     let session = URLSession(configuration: .ephemeral)
     defer { session.invalidateAndCancel() }
     let origin = URL(string: "https://ghcr.io/v2/fixture/image/blobs/sha256:test")!
-    let task = session.dataTask(with: origin)
+    var original = URLRequest(url: origin)
+    original.setValue("bytes=65536-", forHTTPHeaderField: "Range")
+    let task = session.dataTask(with: original)
     let response = HTTPURLResponse(
       url: origin, statusCode: 307, httpVersion: "HTTP/1.1", headerFields: nil)!
     let observer = OCIRegistry.Observer(
-      blobRedirects: true, progress: nil, id: UUID(), maximumBytes: 1024)
+      blobRedirects: true, progress: nil, id: UUID())
     for destination in [
       "https://pkg-containers.githubusercontent.com/blob", "https://example.com/blob",
       "http://ghcr.io/blob",
@@ -177,6 +283,7 @@ private final class RegistryProtocol: URLProtocol, @unchecked Sendable {
       if destination.contains("pkg-containers") {
         #expect(redirected != nil)
         #expect(redirected?.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(redirected?.value(forHTTPHeaderField: "Range") == "bytes=65536-")
       } else {
         #expect(redirected == nil)
       }
@@ -251,6 +358,7 @@ private final class RegistryProtocol: URLProtocol, @unchecked Sendable {
       username: "fixture", password: "secret", configuration: configuration)
     #expect(repeated.skippedBlobs == firstUploads)
     #expect(fixture.lock.withLock { fixture.uploads } == firstUploads)
+    fixture.lock.withLock { fixture.downloadFailures = 2 }
     let output = temporary.url.appendingPathComponent("pull")
     let downloaded = try await OCITransfer.pull(
       reference: repeated.reference, output: output, configuration: configuration)

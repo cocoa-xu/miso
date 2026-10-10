@@ -155,7 +155,7 @@ public enum OCITransfer {
         let id = UUID()
         let file = blob.file(in: blobs)
         try Artifacts.requireSpace(blob.size, at: blobs)
-        try await registry.retry(progress: progress, id: id) {
+        try await registry.retry(progress: nil, id: id) {
           try await registry.download(blob, to: file, progress: progress, id: id)
         }
         defer { try? FileManager.default.removeItem(at: file) }

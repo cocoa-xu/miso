@@ -15,22 +15,17 @@ final class OCIRegistry: @unchecked Sendable {
     let http: HTTPURLResponse
   }
 
-  class Observer: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+  class Observer: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     let blobRedirects: Bool
     let progress: TransferProgress?
     let id: UUID
-    let maximumBytes: Int64
     private let lock = NSLock()
     private var redirects = 0
-    private var exceeded = false
 
-    var exceededLimit: Bool { lock.withLock { exceeded } }
-
-    init(blobRedirects: Bool, progress: TransferProgress?, id: UUID, maximumBytes: Int64) {
+    init(blobRedirects: Bool, progress: TransferProgress?, id: UUID) {
       self.blobRedirects = blobRedirects
       self.progress = progress
       self.id = id
-      self.maximumBytes = maximumBytes
     }
 
     func urlSession(
@@ -51,6 +46,10 @@ final class OCIRegistry: @unchecked Sendable {
         return
       }
       var forwarded = request
+      if let range = task.originalRequest?.value(forHTTPHeaderField: "Range") {
+        forwarded.setValue(range, forHTTPHeaderField: "Range")
+        forwarded.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+      }
       if url.host != "ghcr.io" { forwarded.setValue(nil, forHTTPHeaderField: "Authorization") }
       completionHandler(forwarded)
     }
@@ -60,86 +59,6 @@ final class OCIRegistry: @unchecked Sendable {
       totalBytesSent: Int64, totalBytesExpectedToSend: Int64
     ) { progress?.update(id, bytes: totalBytesSent) }
 
-    func urlSession(
-      _ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
-      totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
-    ) {
-      guard (downloadTask.response as? HTTPURLResponse)?.statusCode == 200 else { return }
-      if totalBytesWritten > maximumBytes || totalBytesExpectedToWrite > maximumBytes {
-        lock.withLock { exceeded = true }
-        downloadTask.cancel()
-      }
-      progress?.update(id, bytes: totalBytesWritten)
-    }
-
-    func urlSession(
-      _ session: URLSession, downloadTask: URLSessionDownloadTask,
-      didFinishDownloadingTo location: URL
-    ) {}
-  }
-
-  private final class Download: Observer, @unchecked Sendable {
-    let destination: URL
-    private let completionLock = NSLock()
-    private var continuation: CheckedContinuation<HTTPURLResponse, any Error>?
-    private var result: Result<HTTPURLResponse, any Error>?
-    private var fileError: (any Error)?
-    private var moved = false
-
-    init(destination: URL, progress: TransferProgress, id: UUID, maximumBytes: Int64) {
-      self.destination = destination
-      super.init(blobRedirects: true, progress: progress, id: id, maximumBytes: maximumBytes)
-    }
-
-    func start(_ task: URLSessionDownloadTask) async throws -> HTTPURLResponse {
-      try await withTaskCancellationHandler {
-        try await withCheckedThrowingContinuation { continuation in
-          let result = completionLock.withLock {
-            self.continuation = continuation
-            return self.result
-          }
-          if let result { continuation.resume(with: result) }
-          task.resume()
-        }
-      } onCancel: {
-        task.cancel()
-      }
-    }
-
-    override func urlSession(
-      _ session: URLSession, downloadTask: URLSessionDownloadTask,
-      didFinishDownloadingTo location: URL
-    ) {
-      guard (downloadTask.response as? HTTPURLResponse)?.statusCode == 200 else { return }
-      do {
-        guard try FileMetadata.inspect(location).st_size <= maximumBytes else {
-          throw MisoError.invalid("Downloaded OCI blob exceeds its declared size")
-        }
-        try FileManager.default.moveItem(at: location, to: destination)
-        moved = true
-      } catch { fileError = error }
-    }
-
-    func urlSession(
-      _ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?
-    ) {
-      let result: Result<HTTPURLResponse, any Error>
-      if let error = fileError ?? error {
-        result = .failure(error)
-      } else if let response = task.response as? HTTPURLResponse {
-        result = .success(response)
-      } else {
-        result = .failure(MisoError.invalid("Invalid GHCR response"))
-      }
-      if case .failure = result, moved { try? FileManager.default.removeItem(at: destination) }
-      let continuation = completionLock.withLock {
-        self.result = result
-        let continuation = self.continuation
-        self.continuation = nil
-        return continuation
-      }
-      continuation?.resume(with: result)
-    }
   }
 
   let reference: OCIReference
@@ -231,8 +150,7 @@ final class OCIRegistry: @unchecked Sendable {
   ) async throws -> Response {
     try cancellation.check()
     let observer = Observer(
-      blobRedirects: request.httpMethod == "HEAD", progress: progress, id: id,
-      maximumBytes: 16 << 20)
+      blobRedirects: request.httpMethod == "HEAD", progress: progress, id: id)
     do {
       let (bytes, response): (Data, URLResponse) = try await cancellable {
         if let file {
@@ -256,38 +174,48 @@ final class OCIRegistry: @unchecked Sendable {
   func download(
     _ blob: OCIDescriptor, to file: URL, progress: TransferProgress, id: UUID
   ) async throws {
-    if lock.withLock({ token == nil }) { try await authenticate() }
-    for attempt in 0...1 {
-      var request = URLRequest(url: reference.url("blobs/\(blob.digest)"))
-      request.setValue(
-        lock.withLock { "Bearer " + (token ?? "") }, forHTTPHeaderField: "Authorization")
-      request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
-      let observer = Download(
-        destination: file, progress: progress, id: id, maximumBytes: Int64(blob.size))
-      let task = session.downloadTask(with: request)
-      task.delegate = observer
-      let http: HTTPURLResponse
-      do {
-        http = try await cancellable { try await observer.start(task) }
-      } catch let error as URLError {
-        try cancellation.check()
-        if observer.exceededLimit {
-          throw MisoError.invalid("Downloaded OCI blob exceeds its declared size")
+    let partial = file.appendingPathExtension("partial")
+    do {
+      if lock.withLock({ token == nil }) { try await authenticate() }
+      for attempt in 0...1 {
+        let observer = try OCIBlobDownload(
+          destination: partial, progress: progress, id: id, maximumBytes: Int64(blob.size))
+        if observer.offset == Int64(blob.size) {
+          try observer.close()
+          try cancellation.check()
+          try FileManager.default.moveItem(at: partial, to: file)
+          return
         }
-        throw OCIRegistryError(status: error.errorCode, retryAfter: 2)
+        var request = URLRequest(url: reference.url("blobs/\(blob.digest)"))
+        request.setValue(
+          lock.withLock { "Bearer " + (token ?? "") }, forHTTPHeaderField: "Authorization")
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        if observer.offset > 0 {
+          request.setValue("bytes=\(observer.offset)-", forHTTPHeaderField: "Range")
+          BuildProgress.write(
+            "Resume OCI blob \(blob.digest.prefix(19)) at \(TransferProgress.size(Double(observer.offset))) / \(TransferProgress.size(Double(blob.size)))"
+          )
+        }
+        let task = session.dataTask(with: request)
+        task.delegate = observer
+        do {
+          try await cancellable { try await observer.start(task) }
+        } catch let error as URLError {
+          try cancellation.check()
+          throw OCIRegistryError(status: error.errorCode, retryAfter: 2)
+        } catch let error as OCIRegistryError where error.status == 401 && attempt == 0 {
+          try await authenticate()
+          continue
+        }
+        try cancellation.check()
+        try FileManager.default.moveItem(at: partial, to: file)
+        return
       }
-      if http.statusCode == 401, attempt == 0 {
-        progress.reset(id)
-        try await authenticate()
-        continue
+    } catch {
+      if !((error as? OCIRegistryError)?.retryable ?? false) {
+        try? FileManager.default.removeItem(at: partial)
       }
-      try require(http, codes: [200])
-      guard try FileMetadata.inspect(file).st_size == Int64(blob.size) else {
-        try? FileManager.default.removeItem(at: file)
-        throw MisoError.invalid("Downloaded OCI blob size differs from manifest")
-      }
-      progress.update(id, bytes: Int64(blob.size))
-      return
+      throw error
     }
   }
 
