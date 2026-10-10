@@ -37,6 +37,20 @@ private func xcodeFixture(_ root: URL, minimum: String = "26.6") throws -> URL {
   return app
 }
 
+@Test func xcodeArchiveAcceptsBetaBundleNamesAndRejectsAmbiguousContents() throws {
+  let directory = try TemporaryDirectory()
+  defer { directory.remove() }
+  let app = try xcodeFixture(directory.url)
+  #expect(try XcodeArchive.extractedApplication(in: directory.url).path == app.path)
+  let beta = directory.url.appendingPathComponent("Xcode-beta.app")
+  try FileManager.default.moveItem(at: app, to: beta)
+  #expect(try XcodeArchive.extractedApplication(in: directory.url).path == beta.path)
+  try FileManager.default.createSymbolicLink(at: app, withDestinationURL: beta)
+  #expect(throws: MisoError.self) { try XcodeArchive.extractedApplication(in: directory.url) }
+  try FileManager.default.removeItem(at: beta)
+  #expect(throws: (any Error).self) { try XcodeArchive.extractedApplication(in: directory.url) }
+}
+
 @Test func xcodeArchiveInspectionRequiresEveryConfiguredSDK() throws {
   let directory = try TemporaryDirectory()
   defer { directory.remove() }

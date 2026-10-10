@@ -107,9 +107,9 @@ public enum XcodeArchive {
       NativeCommand(
         .xip, arguments: ["--expand", archive.path], timeout: 3600,
         workingDirectory: expanded))
-    guard try FileManager.default.contentsOfDirectory(atPath: expanded.path) == ["Xcode.app"]
-    else { throw MisoError.invalid("Unexpected Xcode archive contents") }
+    let extracted = try extractedApplication(in: expanded)
     let app = expanded.appendingPathComponent("Xcode.app")
+    if extracted.path != app.path { try FileManager.default.moveItem(at: extracted, to: app) }
     try AppleCode.validate(app)
     try journal.run(
       "verify-xcode-signature",
@@ -124,6 +124,20 @@ public enum XcodeArchive {
       runtimeVerified: false, vmStarted: false)
     try SafeFile.writeNew(JSON.encode(receipt), to: output.appendingPathComponent("archive.json"))
     return receipt
+  }
+
+  static func extractedApplication(in directory: URL) throws -> URL {
+    let names = try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted()
+    guard names.count == 1, let name = names.first,
+      ["Xcode.app", "Xcode-beta.app"].contains(name)
+    else {
+      throw MisoError.invalid("Unexpected Xcode archive contents: \(names.joined(separator: ", "))")
+    }
+    let app = try GuestVolume(directory).directory(name).url
+    guard try GuestVolume(app).plist("Contents/Info.plist")["CFBundleIdentifier"] as? String
+      == "com.apple.dt.Xcode"
+    else { throw MisoError.invalid("Archive does not contain an Xcode application") }
+    return app
   }
 
   static func inspect(
