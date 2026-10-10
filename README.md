@@ -55,6 +55,10 @@ sudo "$(command -v miso)" base build --source vanilla/assembled/bundle \
 Use `miso base --help` for input preparation and `miso xcode --help` for Xcode,
 SDK and Simulator installation. Each subcommand provides its own `--help`.
 
+Use `miso xcode complete --refresh-existing` with the original `--config`,
+`--source` and a new `--output` to refresh a completed, never-booted Xcode image
+without downloading or reinstalling its components.
+
 Final images automatically compress eligible installed files and reclaim unused
 APFS blocks. To optimize an existing, trusted MISO bundle into a new clone:
 

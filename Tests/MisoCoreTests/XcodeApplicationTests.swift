@@ -65,7 +65,7 @@ import Testing
     try BaseImageStage.advanceManifest(
       &manifest, operation: "xcode-android", layer: .xcode, reapply: true)
   }
-  for operation in ["xcode-application", "xcode-packages", "xcode-finalize"] {
+  for operation in ["xcode-application", "xcode-packages"] {
     var invalid = original
     #expect(throws: MisoError.self) {
       try BaseImageStage.advanceManifest(

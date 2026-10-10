@@ -23,6 +23,8 @@ struct Xcode: AsyncParsableCommand {
     @Option var output: String
     @Option var config: String?
     @Option var username = "admin"
+    @Flag(help: "Refresh configuration on an already completed, never-booted Xcode image.")
+    var refreshExisting = false
 
     @MainActor func run() async throws {
       let cancellation = try CancellationScope()
@@ -33,7 +35,8 @@ struct Xcode: AsyncParsableCommand {
           configuration: try config.map {
             try JSON.read(XcodeConfiguration.self, from: fileURL($0))
           }
-            ?? .init(), username: username, cancellation: cancellation.token))
+            ?? .init(), username: username, refreshExisting: refreshExisting,
+          cancellation: cancellation.token))
     }
   }
 

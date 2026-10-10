@@ -133,12 +133,12 @@ enum BaseImageStage {
         reapply || manifest["xcode_complete"] as? Bool != true, operation.hasPrefix("xcode-")
       else { throw MisoError.invalid("Xcode construction requires a complete Base source") }
       if reapply {
-        guard operation == "xcode-android",
+        guard ["xcode-android", "xcode-finalize"].contains(operation),
           manifest["xcode_complete"] as? Bool == true,
           manifest["xcode_configuration"] is [String: Any],
           let stages = manifest["xcode_stages"] as? [String],
           stages.contains(operation), stages.contains("xcode-finalize")
-        else { throw MisoError.invalid("Android replacement requires a completed Xcode source") }
+        else { throw MisoError.invalid("Xcode refresh requires a completed source") }
         manifest["xcode_stages"] = stages.filter { $0 != operation && $0 != "xcode-finalize" }
       }
       manifest["xcode_complete"] = false

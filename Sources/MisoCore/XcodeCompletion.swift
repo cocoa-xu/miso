@@ -16,6 +16,7 @@ public enum XcodeCompletion {
     public let developerDisks: [DeveloperDisk]
     let trimming: IntelTrimming.Receipt?
     public let removedSDKs: [String]
+    public let platformSDKBuilds: [String: String]
     public let firstLaunchRuntimeVerified = false
   }
 
@@ -30,13 +31,15 @@ public enum XcodeCompletion {
   @MainActor
   public static func run(
     source: URL, output: URL, configuration: XcodeConfiguration = .init(),
-    username: String = "admin",
+    username: String = "admin", refreshExisting: Bool = false,
     cancellation: CancellationToken? = nil
   ) throws -> Receipt {
     try configuration.validate()
     let sourceData = try SafeFile.read(
       source.appendingPathComponent("manifest.json"), limit: 1 << 20)
-    try requireStages(sourceData, configuration: configuration, finalized: false)
+    try requireStages(
+      sourceData, configuration: configuration, finalized: refreshExisting,
+      completed: refreshExisting)
     let sourceManifest = try JSONSerialization.jsonObject(with: sourceData) as! [String: Any]
     let previousConfiguration = try sourceManifest["xcode_configuration"].map {
       try JSONDecoder().decode(
@@ -55,8 +58,9 @@ public enum XcodeCompletion {
       let image = try BaseImageStage.run(
         source: source, output: output.appendingPathComponent("image"),
         operation: "xcode-finalize", layer: .xcode, cancellation: journal.cancellation,
-        optimizationUsername: username, xcodeApplication: configuration.applicationPath,
-        optimizationProfile: configuration.buildProfile
+        optimizationUsername: refreshExisting ? nil : username,
+        xcodeApplication: configuration.applicationPath,
+        optimizationProfile: configuration.buildProfile, reapply: refreshExisting
       ) { bundle, target, stage in
         let session = try DiskImageSession(
           image: bundle.appendingPathComponent("disk.img"), readOnly: false, journal: stage)
@@ -88,8 +92,13 @@ public enum XcodeCompletion {
           let removed = try BuildProgress.run("Remove excluded Xcode SDKs") {
             try removeExcludedSDKs(data, configuration: configuration)
           }
+          let platformSDKBuilds = try BuildProgress.run("Configure Xcode platform selection") {
+            try XcodePlatformPreferences.install(
+              data: data, application: app, sdks: application.sdks,
+              configuration: configuration, username: username)
+          }
           let trimming: IntelTrimming.Receipt?
-          if configuration.profile?.trimIntel == true {
+          if configuration.profile?.trimIntel == true && !refreshExisting {
             trimming = try BuildProgress.run("Trim Intel architectures, preserving ARM signatures")
             {
               try IntelTrimming.run(
@@ -104,7 +113,7 @@ public enum XcodeCompletion {
           }
           return Details(
             configuration: configuration, application: application, developerDisks: disks,
-            trimming: trimming, removedSDKs: removed)
+            trimming: trimming, removedSDKs: removed, platformSDKBuilds: platformSDKBuilds)
         }
       }
       let bundle = output.appendingPathComponent("image/bundle")
@@ -157,7 +166,7 @@ public enum XcodeCompletion {
   }
 
   static func requireStages(
-    _ data: Data, configuration: XcodeConfiguration, finalized: Bool
+    _ data: Data, configuration: XcodeConfiguration, finalized: Bool, completed: Bool = false
   ) throws {
     var expected = requiredStages(configuration)
     if finalized { expected.insert("xcode-finalize") }
@@ -165,7 +174,7 @@ public enum XcodeCompletion {
       manifest["base_complete"] as? Bool == true,
       manifest["construction_vm_started"] as? Bool == false,
       manifest["runtime_verified"] as? Bool == false,
-      manifest["xcode_complete"] as? Bool == false,
+      manifest["xcode_complete"] as? Bool == completed,
       let stages = manifest["xcode_stages"] as? [String]
     else { throw MisoError.invalid("Incomplete or previously booted Xcode image") }
     if stages.contains("xcode-homebrew") { expected.insert("xcode-homebrew") }

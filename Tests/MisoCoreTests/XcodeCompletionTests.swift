@@ -4,6 +4,36 @@ import Testing
 
 @testable import MisoCore
 
+@Test func xcodeRefreshRequiresCompleteUnbootedSourceAndPreservesExistingLayers() throws {
+  let configuration = XcodeConfiguration()
+  let stages = XcodeCompletion.requiredStages(configuration).sorted() + ["xcode-finalize"]
+  let original: [String: Any] = [
+    "base_complete": true, "construction_vm_started": false, "runtime_verified": false,
+    "xcode_complete": true, "xcode_stages": stages,
+    "xcode_configuration": try JSONSerialization.jsonObject(with: JSON.encode(configuration)),
+  ]
+  try XcodeCompletion.requireStages(
+    JSONSerialization.data(withJSONObject: original), configuration: configuration,
+    finalized: true, completed: true)
+  var refreshed = original
+  try BaseImageStage.advanceManifest(
+    &refreshed, operation: "xcode-finalize", layer: .xcode, reapply: true)
+  #expect(refreshed["xcode_stages"] as? [String] == stages)
+  #expect(refreshed["xcode_complete"] as? Bool == false)
+  #expect(
+    refreshed["xcode_configuration"] as? NSDictionary == original["xcode_configuration"]
+      as? NSDictionary)
+  for key in ["base_complete", "construction_vm_started", "runtime_verified", "xcode_complete"] {
+    var invalid = original
+    invalid[key] = !(original[key] as! Bool)
+    #expect(throws: MisoError.self) {
+      try XcodeCompletion.requireStages(
+        JSONSerialization.data(withJSONObject: invalid), configuration: configuration,
+        finalized: true, completed: true)
+    }
+  }
+}
+
 @Test func xcodeCompletionRequiresEveryConfiguredLayerWithoutDuplicateOrBootedStages() throws {
   let configuration = XcodeConfiguration()
   let stages = XcodeCompletion.requiredStages(configuration).sorted()
