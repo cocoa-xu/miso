@@ -9,7 +9,7 @@ struct Base: AsyncParsableCommand {
       Defaults.self, Prepare.self, Resolve.self, Archive.self, Static.self, Bootstrap.self,
       Bottles.self,
       Ruby.self, Packages.self, Taps.self, GCM.self, Runner.self, Security.self, Settings.self,
-      CA.self, PrepareParent.self,
+      CA.self, PrepareParent.self, PreparePolicy.self,
       Cleanup.self, Recipe.self, Build.self,
     ])
 
@@ -25,6 +25,24 @@ struct Base: AsyncParsableCommand {
       try printJSON(
         BaseParentInputs.run(
           source: fileURL(source), output: fileURL(output), cancellation: cancellation.token))
+    }
+  }
+
+  struct PreparePolicy: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+      abstract: "Bind reviewed Base policy templates to an unbooted Vanilla image.")
+    @Option var source: String
+    @Option var security: String
+    @Option var settings: String
+    @Option var output: String
+
+    @MainActor func run() async throws {
+      let cancellation = try CancellationScope()
+      defer { withExtendedLifetime(cancellation) {} }
+      try printJSON(
+        BasePolicyPreparation.run(
+          source: fileURL(source), security: fileURL(security), settings: fileURL(settings),
+          output: fileURL(output), cancellation: cancellation.token))
     }
   }
 

@@ -132,6 +132,26 @@ public struct RestoreProfile: Codable, Equatable, Sendable {
       ipswSHA256: "2f016638293c3e641b8b25391a76fbc16563b3711915a5551cf8aa0f5598a5c1",
       commandLineTools: .init(
         product: "082-83364", version: "27.0.0.0.1788430756", sdk: "MacOSX27.0.sdk")),
+    Self(
+      release: .init(version: "26.6.1", build: "25G76"), family: .tahoe,
+      ipswSHA256: "ebea9fbe4afd84eed0a4f9673b75cd0f46e15576e01615026368b6e5f1af0f03",
+      commandLineTools: .init(
+        product: "140-17812", version: "26.6.0.0.1781586589", sdk: "MacOSX26.5.sdk")),
+    Self(
+      release: .init(version: "26.6", build: "25G72"), family: .tahoe,
+      ipswSHA256: "a8d59bdec11a16f704c1a41edc86461c77e71c790ac834a05266b9670287142c",
+      commandLineTools: .init(
+        product: "140-17812", version: "26.6.0.0.1781586589", sdk: "MacOSX26.5.sdk")),
+    Self(
+      release: .init(version: "26.5.2", build: "25F84"), family: .tahoe,
+      ipswSHA256: "065abd295a1a456a46c1155217eab92ee95816520ec9aeed83f249f074f68a04",
+      commandLineTools: .init(
+        product: "140-17812", version: "26.6.0.0.1781586589", sdk: "MacOSX26.5.sdk")),
+    Self(
+      release: .init(version: "26.5.1", build: "25F80"), family: .tahoe,
+      ipswSHA256: "83f53dc7f9cce465ba88dd487bda74ce60c5582fcd45251eeeb9aea7f5a72f4d",
+      commandLineTools: .init(
+        product: "140-17812", version: "26.6.0.0.1781586589", sdk: "MacOSX26.5.sdk")),
   ]
 
   public static func select(_ release: MacOSRelease) throws -> Self {
