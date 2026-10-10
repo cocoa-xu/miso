@@ -155,14 +155,92 @@ private func bottleIndex(annotations changes: [String: String] = [:], duplicate:
   ])
   let tab: JSONValue = .object(["runtime_dependencies": .array([dependency])])
   try HomebrewBottleInputs.validateDependencies(
-    tab, formulae: ["example": formula], selected: ["example"])
+    tab, bottle: "consumer", formulae: ["example": formula], selected: ["example"])
   #expect(throws: (any Error).self) {
-    try HomebrewBottleInputs.validateDependencies(tab, formulae: ["example": formula], selected: [])
+    try HomebrewBottleInputs.validateDependencies(
+      tab, bottle: "consumer", formulae: ["example": formula], selected: [])
   }
   try HomebrewBottleInputs.validateDependencies(
-    tab, formulae: ["example": bottleFormula()], selected: ["example"])
+    tab, bottle: "consumer", formulae: ["example": bottleFormula()], selected: ["example"])
   #expect(throws: (any Error).self) {
-    try HomebrewBottleInputs.validateDependencies(.object([:]), formulae: [:], selected: [])
+    try HomebrewBottleInputs.validateDependencies(
+      .object([:]), bottle: "consumer", formulae: [:], selected: [])
+  }
+}
+
+@Test func bottleRuntimeDependenciesAllowRetiredIndirectDependencies() throws {
+  let tab: JSONValue = .object([
+    "runtime_dependencies": .array([
+      .object([
+        "full_name": .string("libimobiledevice"), "version": .string("1.4.0"),
+        "revision": .integer(0), "declared_directly": .bool(true),
+        "compatibility_version": .integer(1),
+      ]),
+      .object([
+        "full_name": .string("openssl@3"), "version": .string("3.6.5"),
+        "revision": .integer(0), "declared_directly": .bool(false),
+        "compatibility_version": .integer(1),
+      ]),
+    ])
+  ])
+  let formulae = [
+    "libimobiledevice": bottleFormula(name: "libimobiledevice", version: "1.4.0"),
+    "openssl@4": bottleFormula(name: "openssl@4", version: "4.0.3"),
+  ]
+  try HomebrewBottleInputs.validateDependencies(
+    tab, bottle: "ideviceinstaller", formulae: formulae, selected: Set(formulae.keys),
+    compatibilityVersions: ["libimobiledevice": 1], directDependencies: ["libimobiledevice"])
+  #expect(
+    throws: MisoError.unsupported(
+      "Bottle ideviceinstaller dependency openssl@3: absent from resolved formulae")
+  ) {
+    try HomebrewBottleInputs.validateDependencies(
+      tab, bottle: "ideviceinstaller", formulae: formulae, selected: Set(formulae.keys),
+      directDependencies: ["openssl@3"])
+  }
+}
+
+@Test func bottleRuntimeDependenciesNameMissingDirectAndLegacyRequirements() throws {
+  for declaration in [JSONValue.bool(true), nil] {
+    var dependency: [String: JSONValue] = [
+      "full_name": .string("openssl@3"), "version": .string("3.6.5"),
+      "revision": .integer(0),
+    ]
+    dependency["declared_directly"] = declaration
+    let tab: JSONValue = .object(["runtime_dependencies": .array([.object(dependency)])])
+    #expect(
+      throws: MisoError.unsupported(
+        "Bottle ideviceinstaller dependency openssl@3: absent from resolved formulae")
+    ) {
+      try HomebrewBottleInputs.validateDependencies(
+        tab, bottle: "ideviceinstaller", formulae: [:], selected: [])
+    }
+    #expect(
+      throws: MisoError.unsupported(
+        "Bottle ideviceinstaller dependency openssl@3: absent from selected dependency closure")
+    ) {
+      try HomebrewBottleInputs.validateDependencies(
+        tab, bottle: "ideviceinstaller", formulae: ["openssl@3": bottleFormula()], selected: [])
+    }
+  }
+}
+
+@Test func bottleRuntimeDependenciesValidateIndirectMetadata() throws {
+  for (field, value, reason) in [
+    ("declared_directly", JSONValue.string("false"), "invalid declared_directly value"),
+    ("compatibility_version", .integer(-1), "invalid compatibility version"),
+    ("revision", .integer(-1), "invalid version or revision"),
+  ] {
+    var dependency: [String: JSONValue] = [
+      "full_name": .string("openssl@3"), "version": .string("3.6.5"),
+      "revision": .integer(0), "declared_directly": .bool(false),
+    ]
+    dependency[field] = value
+    #expect(throws: MisoError.invalid("Bottle ideviceinstaller dependency openssl@3: \(reason)")) {
+      try HomebrewBottleInputs.validateDependencies(
+        .object(["runtime_dependencies": .array([.object(dependency)])]),
+        bottle: "ideviceinstaller", formulae: [:], selected: [])
+    }
   }
 }
 
@@ -256,10 +334,12 @@ private func bottleIndex(annotations changes: [String: String] = [:], duplicate:
   let tab: JSONValue = .object(["runtime_dependencies": .array([dependency])])
   let formulae = ["example": bottleFormula()]
   try HomebrewBottleInputs.validateDependencies(
-    tab, formulae: formulae, selected: ["example"], compatibilityVersions: ["example": 5])
+    tab, bottle: "consumer", formulae: formulae, selected: ["example"],
+    compatibilityVersions: ["example": 5])
   #expect(throws: MisoError.self) {
     try HomebrewBottleInputs.validateDependencies(
-      tab, formulae: formulae, selected: ["example"], compatibilityVersions: ["example": 6])
+      tab, bottle: "consumer", formulae: formulae, selected: ["example"],
+      compatibilityVersions: ["example": 6])
   }
   let target = RestoreProfile.supported[0].release
   #expect(
@@ -288,18 +368,18 @@ private func bottleIndex(annotations changes: [String: String] = [:], duplicate:
   }
   let formulae = ["example": bottleFormula()]
   try HomebrewBottleInputs.validateDependencies(
-    tab(.bool(false)), formulae: formulae, selected: ["example"],
+    tab(.bool(false)), bottle: "consumer", formulae: formulae, selected: ["example"],
     compatibilityVersions: ["example": 6])
   for declaration in [JSONValue.bool(true), .string("false")] {
     #expect(throws: MisoError.self) {
       try HomebrewBottleInputs.validateDependencies(
-        tab(declaration), formulae: formulae, selected: ["example"],
+        tab(declaration), bottle: "consumer", formulae: formulae, selected: ["example"],
         compatibilityVersions: ["example": 6])
     }
   }
   #expect(throws: MisoError.self) {
     try HomebrewBottleInputs.validateDependencies(
-      tab(.bool(false)), formulae: formulae, selected: ["example"],
+      tab(.bool(false)), bottle: "consumer", formulae: formulae, selected: ["example"],
       compatibilityVersions: ["example": 6], directDependencies: ["example"])
   }
 }

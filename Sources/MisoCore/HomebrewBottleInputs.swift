@@ -157,7 +157,7 @@ public enum HomebrewBottleInputs {
       let tab = try parseIndex(
         SafeFile.read(indexURL, limit: 8 << 20), formula: formula, bytes: archive.bytes)
       try validateDependencies(
-        tab, formulae: resolved.receipt.formulae, selected: selected,
+        tab, bottle: name, formulae: resolved.receipt.formulae, selected: selected,
         compatibilityVersions: resolved.compatibilityVersions,
         directDependencies: Set(formula.dependencies))
       let entries: [TarPayload.Entry]
@@ -211,35 +211,52 @@ public enum HomebrewBottleInputs {
   }
 
   static func validateDependencies(
-    _ tab: JSONValue, formulae: [String: HomebrewResolution.Formula], selected: Set<String>,
+    _ tab: JSONValue, bottle: String, formulae: [String: HomebrewResolution.Formula],
+    selected: Set<String>,
     compatibilityVersions: [String: Int] = [:], directDependencies: Set<String> = []
   ) throws {
     guard case .object(let object) = tab,
       case .array(let dependencies) = object["runtime_dependencies"]
-    else { throw MisoError.invalid("Missing bottle runtime dependency metadata") }
-    for dependency in dependencies {
+    else { throw MisoError.invalid("Bottle \(bottle): missing runtime dependency metadata") }
+    for (index, dependency) in dependencies.enumerated() {
       guard case .object(let fields) = dependency,
-        case .string(let name) = fields["full_name"],
-        case .string(let version) = fields["version"],
-        case .integer(let revision) = fields["revision"],
-        revision >= 0, formulae[name] != nil, selected.contains(name)
-      else { throw MisoError.unsupported("Bottle runtime dependencies differ from resolution") }
-      try PackageRequest(name: name, version: version).validate()
+        case .string(let name) = fields["full_name"]
+      else {
+        throw MisoError.invalid("Bottle \(bottle): runtime dependency \(index + 1) has no name")
+      }
+      let context = "Bottle \(bottle) dependency \(name)"
+      guard case .string(let version) = fields["version"],
+        case .integer(let revision) = fields["revision"], revision >= 0
+      else { throw MisoError.invalid("\(context): invalid version or revision") }
+      do {
+        try PackageRequest(name: name, version: version).validate()
+      } catch {
+        throw MisoError.invalid("\(context): \(error.localizedDescription)")
+      }
       if let direct = fields["declared_directly"] {
         guard case .bool = direct else {
-          throw MisoError.invalid("Invalid bottle dependency declaration")
+          throw MisoError.invalid("\(context): invalid declared_directly value")
         }
       }
       if let builtCompatibility = fields["compatibility_version"] {
         guard case .integer(let expected) = builtCompatibility, expected >= 0 else {
-          throw MisoError.invalid("Invalid bottle dependency compatibility version")
+          throw MisoError.invalid("\(context): invalid compatibility version")
         }
-        if fields["declared_directly"] != .bool(false) || directDependencies.contains(name),
-          let actual = compatibilityVersions[name], actual != expected
-        {
-          throw MisoError.unsupported(
-            "Bottle requires \(name) compatibility \(expected), selected \(actual)")
-        }
+      }
+      guard fields["declared_directly"] != .bool(false) || directDependencies.contains(name) else {
+        continue
+      }
+      guard formulae[name] != nil else {
+        throw MisoError.unsupported("\(context): absent from resolved formulae")
+      }
+      guard selected.contains(name) else {
+        throw MisoError.unsupported("\(context): absent from selected dependency closure")
+      }
+      if case .integer(let expected) = fields["compatibility_version"],
+        let actual = compatibilityVersions[name], actual != expected
+      {
+        throw MisoError.unsupported(
+          "\(context): requires compatibility \(expected), selected \(actual)")
       }
     }
   }
