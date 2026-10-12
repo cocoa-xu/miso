@@ -3,6 +3,70 @@ import Testing
 
 @testable import MisoCore
 
+private func imageInventory(_ images: [[String: Any]]) throws -> Data {
+  try PropertyListSerialization.data(
+    fromPropertyList: ["images": images], format: .xml, options: 0)
+}
+
+@Test func imageInventoryIgnoresIncompleteForeignAttachments() throws {
+  let path = "/work/owned.img"
+  let owned: [String: Any] = [
+    "image-path": path, "writeable": false,
+    "system-entities": [["dev-entry": "/dev/disk11", "content-hint": "GUID_partition_scheme"]],
+  ]
+  let foreign: [String: Any] = [
+    "image-path": "/other/build.img",
+    "system-entities": [
+      ["dev-entry": "/dev/disk12"], ["dev-entry": "/dev/disk12s1"],
+      ["content-hint": "Apple_APFS"],
+    ],
+  ]
+  let data = try imageInventory([owned, foreign])
+  let matches = try DiskImageSession.ImageInfo.matching(data, path: path)
+  #expect(matches.count == 1)
+  #expect(matches.first?.writable == false)
+  #expect(matches.first?.entities.map(\.device) == ["/dev/disk11"])
+  #expect(try DiskImageSession.ImageInfo.matching(data, path: "/work/detached.img").isEmpty)
+}
+
+@Test func imageInventoryStillRejectsIncompleteOwnedAttachments() throws {
+  let path = "/work/owned.img"
+  let data = try imageInventory([
+    ["image-path": path, "writeable": true, "system-entities": [["content-hint": "Apple_APFS"]]]
+  ])
+  #expect(throws: DecodingError.self) {
+    try DiskImageSession.ImageInfo.matching(data, path: path)
+  }
+}
+
+@Test func imageInventoryPreservesDuplicateOwnershipForRejection() throws {
+  let path = "/work/owned.img"
+  let image: [String: Any] = [
+    "image-path": path, "writeable": true, "system-entities": [["dev-entry": "/dev/disk11"]],
+  ]
+  let matches = try DiskImageSession.ImageInfo.matching(
+    imageInventory([image, image]), path: path)
+  #expect(matches.count == 2)
+}
+
+@Test func imageInventoryDoesNotMatchPathPrefixesOrMissingPaths() throws {
+  let data = try imageInventory([
+    [
+      "image-path": "/work/owned.img.other", "system-entities": [["mount-point": "/Volumes/Other"]],
+    ],
+    ["system-entities": [["dev-entry": "/dev/disk11"]]],
+  ])
+  #expect(try DiskImageSession.ImageInfo.matching(data, path: "/work/owned.img").isEmpty)
+}
+
+@Test func imageInventoryRejectsMalformedEnvelope() throws {
+  let data = try PropertyListSerialization.data(
+    fromPropertyList: ["images": "invalid"], format: .binary, options: 0)
+  #expect(throws: (any Error).self) {
+    try DiskImageSession.ImageInfo.matching(data, path: "/work/owned.img")
+  }
+}
+
 @Test(arguments: [(11, 12), (28, 31), (407, 519)])
 func topologyRejectsForeignAndMixedStores(_ disks: (Int, Int)) throws {
   let physical = "disk\(disks.0)"

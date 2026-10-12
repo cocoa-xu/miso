@@ -125,7 +125,7 @@ public struct APFSTopology: Codable, Sendable {
 }
 
 public final class DiskImageSession {
-  private struct ImageInfo: Decodable {
+  enum ImageInfo {
     struct Image: Decodable {
       let path: String?
       let entities: [DiskImageAttachment.Entity]
@@ -136,7 +136,17 @@ public final class DiskImageSession {
         case writable = "writeable"
       }
     }
-    let images: [Image]
+    static func matching(_ data: Data, path: String) throws -> [Image] {
+      guard
+        let info = try PropertyListSerialization.propertyList(from: data, format: nil)
+          as? [String: Any],
+        let images = info["images"] as? [[String: Any]]
+      else { throw MisoError.invalid("Invalid disk image inventory") }
+      let matches = images.filter { $0["image-path"] as? String == path }
+      let selected = try PropertyListSerialization.data(
+        fromPropertyList: matches, format: .binary, options: 0)
+      return try PropertyListDecoder().decode([Image].self, from: selected)
+    }
   }
 
   public let image: URL
@@ -238,11 +248,11 @@ public final class DiskImageSession {
 
   private func matchingImages(cleanup: Bool = false) throws -> [ImageInfo.Image] {
     try checkFileIdentity()
-    let info = try journal.plist(
-      ImageInfo.self, name: "image-ownership",
-      command: NativeCommand(.diskImages, arguments: ["info", "-plist"], timeout: 60),
+    let output = try journal.run(
+      "image-ownership",
+      NativeCommand(.diskImages, arguments: ["info", "-plist"], timeout: 60),
       cleanup: cleanup)
-    return info.images.filter { $0.path == image.path }
+    return try ImageInfo.matching(SafeFile.read(output, limit: 64 << 20), path: image.path)
   }
 
   private func attach(requireGPT: Bool, mountPoint: URL?, existingEmptyMountPoint: Bool) throws {
