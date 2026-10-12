@@ -205,31 +205,36 @@ public enum XcodeCompletion {
     }
   }
 
+  struct DeveloperDiskIdentity: Equatable {
+    let build: String
+    let version: String
+  }
+
+  @discardableResult
   static func validateDeveloperDisk(
-    _ volume: GuestVolume, platform: String, configuration: XcodeConfiguration
-  ) throws {
+    _ volume: GuestVolume, platform: String, expected: DeveloperDiskIdentity? = nil
+  ) throws -> DeveloperDiskIdentity {
     let info = try volume.plist("version.plist")
     guard info["Platform"] as? String == platform,
-      info["ProductBuildVersion"] as? String == configuration.build,
+      let build = info["ProductBuildVersion"] as? String, !build.isEmpty,
       info["Variant"] as? String == "Public",
       let version = info["BuildVersion"] as? String, UInt32(version) != nil
-    else { throw MisoError.invalid("Developer disk identity differs") }
+    else { throw MisoError.invalid("Invalid \(platform) developer disk metadata") }
+    let identity = DeveloperDiskIdentity(build: build, version: version)
+    if let expected, identity != expected {
+      throw MisoError.invalid(
+        "\(platform) developer disk differs from Xcode's bundled component: "
+          + "expected \(expected.build)/\(expected.version), found \(build)/\(version)")
+    }
     _ = try volume.plist("Restore/BuildManifest.plist")
     _ = try volume.plist("Restore/Restore.plist")
+    return identity
   }
 
   static func installDeveloperDisks(
     _ data: GuestVolume, application: URL, configuration: XcodeConfiguration,
     journal: ExecutionJournal, reuseExisting: Bool = false
   ) throws -> [DeveloperDisk] {
-    if reuseExisting {
-      for platform in ["iOS", "watchOS", "tvOS", "xrOS"] {
-        try validateDeveloperDisk(
-          GuestVolume(data.directory("Library/Developer/DeveloperDiskImages/\(platform)_DDI").url),
-          platform: platform, configuration: configuration)
-      }
-      return []
-    }
     let package = try GuestVolume(application).path(
       "Contents/Resources/Packages/XcodeSystemResources.pkg")
     let expanded = journal.output.appendingPathComponent("system-resources")
@@ -253,14 +258,21 @@ public enum XcodeCompletion {
       let installed = "Library/Developer/DeveloperDiskImages/" + platform + "_DDI"
       let payload = try session.withAttachment(requireGPT: false, mountPoint: mount) { _ in
         let volume = try GuestVolume(mount)
-        try validateDeveloperDisk(volume, platform: platform, configuration: configuration)
+        let identity = try validateDeveloperDisk(volume, platform: platform)
+        BuildProgress.write("\(platform) developer disk: \(identity.build) (\(identity.version))")
+        if reuseExisting {
+          try validateDeveloperDisk(
+            GuestVolume(data.directory(installed).url), platform: platform, expected: identity)
+          return nil as DataTemplate.Receipt?
+        }
         let audit = try XcodeComponentPayload.copy(
           mount, to: data, path: installed, journal: journal)
         try validateDeveloperDisk(
           GuestVolume(data.directory(installed).url), platform: platform,
-          configuration: configuration)
+          expected: identity)
         return audit
       }
+      guard let payload else { continue }
       results.append(
         DeveloperDisk(
           platform: platform, archive: record, path: installed, entries: payload.entries,
