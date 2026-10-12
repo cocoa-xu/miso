@@ -98,6 +98,28 @@ public struct APFSTopology: Codable, Sendable {
   public let containers: [Container]
   enum CodingKeys: String, CodingKey { case containers = "Containers" }
 
+  static func owned(in data: Data, by attachment: DiskImageAttachment) throws -> [Container] {
+    guard
+      let inventory = try PropertyListSerialization.propertyList(from: data, format: nil)
+        as? [String: Any],
+      let containers = inventory["Containers"] as? [[String: Any]]
+    else { throw MisoError.invalid("Invalid APFS container inventory") }
+    let nodes = Set(attachment.entities.map { String($0.device.dropFirst(5)) })
+    let selected = containers.filter { container in
+      (container["PhysicalStores"] as? [Any] ?? []).contains { store in
+        guard let device = (store as? [String: Any])?["DeviceIdentifier"] as? String else {
+          return false
+        }
+        return nodes.contains(device)
+      }
+    }
+    let encoded = try PropertyListSerialization.data(
+      fromPropertyList: selected, format: .binary, options: 0)
+    let topology = try Self(
+      containers: PropertyListDecoder().decode([Container].self, from: encoded))
+    return try topology.owned(by: attachment)
+  }
+
   public func owned(by attachment: DiskImageAttachment) throws -> [Container] {
     let nodes = Set(attachment.entities.map { String($0.device.dropFirst(5)) })
     var seen = Set<UUID>()
@@ -315,10 +337,11 @@ public final class DiskImageSession {
   public func containers() throws -> [APFSTopology.Container] {
     try verifyOwnership()
     guard let attachment else { throw MisoError.invalid("Missing image attachment") }
-    let topology = try journal.plist(
-      APFSTopology.self, name: "apfs-topology",
-      command: NativeCommand(.disks, arguments: ["apfs", "list", "-plist"], timeout: 120))
-    return try topology.owned(by: attachment)
+    let output = try journal.run(
+      "apfs-topology",
+      NativeCommand(.disks, arguments: ["apfs", "list", "-plist"], timeout: 120))
+    return try APFSTopology.owned(
+      in: SafeFile.read(output, limit: 64 << 20), by: attachment)
   }
 
   public func detach() throws {
