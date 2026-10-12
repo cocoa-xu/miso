@@ -141,8 +141,12 @@ public enum BaseBottles {
           try guest.data.write(
             relative + "/" + payload.sidecarName,
             data: JSON.encode(payload.sidecar), mode: 0o444)
+          // MISO validates the complete runtime dependency graph and installs it in order.
           let install = try HomebrewExecution.installProgram(
-            arguments: ["--skip-post-install", "/" + relative + "/" + payload.filename])
+            arguments: [
+              "--ignore-dependencies", "--skip-post-install",
+              "/" + relative + "/" + payload.filename,
+            ])
           try guest.run(
             "install-bottle",
             arguments: GuestExecution.brewArguments(
