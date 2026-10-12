@@ -9,11 +9,34 @@ private actor HTTPRetryDelays {
 }
 
 @Test(arguments: [false, true])
+func httpRetryBoundsUnparseableResponses(succeeds: Bool) async throws {
+  let delays = HTTPRetryDelays()
+  var attempts = 0
+  do {
+    try await HTTPRetry.run {
+      await delays.append($0)
+    } body: {
+      attempts += 1
+      if succeeds && attempts == 10 { return }
+      throw URLError(.cannotParseResponse)
+    }
+    #expect(succeeds)
+  } catch {
+    #expect(!succeeds)
+    #expect((error as? URLError)?.code == .cannotParseResponse)
+  }
+  #expect(attempts == 10)
+  #expect(await delays.values == [2, 4, 8, 16, 32, 64, 128, 256, 300].map { .seconds($0) })
+}
+
+@Test(arguments: [false, true])
 func httpRetryStopsAfterTenAttempts(succeeds: Bool) async throws {
   let delays = HTTPRetryDelays()
   var attempts = 0
   do {
-    let result = try await HTTPRetry.run(sleep: { await delays.append($0) }) {
+    let result = try await HTTPRetry.run {
+      await delays.append($0)
+    } body: {
       attempts += 1
       if succeeds && attempts == 10 { return 42 }
       throw HTTPRetry.StatusError(status: 502, retryAfter: 0)
@@ -36,7 +59,9 @@ func httpRetryStopsAfterTenAttempts(succeeds: Bool) async throws {
       httpVersion: nil, headerFields: ["Retry-After": value])!
     let delays = HTTPRetryDelays()
     var attempts = 0
-    try await HTTPRetry.run(sleep: { await delays.append($0) }) {
+    try await HTTPRetry.run {
+      await delays.append($0)
+    } body: {
       attempts += 1
       if attempts == 1 { try HTTPRetry.requireSuccess(response, now: now) }
     }
@@ -51,7 +76,9 @@ func httpRetryStopsAfterTenAttempts(succeeds: Bool) async throws {
   ] {
     var attempts = 0
     await #expect(throws: (any Error).self) {
-      try await HTTPRetry.run(sleep: { _ in Issue.record("Permanent errors must not retry") }) {
+      try await HTTPRetry.run { _ in
+        Issue.record("Permanent errors must not retry")
+      } body: {
         attempts += 1
         throw error
       }

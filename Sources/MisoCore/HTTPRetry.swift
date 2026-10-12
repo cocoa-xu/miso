@@ -8,7 +8,7 @@ enum HTTPRetry {
   }
 
   static func isRetryable(_ status: Int) -> Bool {
-    [-1001, -1003, -1004, -1005, -1006, -1009, 408, 429, 500, 502, 503, 504].contains(status)
+    [-1001, -1003, -1004, -1005, -1006, -1009, -1017, 408, 429, 500, 502, 503, 504].contains(status)
   }
 
   static func delay(attempt: Int, retryAfter: Int) -> Int {

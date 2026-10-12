@@ -28,6 +28,10 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
         client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
         return
       }
+      if path == "retry-unparseable.xip", attempt == 1 {
+        client?.urlProtocol(self, didFailWithError: URLError(.cannotParseResponse))
+        return
+      }
       let status = path == "always-busy" || (path == "retry-502" && attempt == 1) ? 502 : 200
       let response = HTTPURLResponse(
         url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
@@ -450,6 +454,16 @@ func nativePayloadDownloadRejectsInvalidResponses(_ path: String) async throws {
       to: temporary.url.appendingPathComponent("payload"), maximumBytes: 64,
       cancellation: token, configuration: stubConfiguration())
   }
+}
+
+@Test func nativeXcodeDownloadRetriesUnparseableResponses() async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let output = temporary.url.appendingPathComponent("Xcode.xip")
+  try await HTTPFile.xcodeArchive(
+    URL(string: "https://fixture.test/\(UUID().uuidString)/retry-unparseable.xip")!,
+    to: output, configuration: stubConfiguration())
+  #expect(try String(contentsOf: output, encoding: .utf8) == "attempt=2")
 }
 
 private func stubConfiguration() -> URLSessionConfiguration {
