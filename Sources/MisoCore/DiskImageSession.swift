@@ -334,12 +334,12 @@ public final class DiskImageSession {
     attachment = DiskImageAttachment(entities: match.entities)
   }
 
-  public func containers() throws -> [APFSTopology.Container] {
-    try verifyOwnership()
+  public func containers(cleanup: Bool = false) throws -> [APFSTopology.Container] {
+    try verifyOwnership(cleanup: cleanup)
     guard let attachment else { throw MisoError.invalid("Missing image attachment") }
     let output = try journal.run(
       "apfs-topology",
-      NativeCommand(.disks, arguments: ["apfs", "list", "-plist"], timeout: 120))
+      NativeCommand(.disks, arguments: ["apfs", "list", "-plist"], timeout: 120), cleanup: cleanup)
     return try APFSTopology.owned(
       in: SafeFile.read(output, limit: 64 << 20), by: attachment)
   }

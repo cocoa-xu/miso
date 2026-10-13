@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 
@@ -8,53 +9,63 @@ private func volumeFixture() -> APFSTopology.Volume {
     device: "disk42s2", identifier: UUID(), roles: ["Data"], name: "Data", mountPoint: nil)
 }
 
-@Test func mountMetadataCanLagSuccessfulNativeMount() throws {
+@Test func unmountedOwnedVolumeDoesNotNeedAnHDIEntity() throws {
+  let volume = volumeFixture()
+  let attachment = DiskImageAttachment(entities: [
+    .init(device: "/dev/disk41s2", contentHint: "Apple_APFS", mountPoint: nil)
+  ])
+  let container = APFSTopology.Container(
+    device: "disk42", identifier: UUID(), stores: [.init(device: "disk41s2")], volumes: [volume])
+  let owned = try APFSTopology(containers: [container]).owned(by: attachment)
+  #expect(owned.flatMap(\.volumes).map(\.identifier) == [volume.identifier])
+  try ImageMounts.verifyMounts([], volume: volume, mountPoint: nil)
+  let mounted = [ImageMounts.Mount(device: "/dev/disk42s2", path: "/fixture/Data")]
+  try ImageMounts.verifyMounts(mounted, volume: volume, mountPoint: "/fixture/Data")
+  #expect(throws: (any Error).self) {
+    try ImageMounts.verifyMounts(mounted, volume: volume, mountPoint: nil)
+  }
+}
+
+@Test func mountWaitAllowsOnlyPendingMounts() throws {
   let volume = volumeFixture()
   var queries = 0
-  try ImageMounts.waitForAttachment(
+  try ImageMounts.waitForMount(
     volume: volume, mountPoint: "/fixture/Data",
     refresh: {
       queries += 1
-      return DiskImageAttachment(
-        entities: queries == 1
-          ? []
-          : [
-            .init(
-              device: "/dev/" + volume.device, contentHint: nil,
-              mountPoint: queries == 2 ? nil : "/fixture/Data")
-          ])
+      return queries < 3 ? [] : [.init(device: "/dev/" + volume.device, path: "/fixture/Data")]
     }, pause: {})
   #expect(queries == 3)
 }
 
-@Test func mountMetadataWaitRejectsForeignAndAmbiguousMounts() {
+@Test func mountWaitRejectsForeignAndDuplicateMountsImmediately() {
   let volume = volumeFixture()
-  let foreign = DiskImageAttachment.Entity(
-    device: "/dev/" + volume.device, contentHint: nil, mountPoint: "/foreign/Data")
-  for entries in [[foreign], [foreign, foreign]] {
+  let foreign = ImageMounts.Mount(device: "/dev/" + volume.device, path: "/foreign/Data")
+  let correct = ImageMounts.Mount(device: "/dev/" + volume.device, path: "/fixture/Data")
+  for entries in [[foreign], [correct, correct]] {
     var queries = 0
     #expect(throws: (any Error).self) {
-      try ImageMounts.waitForAttachment(
+      try ImageMounts.waitForMount(
         volume: volume, mountPoint: "/fixture/Data",
         refresh: {
           queries += 1
-          return DiskImageAttachment(entities: entries)
+          return entries
         }, pause: {})
     }
     #expect(queries == 1)
   }
 }
 
-@Test func mountMetadataWaitIsBoundedAndExplainsFailure() {
+@Test func mountWaitIsBoundedAndExplainsFailure() {
   var queries = 0
   do {
-    try ImageMounts.waitForAttachment(
+    try ImageMounts.waitForMount(
       volume: volumeFixture(), mountPoint: "/fixture/Data",
       refresh: {
         queries += 1
-        return DiskImageAttachment(entities: [])
+        return []
       }, pause: {})
-    Issue.record("Missing mount metadata was accepted")
+    Issue.record("Missing mount was accepted")
   } catch {
     #expect(error.localizedDescription.contains("disk42s2"))
     #expect(error.localizedDescription.contains("/fixture/Data"))
@@ -63,10 +74,10 @@ private func volumeFixture() -> APFSTopology.Volume {
   #expect(queries == 10)
 }
 
-@Test func mountMetadataWaitPropagatesAttachmentOwnershipFailure() {
+@Test func mountWaitPropagatesOwnershipFailure() {
   var queries = 0
   #expect(throws: (any Error).self) {
-    try ImageMounts.waitForAttachment(
+    try ImageMounts.waitForMount(
       volume: volumeFixture(), mountPoint: "/fixture/Data",
       refresh: {
         queries += 1
@@ -76,89 +87,76 @@ private func volumeFixture() -> APFSTopology.Volume {
   #expect(queries == 1)
 }
 
-@Test func ownedVolumeRefreshRecoversOnlyMissingEntries() throws {
+@Test func mountValidationIgnoresOtherDevicesButRequiresExactPaths() throws {
   let volume = volumeFixture()
-  let entity = DiskImageAttachment.Entity(
-    device: "/dev/" + volume.device, contentHint: nil, mountPoint: "/fixture/Data")
-  var queries = 0
-  var pauses = 0
-  let result = try ImageMountGroup.ownedVolume(
-    volume,
-    refresh: {
-      queries += 1
-      return DiskImageAttachment(entities: queries == 1 ? [] : [entity])
-    }, pause: { pauses += 1 })
-  #expect(queries == 2 && pauses == 1)
-  #expect(result.device == entity.device && result.mountPoint == entity.mountPoint)
-}
-
-@Test func ownedVolumeRefreshIsBounded() {
-  var queries = 0
-  var pauses = 0
+  let other = ImageMounts.Mount(device: "/dev/disk142s2", path: "/fixture/Data")
+  try ImageMounts.verifyMounts([other], volume: volume, mountPoint: nil)
   #expect(throws: (any Error).self) {
-    try ImageMountGroup.ownedVolume(
-      volumeFixture(),
-      refresh: {
-        queries += 1
-        return DiskImageAttachment(entities: [])
-      }, pause: { pauses += 1 })
+    try ImageMounts.verifyMounts([other], volume: volume, mountPoint: "/fixture/Data")
   }
-  #expect(queries == 3 && pauses == 2)
-}
-
-@Test func ownedVolumeRefreshRejectsAmbiguityImmediately() {
-  let volume = volumeFixture()
-  let entity = DiskImageAttachment.Entity(
-    device: "/dev/" + volume.device, contentHint: nil, mountPoint: nil)
-  var queries = 0
-  var pauses = 0
-  #expect(throws: (any Error).self) {
-    try ImageMountGroup.ownedVolume(
-      volume,
-      refresh: {
-        queries += 1
-        return DiskImageAttachment(entities: [entity, entity])
-      }, pause: { pauses += 1 })
+  for path in ["/foreign/Data", "/fixture/Data/child"] {
+    #expect(throws: (any Error).self) {
+      try ImageMounts.verifyMounts(
+        [.init(device: "/dev/" + volume.device, path: path)], volume: volume,
+        mountPoint: "/fixture/Data")
+    }
   }
-  #expect(queries == 1 && pauses == 0)
 }
 
-@Test func ownedVolumeRefreshPropagatesOwnershipFailure() {
-  var queries = 0
-  var pauses = 0
-  #expect(throws: (any Error).self) {
-    try ImageMountGroup.ownedVolume(
-      volumeFixture(),
-      refresh: {
-        queries += 1
-        throw MisoError.invalid("Changed attachment owner")
-      }, pause: { pauses += 1 })
-  }
-  #expect(queries == 1 && pauses == 0)
-}
-
-@Test func ownedVolumeRefreshRejectsMissingImageImmediately() {
-  var queries = 0
-  var pauses = 0
-  #expect(throws: (any Error).self) {
-    try ImageMountGroup.ownedVolume(
-      volumeFixture(),
-      refresh: {
-        queries += 1
-        return nil
-      }, pause: { pauses += 1 })
-  }
-  #expect(queries == 1 && pauses == 0)
-}
-
-@Test func ownedVolumeRefreshPreservesMountPointValidation() throws {
-  let volume = volumeFixture()
-  let attachment = DiskImageAttachment(entities: [
-    .init(device: "/dev/" + volume.device, contentHint: nil, mountPoint: "/foreign/Data")
-  ])
-  let entry = try ImageMountGroup.ownedVolume(volume, refresh: { attachment })
-  #expect(entry.mountPoint == "/foreign/Data")
-  #expect(throws: (any Error).self) {
-    try ImageMounts.verifyAttachment(attachment, volume: volume, mountPoint: "/fixture/Data")
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MISO_MOUNT_SOURCE"] != nil))
+func nativeImageMountLifecycle() throws {
+  let environment = ProcessInfo.processInfo.environment
+  let source = URL(fileURLWithPath: try #require(environment["MISO_MOUNT_SOURCE"]))
+  let output = URL(fileURLWithPath: try #require(environment["MISO_MOUNT_OUTPUT"]))
+  try #require(geteuid() == 0)
+  let original = try FileMetadata.inspect(source)
+  let journal = try ExecutionJournal(output: output, operation: "native-mount-lifecycle")
+  try journal.perform {
+    let image = output.appendingPathComponent("disk.img")
+    try Artifacts.clone(source, to: image)
+    for cycle in 0..<3 {
+      let session = try DiskImageSession(image: image, readOnly: false, journal: journal)
+      try session.withAttachment {
+        let container = try BaseImageStage.mainContainer($0)
+        let group = ImageMountGroup(session: $0, journal: journal)
+        let data = try container.volume(role: "Data")
+        let preboot = try container.volume(role: "Preboot")
+        let root = output.appendingPathComponent("cycle-\(cycle)")
+        try SafeFile.makeDirectory(root)
+        let dataRoot = root.appendingPathComponent("Data")
+        let prebootRoot = root.appendingPathComponent("Preboot")
+        try SafeFile.makeDirectory(dataRoot)
+        try SafeFile.makeDirectory(prebootRoot)
+        do {
+          try group.withCleanup {
+            let mounted = try group.mount(data, name: "data", readOnly: false, at: dataRoot)
+            _ = try group.mount(preboot, name: "preboot", readOnly: true, at: prebootRoot)
+            _ = try BaseImageStage.Account("admin", data: mounted)
+            if cycle == 1 { throw MisoError.invalid("Expected lifecycle body failure") }
+          }
+          #expect(cycle != 1)
+        } catch {
+          #expect(cycle == 1 && error.localizedDescription == "Expected lifecycle body failure")
+        }
+        try ImageMounts.verifyMounts(ImageMounts.mounts(), volume: data, mountPoint: nil)
+        try ImageMounts.verifyMounts(ImageMounts.mounts(), volume: preboot, mountPoint: nil)
+      }
+    }
+    let audit = try DiskImageSession(image: image, readOnly: true, journal: journal)
+    try audit.withAttachment {
+      let data = try BaseImageStage.mainContainer($0).volume(role: "Data")
+      let mounted = try ImageMounts.mount(
+        data, session: $0, journal: journal, name: "audit", readOnly: true)
+      _ = try BaseImageStage.Account("admin", data: mounted)
+    }
+    try BaseStageWorkspace.requireUnmounted(output)
+    let after = try FileMetadata.inspect(source)
+    #expect(original.st_ino == after.st_ino && original.st_size == after.st_size)
+    #expect(original.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec)
+    #expect(original.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec)
+    #expect(original.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec)
+    #expect(original.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec)
+    try FileManager.default.removeItem(at: image)
+    return true
   }
 }

@@ -47,27 +47,6 @@ import Testing
   }
 }
 
-@Test func mountValidationUsesImageEntitiesWithoutAssumingAPFSMountPoints() throws {
-  let volume = APFSTopology.Volume(
-    device: "disk987s4", identifier: UUID(), roles: ["System"], name: nil, mountPoint: nil)
-  let unmounted = DiskImageAttachment(entities: [
-    .init(device: "/dev/disk987s4", contentHint: nil, mountPoint: nil)
-  ])
-  try ImageMounts.verifyAttachment(unmounted, volume: volume, mountPoint: nil)
-  let mounted = DiskImageAttachment(entities: [
-    .init(device: "/dev/disk987s4", contentHint: nil, mountPoint: "/fixture/system")
-  ])
-  try ImageMounts.verifyAttachment(mounted, volume: volume, mountPoint: "/fixture/system")
-  for expected in [nil, "/fixture/other"] {
-    #expect(throws: (any Error).self) {
-      try ImageMounts.verifyAttachment(mounted, volume: volume, mountPoint: expected)
-    }
-  }
-  #expect(throws: (any Error).self) {
-    try ImageMounts.verifyAttachment(nil, volume: volume, mountPoint: nil)
-  }
-}
-
 @Test func systemOverlaysRequireExactOwnedReadOnlyRestrictedMounts() throws {
   let root = URL(fileURLWithPath: "/fixture/system")
   let overlay = ImageMounts.SystemOverlay(

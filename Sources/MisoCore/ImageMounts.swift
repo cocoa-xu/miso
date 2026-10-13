@@ -41,7 +41,7 @@ enum ImageMounts {
     else {
       throw MisoError.invalid("Volume is not an unmounted owned image volume")
     }
-    try verifyAttachment(session.attachment, volume: volume, mountPoint: nil)
+    try verifyMounts(mounts(), volume: volume, mountPoint: nil)
     let mount =
       requestedMount
       ?? journal.output.appendingPathComponent(
@@ -52,8 +52,8 @@ enum ImageMounts {
     if requestedMount == nil { try SafeFile.makeDirectory(mount) }
     _ = try GuestVolume(mount)
     if let systemOverlay {
-      try verifyAttachment(
-        session.attachment, volume: systemOverlay.volume, mountPoint: systemOverlay.root.path)
+      try verifyMounts(
+        mounts(), volume: systemOverlay.volume, mountPoint: systemOverlay.root.path)
       var info = statfs()
       guard statfs(mount.path, &info) == 0 else {
         throw MisoError.system("Inspect System overlay", errno)
@@ -88,11 +88,11 @@ enum ImageMounts {
         $0.identifier == volume.identifier && $0.device == volume.device
       })
     else { throw MisoError.invalid("Image volume mounted at an unexpected location") }
-    try waitForAttachment(
+    try waitForMount(
       volume: volume, mountPoint: mount.path,
       refresh: {
         try session.verifyOwnership()
-        return session.attachment
+        return try mounts()
       })
     var filesystem = statfs()
     guard statfs(mount.path, &filesystem) == 0,
@@ -111,30 +111,50 @@ enum ImageMounts {
     return try GuestVolume(mount)
   }
 
-  static func verifyAttachment(
-    _ attachment: DiskImageAttachment?, volume: APFSTopology.Volume, mountPoint: String?
+  struct Mount {
+    let device: String
+    let path: String
+  }
+
+  static func mounts() throws -> [Mount] {
+    var buffer: UnsafeMutablePointer<statfs>?
+    let count = getmntinfo_r_np(&buffer, MNT_NOWAIT)
+    guard count > 0, let buffer else { throw MisoError.system("Read mounted filesystems", errno) }
+    defer { free(buffer) }
+    return (0..<Int(count)).map { index in
+      let device = withUnsafePointer(to: &buffer[index].f_mntfromname) {
+        $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+      }
+      let path = withUnsafePointer(to: &buffer[index].f_mntonname) {
+        $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+      }
+      return Mount(device: device, path: path)
+    }
+  }
+
+  static func verifyMounts(
+    _ mounts: [Mount], volume: APFSTopology.Volume, mountPoint: String?
   ) throws {
-    let entries = attachment?.entities.filter { $0.device == "/dev/" + volume.device } ?? []
-    guard entries.count == 1, entries[0].mountPoint == mountPoint else {
-      let observed = entries.map { $0.mountPoint ?? "<unmounted>" }.joined(separator: ", ")
+    let entries = mounts.filter { $0.device == "/dev/" + volume.device }
+    let expected = mountPoint.map { [$0] } ?? []
+    guard entries.map(\.path) == expected else {
+      let observed = entries.map(\.path).joined(separator: ", ")
       throw MisoError.invalid(
         "Owned image volume \(volume.device) mount point mismatch: expected "
           + "\(mountPoint ?? "<unmounted>"), observed \(entries.count) entries [\(observed)]")
     }
   }
 
-  static func waitForAttachment(
+  static func waitForMount(
     volume: APFSTopology.Volume, mountPoint: String,
-    refresh: () throws -> DiskImageAttachment?,
+    refresh: () throws -> [Mount],
     pause: () -> Void = { Thread.sleep(forTimeInterval: 0.1) }
   ) throws {
     for attempt in 0..<10 {
-      let attachment = try refresh()
-      guard let attachment else { throw MisoError.invalid("Owned image disappeared after mount") }
-      let entries = attachment.entities.filter { $0.device == "/dev/" + volume.device }
-      let pending = entries.isEmpty || (entries.count == 1 && entries[0].mountPoint == nil)
-      if !pending || attempt == 9 {
-        try verifyAttachment(attachment, volume: volume, mountPoint: mountPoint)
+      let current = try refresh()
+      let entries = current.filter { $0.device == "/dev/" + volume.device }
+      if !entries.isEmpty || attempt == 9 {
+        try verifyMounts(current, volume: volume, mountPoint: mountPoint)
         return
       }
       if attempt == 0 {

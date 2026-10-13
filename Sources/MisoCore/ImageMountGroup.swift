@@ -37,39 +37,24 @@ final class ImageMountGroup {
 
   private func unmount() throws {
     while let (volume, root, name) = volumes.last {
-      func refresh() throws -> DiskImageAttachment? {
-        try session.verifyOwnership(cleanup: true)
-        return session.attachment
+      func refresh() throws -> [ImageMounts.Mount] {
+        guard
+          try session.containers(cleanup: true).flatMap(\.volumes).contains(where: {
+            $0.identifier == volume.identifier && $0.device == volume.device
+          })
+        else { throw MisoError.invalid("Owned volume disappeared during unmount") }
+        return try ImageMounts.mounts()
       }
-      let entry = try Self.ownedVolume(volume, refresh: refresh)
-      if entry.mountPoint != nil {
-        try ImageMounts.verifyAttachment(session.attachment, volume: volume, mountPoint: root.path)
+      let mounts = try refresh()
+      if mounts.contains(where: { $0.device == "/dev/" + volume.device }) {
+        try ImageMounts.verifyMounts(mounts, volume: volume, mountPoint: root.path)
         try journal.run(
           "unmount-" + name,
           NativeCommand(.disks, arguments: ["unmount", volume.device], timeout: 120), cleanup: true)
-        _ = try Self.ownedVolume(volume, refresh: refresh)
-        try ImageMounts.verifyAttachment(session.attachment, volume: volume, mountPoint: nil)
+        try ImageMounts.verifyMounts(refresh(), volume: volume, mountPoint: nil)
       }
       volumes.removeLast()
     }
   }
 
-  static func ownedVolume(
-    _ volume: APFSTopology.Volume,
-    refresh: () throws -> DiskImageAttachment?,
-    pause: () -> Void = { Thread.sleep(forTimeInterval: 0.1) }
-  ) throws -> DiskImageAttachment.Entity {
-    for attempt in 0..<3 {
-      guard let attachment = try refresh() else {
-        throw MisoError.invalid("Owned image disappeared during unmount")
-      }
-      let entries = attachment.entities.filter { $0.device == "/dev/" + volume.device }
-      guard entries.count <= 1 else {
-        throw MisoError.invalid("Ambiguous owned volume during unmount")
-      }
-      if let entry = entries.first { return entry }
-      if attempt < 2 { pause() }
-    }
-    throw MisoError.invalid("Owned volume disappeared during unmount")
-  }
 }
