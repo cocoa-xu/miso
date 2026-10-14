@@ -169,6 +169,33 @@ public final class DiskImageSession {
         fromPropertyList: matches, format: .binary, options: 0)
       return try PropertyListDecoder().decode([Image].self, from: selected)
     }
+
+    static func owned(
+      path: String, device: String, readOnly: Bool, refresh: () throws -> [Image],
+      pause: () -> Void = { Thread.sleep(forTimeInterval: 0.1) }
+    ) throws -> Image {
+      var matches: [Image] = []
+      for attempt in 0..<10 {
+        matches = try refresh()
+        guard matches.count <= 1 else {
+          throw MisoError.invalid("Ambiguous image attachment: \(path)")
+        }
+        if let match = matches.first {
+          guard match.writable == !readOnly else {
+            throw MisoError.invalid("Backing image attachment access differs from requested access")
+          }
+          if match.entities.contains(where: { $0.device == device }) { return match }
+        }
+        if attempt == 0 {
+          BuildProgress.write("Waiting for image attachment metadata: \(device)")
+        }
+        if attempt < 9 { pause() }
+      }
+      let observed = matches.flatMap(\.entities).map(\.device).joined(separator: ", ")
+      throw MisoError.invalid(
+        "Image attachment ownership unavailable: \(path); expected \(device), "
+          + "observed \(matches.count) matching images [\(observed)]")
+    }
   }
 
   public let image: URL
@@ -322,15 +349,9 @@ public final class DiskImageSession {
 
   public func verifyOwnership(cleanup: Bool = false) throws {
     guard let whole else { throw MisoError.invalid("Image is not attached") }
-    let matches = try matchingImages(cleanup: cleanup)
-    guard matches.count == 1, let match = matches.first,
-      match.entities.contains(where: { $0.device == whole })
-    else {
-      throw MisoError.invalid("Image attachment ownership changed")
-    }
-    guard match.writable == !readOnly else {
-      throw MisoError.invalid("Backing image attachment access differs from requested access")
-    }
+    let match = try ImageInfo.owned(
+      path: image.path, device: whole, readOnly: readOnly,
+      refresh: { try self.matchingImages(cleanup: cleanup) })
     attachment = DiskImageAttachment(entities: match.entities)
   }
 

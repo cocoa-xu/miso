@@ -130,8 +130,25 @@ func nativeImageMountLifecycle() throws {
         do {
           try group.withCleanup {
             let mounted = try group.mount(data, name: "data", readOnly: false, at: dataRoot)
-            _ = try group.mount(preboot, name: "preboot", readOnly: true, at: prebootRoot)
+            let boot = try group.mount(preboot, name: "preboot", readOnly: true, at: prebootRoot)
             _ = try BaseImageStage.Account("admin", data: mounted)
+            let cryptexes = try FileManager.default.contentsOfDirectory(atPath: boot.root.path)
+              .filter { UUID(uuidString: $0) != nil }
+              .map {
+                boot.root.appendingPathComponent($0 + "/cryptex1/current/os.dmg")
+                  .resolvingSymlinksInPath()
+              }.filter { FileManager.default.fileExists(atPath: $0.path) }
+            let cryptexImage = try #require(cryptexes.count == 1 ? cryptexes.first : nil)
+            try #require(cryptexImage.path.hasPrefix(boot.root.path + "/"))
+            let cryptex = try DiskImageSession(
+              image: cryptexImage, readOnly: true, journal: journal, forceReadOnlyDetach: true)
+            var descriptor: Int32 = -1
+            defer { if descriptor >= 0 { close(descriptor) } }
+            let cryptexRoot = root.appendingPathComponent("Cryptex")
+            try cryptex.withAttachment(requireGPT: false, mountPoint: cryptexRoot) { _ in
+              descriptor = try SafeFile.openDirectory(cryptexRoot)
+            }
+            try session.verifyOwnership()
             if cycle == 1 { throw MisoError.invalid("Expected lifecycle body failure") }
           }
           #expect(cycle != 1)

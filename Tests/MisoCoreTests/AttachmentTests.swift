@@ -67,6 +67,86 @@ private func imageInventory(_ images: [[String: Any]]) throws -> Data {
   }
 }
 
+@Test func imageOwnershipWaitsForMissingInventoryAndWholeDevice() throws {
+  let owned = DiskImageSession.ImageInfo.Image(
+    path: "/work/owned.img",
+    entities: [.init(device: "/dev/disk11", contentHint: nil, mountPoint: nil)], writable: true)
+  let incomplete = DiskImageSession.ImageInfo.Image(
+    path: owned.path, entities: [], writable: true)
+  var queries = 0
+  var pauses = 0
+  let result = try DiskImageSession.ImageInfo.owned(
+    path: "/work/owned.img", device: "/dev/disk11", readOnly: false,
+    refresh: {
+      queries += 1
+      return queries == 1 ? [] : [queries == 2 ? incomplete : owned]
+    }, pause: { pauses += 1 })
+  #expect(result.entities.map(\.device) == ["/dev/disk11"])
+  #expect(queries == 3 && pauses == 2)
+}
+
+@Test func imageOwnershipRejectsAmbiguousOrChangedAccessImmediately() {
+  let owned = DiskImageSession.ImageInfo.Image(
+    path: "/work/owned.img",
+    entities: [.init(device: "/dev/disk11", contentHint: nil, mountPoint: nil)], writable: true)
+  let readOnly = DiskImageSession.ImageInfo.Image(
+    path: owned.path, entities: owned.entities, writable: false)
+  let unknown = DiskImageSession.ImageInfo.Image(
+    path: owned.path, entities: owned.entities, writable: nil)
+  for matches in [[owned, owned], [readOnly], [unknown]] {
+    var queries = 0
+    #expect(throws: (any Error).self) {
+      try DiskImageSession.ImageInfo.owned(
+        path: "/work/owned.img", device: "/dev/disk11", readOnly: false,
+        refresh: {
+          queries += 1
+          return matches
+        },
+        pause: { Issue.record("Conflicting ownership must not be retried") })
+    }
+    #expect(queries == 1)
+  }
+}
+
+@Test func imageOwnershipWaitIsBoundedAndNeverAcceptsAnotherDevice() {
+  let foreign = DiskImageSession.ImageInfo.Image(
+    path: "/work/owned.img",
+    entities: [.init(device: "/dev/disk12", contentHint: nil, mountPoint: nil)], writable: true)
+  for matches in [[], [foreign]] {
+    var queries = 0
+    var pauses = 0
+    do {
+      _ = try DiskImageSession.ImageInfo.owned(
+        path: "/work/owned.img", device: "/dev/disk11", readOnly: false,
+        refresh: {
+          queries += 1
+          return matches
+        }, pause: { pauses += 1 })
+      Issue.record("Missing attachment ownership was accepted")
+    } catch {
+      #expect(error.localizedDescription.contains("/work/owned.img"))
+      #expect(error.localizedDescription.contains("expected /dev/disk11"))
+      #expect(error.localizedDescription.contains("observed \(matches.count) matching images"))
+      if !matches.isEmpty { #expect(error.localizedDescription.contains("/dev/disk12")) }
+    }
+    #expect(queries == 10 && pauses == 9)
+  }
+}
+
+@Test func imageOwnershipDoesNotRetryCommandOrFileIdentityErrors() {
+  var queries = 0
+  #expect(throws: (any Error).self) {
+    try DiskImageSession.ImageInfo.owned(
+      path: "/work/owned.img", device: "/dev/disk11", readOnly: true,
+      refresh: {
+        queries += 1
+        throw MisoError.invalid("Image file identity changed")
+      },
+      pause: { Issue.record("Invalid image identity must not be retried") })
+  }
+  #expect(queries == 1)
+}
+
 @Test(arguments: [(11, 12), (28, 31), (407, 519)])
 func topologyRejectsForeignAndMixedStores(_ disks: (Int, Int)) throws {
   let physical = "disk\(disks.0)"
