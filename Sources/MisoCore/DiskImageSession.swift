@@ -196,6 +196,23 @@ public final class DiskImageSession {
         "Image attachment ownership unavailable: \(path); expected \(device), "
           + "observed \(matches.count) matching images [\(observed)]")
     }
+
+    static func waitUntilDetached(
+      path: String, refresh: () throws -> [Image],
+      pause: () -> Void = { Thread.sleep(forTimeInterval: 0.1) }
+    ) throws {
+      var matches: [Image] = []
+      for attempt in 0..<10 {
+        matches = try refresh()
+        if matches.isEmpty { return }
+        if attempt == 0 { BuildProgress.write("Waiting for image detachment metadata: \(path)") }
+        if attempt < 9 { pause() }
+      }
+      let observed = matches.flatMap(\.entities).map(\.device).joined(separator: ", ")
+      throw MisoError.invalid(
+        "Image remains attached after detach: \(path); "
+          + "observed \(matches.count) matching images [\(observed)]")
+    }
   }
 
   public let image: URL
@@ -206,6 +223,7 @@ public final class DiskImageSession {
   private let originalIdentity: (dev_t, ino_t)
   private var whole: String?
   private var attachmentAttempted = false
+  private var detachSucceeded = false
   private let forceReadOnlyDetach: Bool
 
   public init(
@@ -374,6 +392,10 @@ public final class DiskImageSession {
   }
 
   private func detachAttempt(allowBusy: Bool) throws -> Bool {
+    if detachSucceeded {
+      try finishDetach()
+      return true
+    }
     let matches = try matchingImages(cleanup: true)
     if matches.isEmpty {
       whole = nil
@@ -411,12 +433,17 @@ public final class DiskImageSession {
         NativeCommand(.diskImages, arguments: ["detach", "-force", device], timeout: 120),
         cleanup: true)
     }
-    guard try matchingImages(cleanup: true).isEmpty else {
-      throw MisoError.invalid("Image remains attached after detach")
-    }
+    detachSucceeded = true
+    try finishDetach()
+    return true
+  }
+
+  private func finishDetach() throws {
+    try ImageInfo.waitUntilDetached(
+      path: image.path, refresh: { try self.matchingImages(cleanup: true) })
     whole = nil
     attachment = nil
     attachmentAttempted = false
-    return true
+    detachSucceeded = false
   }
 }

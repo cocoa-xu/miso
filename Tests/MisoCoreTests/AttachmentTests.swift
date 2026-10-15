@@ -147,6 +147,60 @@ private func imageInventory(_ images: [[String: Any]]) throws -> Data {
   #expect(queries == 1)
 }
 
+@Test func detachmentWaitAllowsStaleAndIncompleteInventory() throws {
+  let stale = DiskImageSession.ImageInfo.Image(
+    path: "/work/owned.img",
+    entities: [.init(device: "/dev/disk11", contentHint: nil, mountPoint: nil)], writable: false)
+  let incomplete = DiskImageSession.ImageInfo.Image(
+    path: stale.path, entities: [], writable: nil)
+  var queries = 0
+  var pauses = 0
+  try DiskImageSession.ImageInfo.waitUntilDetached(
+    path: "/work/owned.img",
+    refresh: {
+      queries += 1
+      return queries < 3 ? [queries == 1 ? stale : incomplete] : []
+    }, pause: { pauses += 1 })
+  #expect(queries == 3 && pauses == 2)
+}
+
+@Test func detachmentWaitNeverAcceptsRemainingAttachments() {
+  let remaining = DiskImageSession.ImageInfo.Image(
+    path: "/work/owned.img",
+    entities: [.init(device: "/dev/disk12", contentHint: nil, mountPoint: nil)], writable: true)
+  for matches in [[remaining], [remaining, remaining]] {
+    var queries = 0
+    var pauses = 0
+    do {
+      try DiskImageSession.ImageInfo.waitUntilDetached(
+        path: "/work/owned.img",
+        refresh: {
+          queries += 1
+          return matches
+        }, pause: { pauses += 1 })
+      Issue.record("A remaining attachment was accepted as detached")
+    } catch {
+      #expect(error.localizedDescription.contains("/work/owned.img"))
+      #expect(error.localizedDescription.contains("/dev/disk12"))
+      #expect(error.localizedDescription.contains("\(matches.count) matching images"))
+    }
+    #expect(queries == 10 && pauses == 9)
+  }
+}
+
+@Test func detachmentWaitPropagatesInventoryErrors() {
+  var queries = 0
+  #expect(throws: (any Error).self) {
+    try DiskImageSession.ImageInfo.waitUntilDetached(
+      path: "/work/owned.img",
+      refresh: {
+        queries += 1
+        throw MisoError.invalid("Image file identity changed")
+      }, pause: { Issue.record("Invalid image identity must not be retried") })
+  }
+  #expect(queries == 1)
+}
+
 @Test(arguments: [(11, 12), (28, 31), (407, 519)])
 func topologyRejectsForeignAndMixedStores(_ disks: (Int, Int)) throws {
   let physical = "disk\(disks.0)"
