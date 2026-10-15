@@ -154,14 +154,14 @@ private func imageInventory(_ images: [[String: Any]]) throws -> Data {
   let incomplete = DiskImageSession.ImageInfo.Image(
     path: stale.path, entities: [], writable: nil)
   var queries = 0
-  var pauses = 0
+  var clock: TimeInterval = 0
   try DiskImageSession.ImageInfo.waitUntilDetached(
-    path: "/work/owned.img",
+    path: "/work/owned.img", deadline: 120,
     refresh: {
       queries += 1
-      return queries < 3 ? [queries == 1 ? stale : incomplete] : []
-    }, pause: { pauses += 1 })
-  #expect(queries == 3 && pauses == 2)
+      return clock < 5 ? [clock < 4 ? stale : incomplete] : []
+    }, now: { clock }, pause: { clock += $0 })
+  #expect(clock == 5 && queries == 6)
 }
 
 @Test func detachmentWaitNeverAcceptsRemainingAttachments() {
@@ -170,21 +170,21 @@ private func imageInventory(_ images: [[String: Any]]) throws -> Data {
     entities: [.init(device: "/dev/disk12", contentHint: nil, mountPoint: nil)], writable: true)
   for matches in [[remaining], [remaining, remaining]] {
     var queries = 0
-    var pauses = 0
+    var clock: TimeInterval = 0
     do {
       try DiskImageSession.ImageInfo.waitUntilDetached(
-        path: "/work/owned.img",
+        path: "/work/owned.img", deadline: 2.5,
         refresh: {
           queries += 1
           return matches
-        }, pause: { pauses += 1 })
+        }, now: { clock }, pause: { clock += $0 })
       Issue.record("A remaining attachment was accepted as detached")
     } catch {
       #expect(error.localizedDescription.contains("/work/owned.img"))
       #expect(error.localizedDescription.contains("/dev/disk12"))
       #expect(error.localizedDescription.contains("\(matches.count) matching images"))
     }
-    #expect(queries == 10 && pauses == 9)
+    #expect(clock == 2.5 && queries == 4)
   }
 }
 
@@ -192,13 +192,33 @@ private func imageInventory(_ images: [[String: Any]]) throws -> Data {
   var queries = 0
   #expect(throws: (any Error).self) {
     try DiskImageSession.ImageInfo.waitUntilDetached(
-      path: "/work/owned.img",
+      path: "/work/owned.img", deadline: 120,
       refresh: {
         queries += 1
         throw MisoError.invalid("Image file identity changed")
-      }, pause: { Issue.record("Invalid image identity must not be retried") })
+      }, now: { 0 }, pause: { _ in Issue.record("Invalid image identity must not be retried") })
   }
   #expect(queries == 1)
+}
+
+@Test func detachmentCleanupDoesNotExtendAnExpiredDeadline() throws {
+  var queries = 0
+  let remaining = DiskImageSession.ImageInfo.Image(
+    path: "/work/owned.img", entities: [], writable: true)
+  for matches in [[remaining], []] {
+    do {
+      try DiskImageSession.ImageInfo.waitUntilDetached(
+        path: "/work/owned.img", deadline: 120,
+        refresh: {
+          queries += 1
+          return matches
+        }, now: { 121 }, pause: { _ in Issue.record("Expired cleanup deadline was extended") })
+      #expect(matches.isEmpty)
+    } catch {
+      #expect(!matches.isEmpty)
+    }
+  }
+  #expect(queries == 2)
 }
 
 @Test(arguments: [(11, 12), (28, 31), (407, 519)])

@@ -198,15 +198,22 @@ public final class DiskImageSession {
     }
 
     static func waitUntilDetached(
-      path: String, refresh: () throws -> [Image],
-      pause: () -> Void = { Thread.sleep(forTimeInterval: 0.1) }
+      path: String, deadline: TimeInterval, refresh: () throws -> [Image],
+      now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+      pause: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }
     ) throws {
       var matches: [Image] = []
-      for attempt in 0..<10 {
+      var reported = false
+      while true {
         matches = try refresh()
         if matches.isEmpty { return }
-        if attempt == 0 { BuildProgress.write("Waiting for image detachment metadata: \(path)") }
-        if attempt < 9 { pause() }
+        let remaining = deadline - now()
+        guard remaining > 0 else { break }
+        if !reported {
+          BuildProgress.write("Waiting for image detachment metadata: \(path)")
+          reported = true
+        }
+        pause(min(1, remaining))
       }
       let observed = matches.flatMap(\.entities).map(\.device).joined(separator: ", ")
       throw MisoError.invalid(
@@ -223,7 +230,8 @@ public final class DiskImageSession {
   private let originalIdentity: (dev_t, ino_t)
   private var whole: String?
   private var attachmentAttempted = false
-  private var detachSucceeded = false
+  private var detachDeadline: TimeInterval?
+  private static let detachTimeout: TimeInterval = 120
   private let forceReadOnlyDetach: Bool
 
   public init(
@@ -392,7 +400,7 @@ public final class DiskImageSession {
   }
 
   private func detachAttempt(allowBusy: Bool) throws -> Bool {
-    if detachSucceeded {
+    if detachDeadline != nil {
       try finishDetach()
       return true
     }
@@ -417,8 +425,10 @@ public final class DiskImageSession {
       device = try current.wholeDevice(
         requireGPT: current.entities.contains { $0.contentHint == "GUID_partition_scheme" })
     }
+    let deadline = ProcessInfo.processInfo.systemUptime + Self.detachTimeout
     try journal.run(
-      "detach-image", NativeCommand(.diskImages, arguments: ["detach", device], timeout: 120),
+      "detach-image",
+      NativeCommand(.diskImages, arguments: ["detach", device], timeout: Self.detachTimeout),
       cleanup: true, expectedExitCodes: allowBusy || forceReadOnlyDetach ? [0, 16] : [0])
     if journal.record.commands.last?.result?.exitCode == 16 {
       if allowBusy { return false }
@@ -430,20 +440,23 @@ public final class DiskImageSession {
       }
       try journal.run(
         "detach-owned-readonly-image",
-        NativeCommand(.diskImages, arguments: ["detach", "-force", device], timeout: 120),
+        NativeCommand(
+          .diskImages, arguments: ["detach", "-force", device], timeout: Self.detachTimeout),
         cleanup: true)
     }
-    detachSucceeded = true
+    detachDeadline = deadline
     try finishDetach()
     return true
   }
 
   private func finishDetach() throws {
+    guard let detachDeadline else { throw MisoError.invalid("Image detach has not succeeded") }
     try ImageInfo.waitUntilDetached(
-      path: image.path, refresh: { try self.matchingImages(cleanup: true) })
+      path: image.path, deadline: detachDeadline,
+      refresh: { try self.matchingImages(cleanup: true) })
     whole = nil
     attachment = nil
     attachmentAttempted = false
-    detachSucceeded = false
+    self.detachDeadline = nil
   }
 }

@@ -131,7 +131,15 @@ func nativeImageMountLifecycle() throws {
           try group.withCleanup {
             let mounted = try group.mount(data, name: "data", readOnly: false, at: dataRoot)
             let boot = try group.mount(preboot, name: "preboot", readOnly: true, at: prebootRoot)
-            _ = try BaseImageStage.Account("admin", data: mounted)
+            let account = try BaseImageStage.Account("admin", data: mounted)
+            let probe = "private/tmp/miso-detach-probe"
+            try mounted.makeDirectories(probe, uid: account.uid, gid: account.gid)
+            let bytes = Data(repeating: UInt8(cycle), count: 128 << 10)
+            for index in 0..<64 {
+              try mounted.write(
+                probe + "/\(index)", data: bytes, uid: account.uid, gid: account.gid)
+            }
+            try FileManager.default.removeItem(at: mounted.path(probe))
             let cryptexes = try FileManager.default.contentsOfDirectory(atPath: boot.root.path)
               .filter { UUID(uuidString: $0) != nil }
               .map {
