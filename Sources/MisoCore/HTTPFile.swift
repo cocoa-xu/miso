@@ -1,40 +1,6 @@
 import Foundation
 
 enum HTTPFile {
-  private final class Delegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    let maximumBytes: Int64
-    let gate: HTTPData.RedirectGate
-
-    init(url: URL, maximumBytes: Int64, redirects: HTTPData.RedirectPolicy) {
-      self.maximumBytes = maximumBytes
-      gate = HTTPData.RedirectGate(source: url, policy: redirects)
-    }
-
-    func urlSession(
-      _ session: URLSession, task: URLSessionTask,
-      willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
-      completionHandler: @escaping @Sendable (URLRequest?) -> Void
-    ) {
-      gate.urlSession(
-        session, task: task, willPerformHTTPRedirection: response,
-        newRequest: request, completionHandler: completionHandler)
-    }
-
-    func urlSession(
-      _ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
-      totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
-    ) {
-      if totalBytesWritten > maximumBytes || totalBytesExpectedToWrite > maximumBytes {
-        downloadTask.cancel()
-      }
-    }
-
-    func urlSession(
-      _ session: URLSession, downloadTask: URLSessionDownloadTask,
-      didFinishDownloadingTo location: URL
-    ) {}
-  }
-
   static func validate(
     _ url: URL, maximumBytes: UInt64, appleAsset: Bool = false, appleRestore: Bool = false,
     xcodeArchive: Bool = false
@@ -175,26 +141,19 @@ enum HTTPFile {
     try await withThrowingTaskGroup(of: Void.self) { group in
       group.addTask { [request] in
         try await HTTPRetry.run(cancellation: cancellation) {
-          let delegate = Delegate(url: url, maximumBytes: Int64(maximumBytes), redirects: redirects)
-          let (temporary, response) = try await session.download(for: request, delegate: delegate)
+          let temporary = output.deletingLastPathComponent().appendingPathComponent(
+            ".download-\(UUID().uuidString)")
+          let delegate = try HTTPFileDownload(
+            source: url, destination: temporary, maximumBytes: Int64(maximumBytes),
+            redirects: redirects)
           defer { try? FileManager.default.removeItem(at: temporary) }
-          guard let response = response as? HTTPURLResponse else {
-            throw MisoError.invalid("Expected an HTTPS payload response")
-          }
-          try HTTPRetry.requireSuccess(response)
-          guard let destination = response.url,
-            destination == url || redirects.permits(from: url, to: destination)
-          else { throw MisoError.invalid("HTTPS payload response destination changed") }
-          guard response.expectedContentLength <= maximumBytes else {
-            throw MisoError.invalid("HTTPS payload exceeds size limit")
-          }
-          if appleRestore || xcodeArchive {
-            try Artifacts.moveDownload(
-              temporary, to: output, maximumBytes: maximumBytes, cancellation: cancellation)
-          } else {
-            try Artifacts.copy(
-              temporary, to: output, maximumBytes: maximumBytes, cancellation: cancellation)
-          }
+          let task = session.dataTask(with: request)
+          task.delegate = delegate
+          try await delegate.start(task)
+          try cancellation?.check()
+          try Task.checkCancellation()
+          try Artifacts.moveDownload(
+            temporary, to: output, maximumBytes: maximumBytes, cancellation: cancellation)
         }
       }
       group.addTask {

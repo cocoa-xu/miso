@@ -32,6 +32,19 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
         client?.urlProtocol(self, didFailWithError: URLError(.cannotParseResponse))
         return
       }
+      if ["retry-partial", "retry-truncated"].contains(path), attempt == 1 {
+        let response = HTTPURLResponse(
+          url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+          headerFields: ["Content-Length": "64"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(repeating: 42, count: 32))
+        if path == "retry-partial" {
+          client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+        } else {
+          client?.urlProtocolDidFinishLoading(self)
+        }
+        return
+      }
       let status = path == "always-busy" || (path == "retry-502" && attempt == 1) ? 502 : 200
       let response = HTTPURLResponse(
         url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
@@ -116,10 +129,11 @@ private final class StubHTTPProtocol: URLProtocol, @unchecked Sendable {
       headerFields: header)!
     client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
     if path != "empty" {
+      let count = path == "stream-until-cancel" ? 256 << 10 : path == "streamed-large" ? 65 : 64
       client?.urlProtocol(
-        self, didLoad: Data(repeating: 42, count: path == "streamed-large" ? 65 : 64))
+        self, didLoad: Data(repeating: 42, count: count))
     }
-    client?.urlProtocolDidFinishLoading(self)
+    if path != "stream-until-cancel" { client?.urlProtocolDidFinishLoading(self) }
   }
 }
 
@@ -137,6 +151,44 @@ func nativeHTTPSRecoversFromTransientFailures(file: Bool, path: String) async th
     result = try await HTTPData.get(url, maximumBytes: 64, configuration: stubConfiguration())
   }
   #expect(String(data: result, encoding: .utf8) == "attempt=2")
+}
+
+@Test(arguments: ["retry-partial", "retry-truncated"])
+func payloadRetryDiscardsIncompleteAttempt(_ path: String) async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let output = temporary.url.appendingPathComponent("payload")
+  try await HTTPFile.get(
+    URL(string: "https://\(UUID().uuidString).test/\(path)")!, to: output,
+    maximumBytes: 64, configuration: stubConfiguration())
+  #expect(try String(contentsOf: output, encoding: .utf8) == "attempt=2")
+  #expect(try FileManager.default.contentsOfDirectory(atPath: temporary.url.path) == ["payload"])
+}
+
+@Test func payloadStreamsIntoDestinationVolumeAndCleansUpOnCancellation() async throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let output = temporary.url.appendingPathComponent("payload")
+  let task = Task {
+    try await HTTPFile.get(
+      URL(string: "https://fixture.test/stream-until-cancel")!, to: output,
+      maximumBytes: 1 << 20, configuration: stubConfiguration())
+  }
+  var partial: URL?
+  for _ in 0..<200 {
+    let paths = try FileManager.default.contentsOfDirectory(
+      at: temporary.url, includingPropertiesForKeys: [.fileSizeKey])
+    partial = try paths.first {
+      try $0.resourceValues(forKeys: [.fileSizeKey]).fileSize == 256 << 10
+    }
+    if partial != nil { break }
+    try await Task.sleep(for: .milliseconds(10))
+  }
+  task.cancel()
+  await #expect(throws: (any Error).self) { try await task.value }
+  #expect(partial?.deletingLastPathComponent().path == temporary.url.path)
+  #expect(!FileManager.default.fileExists(atPath: output.path))
+  #expect(try FileManager.default.contentsOfDirectory(atPath: temporary.url.path).isEmpty)
 }
 
 @Test(arguments: [false, true])
