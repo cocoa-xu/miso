@@ -41,6 +41,9 @@ sudo "$(command -v miso)" restore restore.ipsw \
 
 The image bundle is written to `vanilla/assembled/bundle`. Output directories must
 be new, with enough free space for the image and its inputs.
+For external storage, put inputs, parent images and `--output` directories on the
+same APFS volume. Downloads stream into their output directory; image stages use
+APFS clones rather than copying the parent disk. No separate storage flag is needed.
 You can also pass an Apple HTTPS IPSW URL. MISO removes its download after successful
 input preparation; add `--keep-downloads` to retain it. Local IPSW files are always
 preserved.
