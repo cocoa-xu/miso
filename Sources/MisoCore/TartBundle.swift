@@ -93,6 +93,16 @@ public enum TartBundle {
       try SafeFile.writeNew(bytes, to: bundle.appendingPathComponent("manifest.json"))
       let verification = try ImageBundle.verify(bundle, cancellation: journal.cancellation)
       var files = verification.files
+      var updated = fields
+      let auxiliaryURL = bundle.appendingPathComponent("aux.bin")
+      var auxiliary = try SafeFile.read(auxiliaryURL, limit: AuxiliaryStorage.size)
+      let initializedEAN = try AuxiliaryStorage.initializeEAN(in: &auxiliary)
+      if initializedEAN {
+        try SafeFile.replace(auxiliary, at: auxiliaryURL)
+        let record = try Artifacts.record(auxiliaryURL, relativeTo: bundle)
+        files = files.map { $0.path == "aux.bin" ? record : $0 }
+        updated["ean_storage_initialized"] = true
+      }
       if let diskBytes {
         let details = try DiskExpansion.run(
           image: bundle.appendingPathComponent("disk.img"), bytes: diskBytes, journal: journal)
@@ -100,11 +110,12 @@ public enum TartBundle {
           bundle.appendingPathComponent("disk.img"), relativeTo: bundle,
           cancellation: journal.cancellation)
         files = files.map { $0.path == "disk.img" ? disk : $0 }
-        var expanded = fields
-        expanded["files"] = try JSONSerialization.jsonObject(with: JSON.encode(files))
-        expanded["disk_expansion"] = try JSONSerialization.jsonObject(with: JSON.encode(details))
+        updated["disk_expansion"] = try JSONSerialization.jsonObject(with: JSON.encode(details))
+      }
+      if initializedEAN || diskBytes != nil {
+        updated["files"] = try JSONSerialization.jsonObject(with: JSON.encode(files))
         try SafeFile.replace(
-          JSONSerialization.data(withJSONObject: expanded, options: [.prettyPrinted, .sortedKeys]),
+          JSONSerialization.data(withJSONObject: updated, options: [.prettyPrinted, .sortedKeys]),
           at: bundle.appendingPathComponent("manifest.json"))
       }
       return ImportReceipt(

@@ -134,11 +134,27 @@ private func pbzeHeader(_ numbers: [UInt64]) -> Data {
     appleLogo: Data("logo".utf8), nonces: Data(0..<112), generator: 0x1234_5678_9abc_def0,
     selection: selection, profile: RestoreProfile.supported[0])
   #expect(
-    SafeFile.sha256(data) == "926fbd13500dc1896df9708600ff253ea286e55cdc12a0ab60ee38d6d448a230")
+    SafeFile.sha256(data) == "d79fe5ceba2f99527f3bfc3c9c66a405a89265f7f967a4f351349a0179df1a90")
   try AuxiliaryStorage.verifyPanicLog(data)
   var corrupt = data
   corrupt[AuxiliaryStorage.panicLogOffset] = 255
   #expect(throws: (any Error).self) { try AuxiliaryStorage.verifyPanicLog(corrupt) }
+}
+
+@Test func auxiliaryEANPreservesExistingDataAndRejectsCorruptStorage() throws {
+  var data = Data(repeating: 0xff, count: AuxiliaryStorage.size)
+  #expect(try AuxiliaryStorage.initializeEAN(in: &data))
+  let initialized = data
+  data[AuxiliaryStorage.eanOffset + 4096] = 42
+  let retained = data
+  #expect(try !AuxiliaryStorage.initializeEAN(in: &data))
+  #expect(data == retained)
+  data[AuxiliaryStorage.eanOffset + 20] ^= 1
+  let corrupted = data
+  #expect(throws: MisoError.self) { try AuxiliaryStorage.initializeEAN(in: &data) }
+  #expect(data == corrupted)
+  data = Data(initialized.dropLast())
+  #expect(throws: MisoError.self) { try AuxiliaryStorage.initializeEAN(in: &data) }
 }
 
 @Test func accountPasswordGoldenBytes() throws {

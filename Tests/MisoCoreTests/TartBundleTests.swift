@@ -5,7 +5,7 @@ import Virtualization
 @testable import MisoCore
 
 @MainActor
-private func exportFixture(_ directory: URL) throws -> URL {
+private func exportFixture(_ directory: URL, legacyEAN: Bool = false) throws -> URL {
   let source = directory.appendingPathComponent("source")
   try SafeFile.makeDirectory(source)
   let model = try #require(
@@ -18,9 +18,12 @@ private func exportFixture(_ directory: URL) throws -> URL {
   try SafeFile.writeNew(
     VZMacMachineIdentifier().dataRepresentation,
     to: source.appendingPathComponent("machine-identifier.bin"))
-  let auxiliary = try SafeFile.create(source.appendingPathComponent("aux.bin"))
-  try auxiliary.truncate(atOffset: UInt64(AuxiliaryStorage.size))
-  try auxiliary.close()
+  var auxiliary = Data(count: AuxiliaryStorage.size)
+  auxiliary.replaceSubrange(
+    AuxiliaryStorage.eanOffset..<AuxiliaryStorage.size,
+    with: Data(repeating: 0xff, count: AuxiliaryStorage.eanSize))
+  if !legacyEAN { try AuxiliaryStorage.initializeEAN(in: &auxiliary) }
+  try SafeFile.writeNew(auxiliary, to: source.appendingPathComponent("aux.bin"))
   let files = try ImageBundle.requiredFiles.sorted().map {
     try Artifacts.record(source.appendingPathComponent($0), relativeTo: source)
   }
@@ -123,4 +126,36 @@ private func exportFixture(_ directory: URL) throws -> URL {
     try TartBundle.importImage(source: vm, manifest: manifest, output: output)
   }
   #expect(!FileManager.default.fileExists(atPath: output.path))
+}
+
+@Test @MainActor func tartImportInitializesLegacyEANWithoutChangingItsSource() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let source = try exportFixture(temporary.url, legacyEAN: true)
+  let exported = temporary.url.appendingPathComponent("export")
+  _ = try TartBundle.export(source: source, output: exported)
+  let original = try SafeFile.read(
+    source.appendingPathComponent("aux.bin"), limit: AuxiliaryStorage.size)
+  let output = temporary.url.appendingPathComponent("import")
+  let receipt = try TartBundle.importImage(
+    source: exported.appendingPathComponent("vm"),
+    manifest: source.appendingPathComponent("manifest.json"),
+    output: output)
+  let bundle = output.appendingPathComponent("bundle")
+  let verified = try ImageBundle.verify(bundle)
+  #expect(verified.files == receipt.files)
+  var initialized = try SafeFile.read(
+    bundle.appendingPathComponent("aux.bin"), limit: AuxiliaryStorage.size)
+  #expect(initialized != original)
+  #expect(
+    initialized.prefix(AuxiliaryStorage.eanOffset) == original.prefix(AuxiliaryStorage.eanOffset))
+  #expect(try !AuxiliaryStorage.initializeEAN(in: &initialized))
+  #expect(
+    try SafeFile.read(exported.appendingPathComponent("vm/nvram.bin"), limit: AuxiliaryStorage.size)
+      == original)
+  #expect(
+    try SafeFile.read(source.appendingPathComponent("aux.bin"), limit: AuxiliaryStorage.size)
+      == original)
+  _ = try TartBundle.export(
+    source: bundle, output: temporary.url.appendingPathComponent("reexport"))
 }
