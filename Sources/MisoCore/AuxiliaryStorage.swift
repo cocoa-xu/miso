@@ -6,6 +6,8 @@ public enum AuxiliaryStorage {
   public static let size = 0x2004000
   public static let panicLogOffset = 0x1504000
   public static let panicLogSize = 0x500000
+  static let eanOffset = 0x1a04000
+  static let eanSize = 0x600000
 
   public struct BootSelection: Sendable {
     public let partitionType: UUID
@@ -72,9 +74,42 @@ public enum AuxiliaryStorage {
     }
     let panicStart = panicLogOffset - 0x4000
     flash.replaceSubrange(panicStart..<panicStart + panicLogSize, with: Data(count: panicLogSize))
-    let result = empty.prefix(0x4000) + flash
+    var result = empty.prefix(0x4000) + flash
+    try initializeEAN(in: &result)
     try verifyPanicLog(result)
     return result
+  }
+
+  @discardableResult
+  static func initializeEAN(in data: inout Data) throws -> Bool {
+    guard data.count == size else { throw MisoError.invalid("Unexpected auxiliary storage size") }
+    let region = eanOffset..<eanOffset + eanSize
+    guard data[region].allSatisfy({ $0 == 0xff }) else {
+      let header = data.subdata(in: eanOffset..<eanOffset + 4096)
+      let used = try header.integer(at: 16, as: UInt32.self)
+      guard try header.integer(at: 0, as: UInt32.self) == 1,
+        try header.integer(at: 4, as: UInt32.self) == 0xeaea_eaea,
+        try header.integer(at: 12, as: UInt32.self) == eanSize,
+        used >= 4096, used <= eanSize, used % 4096 == 0,
+        try header.integer(at: 4092, as: UInt32.self) == eanChecksum(header.prefix(4092))
+      else { throw MisoError.invalid("Invalid EAN storage; refusing to replace existing data") }
+      return false
+    }
+    var header = Data(count: 4096)
+    header.put(UInt32(1), at: 0)
+    header.put(UInt32(0xeaea_eaea), at: 4)
+    header.put(UInt32(eanSize), at: 12)
+    header.put(UInt32(4096), at: 16)
+    header.put(eanChecksum(header.prefix(4092)), at: 4092)
+    data.replaceSubrange(region, with: Data(count: eanSize))
+    data.replaceSubrange(eanOffset..<eanOffset + header.count, with: header)
+    return true
+  }
+
+  private static func eanChecksum(_ data: Data) -> UInt32 {
+    data.withUnsafeBytes {
+      UInt32(crc32(0, $0.bindMemory(to: UInt8.self).baseAddress, UInt32($0.count)))
+    }
   }
 
   public static func verifyPanicLog(_ data: Data) throws {
