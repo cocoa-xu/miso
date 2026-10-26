@@ -28,11 +28,23 @@ jobs:
       - name: Run unit tests
         run: make test-unit
       - name: Verify Spotlight policy on a disposable APFS volume
+        id: spotlight
         run: |
           sudo env DEVELOPER_DIR="$DEVELOPER_DIR" \
             MISO_SPOTLIGHT_TEST_OUTPUT="$RUNNER_TEMP/spotlight-policy" \
             xcrun swift test --disable-automatic-resolution --skip-build \
             --filter nativeSpotlightVolumePolicy --no-parallel
+      - name: Collect native volume failure evidence
+        if: failure() && steps.spotlight.outcome == 'failure'
+        run: |
+          sudo tar -czf "$RUNNER_TEMP/spotlight-evidence.tar.gz" \
+            -C "$RUNNER_TEMP/spotlight-policy" journal.json logs
+          sudo chmod 0644 "$RUNNER_TEMP/spotlight-evidence.tar.gz"
+      - uses: actions/upload-artifact@v7
+        if: failure() && steps.spotlight.outcome == 'failure'
+        with:
+          name: spotlight-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/spotlight-evidence.tar.gz
       - name: Build signed executable
         run: make build
       - name: Package release
