@@ -14,7 +14,7 @@ func nativeSpotlightVolumePolicy() throws {
   var phase = "create disposable image"
   do {
     _ = try journal.perform {
-      let image = output.appendingPathComponent("spotlight.sparseimage")
+      let image = output.appendingPathComponent("spotlight.cdr")
       let systemRoot = output.appendingPathComponent("system")
       try SafeFile.makeDirectory(systemRoot)
       let system = try GuestVolume(systemRoot)
@@ -25,7 +25,7 @@ func nativeSpotlightVolumePolicy() throws {
           .diskImages,
           arguments: [
             "create", "-size", "256m", "-fs", "APFS", "-volname", "MISO-Spotlight-Test",
-            "-type", "SPARSE", "-layout", "GPTSPUD", image.path,
+            "-type", "UDTO", "-layout", "GPTSPUD", image.path,
           ]))
       for cycle in 0..<3 {
         phase = "attach cycle \(cycle)"
