@@ -27,6 +27,12 @@ jobs:
           persist-credentials: false
       - name: Run unit tests
         run: make test-unit
+      - name: Verify Spotlight policy on a disposable APFS volume
+        run: |
+          sudo env DEVELOPER_DIR="$DEVELOPER_DIR" \
+            MISO_SPOTLIGHT_TEST_OUTPUT="$RUNNER_TEMP/spotlight-policy" \
+            xcrun swift test --disable-automatic-resolution --skip-build \
+            --filter nativeSpotlightVolumePolicy --no-parallel
       - name: Build signed executable
         run: make build
       - name: Package release
