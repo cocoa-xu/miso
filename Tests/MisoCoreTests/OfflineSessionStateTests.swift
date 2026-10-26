@@ -115,3 +115,64 @@ private let sessionSchema = """
     try OfflineSessionState.seed(path, schema: sessionSchema, version: 36, requirement: requirement)
   }
 }
+
+@Test func goldenGateRCSessionUsesItsOwnSchemaAndVersionStamps() throws {
+  let target = MacOSRelease(version: "27.2", build: "26B118")
+  let profile = try #require(try OfflineSessionState.profile(for: target))
+  let previous = try #require(try OfflineSessionState.profile(for: sessionTarget))
+  #expect(profile.versionNumber == (27 << 24) | (2 << 16))
+  #expect(profile.buildNumber == (26 << 21) | (1 << 16) | (118 << 5))
+  #expect(profile.schemaVersion == 37)
+  #expect(profile.tccdSHA256 != previous.tccdSHA256)
+  #expect(profile.schemaSHA256 != previous.schemaSHA256)
+  for release in [
+    MacOSRelease(version: "27.2", build: "26A434"),
+    .init(version: "27.0.1", build: "26B118"), .init(version: "27.2", build: "26B119"),
+  ] {
+    #expect(throws: (any Error).self) { try OfflineSessionState.profile(for: release) }
+  }
+}
+
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MISO_SESSION_SYSTEM"] != nil))
+func nativeSessionSchemaPreservesScreenSharingThroughBaseSeeding() throws {
+  let system = URL(
+    fileURLWithPath: try #require(ProcessInfo.processInfo.environment["MISO_SESSION_SYSTEM"]))
+  let version = try RestoreInspection.plist(
+    SafeFile.read(
+      system.appendingPathComponent("System/Library/CoreServices/SystemVersion.plist"),
+      limit: 1 << 20))
+  let target = MacOSRelease(
+    version: try #require(version["ProductVersion"] as? String),
+    build: try #require(version["ProductBuildVersion"] as? String))
+  let profile = try #require(try OfflineSessionState.profile(for: target))
+  for (path, hash) in [
+    (OfflineSessionState.loginPath, profile.loginSHA256),
+    (OfflineSessionState.tccdPath, profile.tccdSHA256),
+  ] {
+    let file = system.appendingPathComponent(path)
+    try AppleCode.validate(file, scope: .executable)
+    #expect(try SafeFile.sha256(file) == hash)
+  }
+  let schema = try BaseTCC.schema(
+    in: SafeFile.read(system.appendingPathComponent(OfflineSessionState.tccdPath), limit: 64 << 20),
+    version: profile.schemaVersion, sha256: profile.schemaSHA256)
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let path = temporary.url.appendingPathComponent("TCC.db")
+  let requirement = try #require(try OfflineSessionState.screenSharingRequirement(for: target))
+  try OfflineSessionState.seed(
+    path, schema: schema, version: profile.schemaVersion, requirement: requirement)
+  let query = "SELECT * FROM access WHERE client='com.apple.screensharing.agent'"
+  let before = try SQLiteDatabase(path, readOnly: true).rows(query)
+  let grants = try BaseTCC.grants(
+    agent: "opt/homebrew/Cellar/tart-guest-agent/0.15.0/bin/tart-guest-agent")
+  #expect(
+    try BaseTCC.seed(
+      path, schema: schema, version: profile.schemaVersion, grants: grants,
+      preservedRequirement: requirement) == 15)
+  try OfflineSessionState.seed(
+    path, schema: schema, version: profile.schemaVersion, requirement: requirement)
+  let database = try SQLiteDatabase(path, readOnly: true)
+  #expect(try database.rows(query) == before)
+  #expect(try database.rows("PRAGMA integrity_check") == [[.text("ok")]])
+}

@@ -133,6 +133,11 @@ public struct RestoreProfile: Codable, Equatable, Sendable {
       commandLineTools: .init(
         product: "082-83364", version: "27.0.0.0.1788430756", sdk: "MacOSX27.0.sdk")),
     Self(
+      release: .init(version: "27.2", build: "26B118"), family: .goldenGate,
+      ipswSHA256: "7e032d3fa312987640631c8b7117e63ba051e4a5e21a1c27e8a4a4b49704054d",
+      commandLineTools: .init(
+        product: "082-83364", version: "27.0.0.0.1788430756", sdk: "MacOSX27.0.sdk")),
+    Self(
       release: .init(version: "26.6.1", build: "25G76"), family: .tahoe,
       ipswSHA256: "ebea9fbe4afd84eed0a4f9673b75cd0f46e15576e01615026368b6e5f1af0f03",
       commandLineTools: .init(
