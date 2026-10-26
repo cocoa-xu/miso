@@ -3,7 +3,8 @@ import Testing
 
 @testable import MisoCore
 
-@Test func portableRubyProbeReplaysVerifiedCompatibilityWithoutNetwork() async throws {
+@Test(arguments: ["4.0.7", "4.0.7_1", "4.0.7_12"])
+func portableRubyProbeReplaysVerifiedCompatibilityWithoutNetwork(version: String) async throws {
   let temporary = try TemporaryDirectory()
   defer { temporary.remove() }
   let cache = temporary.url.appendingPathComponent("cache")
@@ -20,7 +21,7 @@ import Testing
     (40, 1), (44, 26 << 16),
   ] { executable.put(value, at: offset) }
   let tar =
-    tarEntry(path: "portable-ruby/4.0.7/bin/ruby", content: executable)
+    tarEntry(path: "portable-ruby/\(version)/bin/ruby", content: executable)
     + Data(count: 1024)
   let sha = SafeFile.sha256(tar)
   func write(_ path: String, _ data: Data) throws -> ImageBundle.FileRecord {
@@ -31,7 +32,7 @@ import Testing
   let commit = String(repeating: "a", count: 40)
   let probe = try HomebrewRubyProbe(
     version: "7.0.7", commit: commit,
-    vendorVersion: write("compatibility/7.0.7-portable-ruby-version", Data("4.0.7\n".utf8)),
+    vendorVersion: write("compatibility/7.0.7-portable-ruby-version", Data("\(version)\n".utf8)),
     vendorPlatform: write(
       "compatibility/7.0.7-portable-ruby-arm64-darwin", Data("ruby_SHA=\(sha)\n".utf8)),
     payload: write("ruby-candidates/\(sha).tar.gz", tar), minimumMacOS: "26.0")
@@ -50,7 +51,13 @@ import Testing
 
 @Test func portableRubyVersionRejectsNonliteralAndOversizedValues() throws {
   #expect(try HomebrewRubyProbe.rubyVersion(Data("4.0.7\n".utf8)) == "4.0.7")
-  for value in ["", "../4.0.7", "$(id)", String(repeating: "1", count: 65)] {
+  #expect(try HomebrewRubyProbe.rubyVersion(Data("4.0.7_1\n".utf8)) == "4.0.7_1")
+  #expect(try HomebrewRubyVersion("4.0.7_1").runtime == "4.0.7")
+  #expect(try HomebrewRubyVersion("4.0.7").runtime == "4.0.7")
+  for value in [
+    "", "../4.0.7", "$(id)", "4.0.7_", "4.0.7_1_2", "4.0.7_../1", "4.0.7_01",
+    "4.0.7-rc1", "4.0.7\n_1", "4.0.7_1/path", "4.0.7_1;id", String(repeating: "1", count: 65),
+  ] {
     #expect(throws: MisoError.self) { try HomebrewRubyProbe.rubyVersion(Data(value.utf8)) }
   }
 }

@@ -103,7 +103,6 @@ struct HomebrewRubyProbe: Codable, Equatable {
       throw MisoError.invalid("Invalid portable Ruby version")
     }
     let version = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    _ = try StableVersion(version)
-    return version
+    return try HomebrewRubyVersion(version).package
   }
 }

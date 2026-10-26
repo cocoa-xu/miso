@@ -50,7 +50,7 @@ public enum BaseBootstrap {
     let core = try subtree("core")
     let ruby = try JSON.read(
       PortableRuby.self, from: inputs.appendingPathComponent("portable-ruby.json"))
-    _ = try StableVersion(ruby.version)
+    let rubyVersion = try HomebrewRubyVersion(ruby.version)
     try SafeFile.validateSHA256(ruby.sha256)
     let rubyTar = inputs.appendingPathComponent("portable-ruby.tar.gz")
     guard try SafeFile.sha256(rubyTar) == ruby.sha256,
@@ -133,7 +133,7 @@ public enum BaseBootstrap {
             "/opt/homebrew/Library/Homebrew/vendor/portable-ruby/current/bin/ruby", "-e",
             "print RUBY_VERSION",
           ])
-        guard portableRubyVersion == ruby.version else {
+        guard portableRubyVersion == rubyVersion.runtime else {
           throw MisoError.invalid("Executed portable Ruby version mismatch")
         }
         try guest.run(

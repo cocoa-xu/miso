@@ -25,7 +25,7 @@ public enum XcodeHomebrew {
     let inputs = prepared.appendingPathComponent("resources/homebrew-sources")
     let ruby = try JSON.read(
       BaseBootstrap.PortableRuby.self, from: inputs.appendingPathComponent("portable-ruby.json"))
-    _ = try StableVersion(ruby.version)
+    let rubyVersion = try HomebrewRubyVersion(ruby.version)
     let tar = inputs.appendingPathComponent("portable-ruby.tar.gz")
     let entries = try TarPayload.inspect(tar, cancellation: cancellation)
     let rubyPrefix = "portable-ruby/" + ruby.version
@@ -103,7 +103,7 @@ public enum XcodeHomebrew {
             arguments: [
               "/opt/homebrew/Library/Homebrew/vendor/portable-ruby/current/bin/ruby",
               "-e", "print RUBY_VERSION",
-            ]) == ruby.version,
+            ]) == rubyVersion.runtime,
           try BaseBottles.installedVersions(
             brew("homebrew-formulae-after", ["list", "--formula", "--versions"])) == before,
           try guest.run("homebrew-core-revision-after", arguments: core + ["rev-parse", "HEAD"])
