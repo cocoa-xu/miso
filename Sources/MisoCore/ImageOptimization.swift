@@ -137,7 +137,12 @@ public enum ImageOptimization {
                 preboot: preboot, uid: account.uid, journal: journal)
             return try OfflineSystemPolicy.apply(
               policy, system: system, data: data,
-              account: account, cancellation: journal.cancellation, additionalServices: services)
+              account: account, cancellation: journal.cancellation, additionalServices: services,
+              configureDataSpotlight: { enabled in
+                try OfflineSystemPolicy.configureSpotlight(
+                  enabled: enabled, volume: main.volume(role: "Data"), data: data,
+                  session: session, journal: journal)
+              })
           }
         }
         var result: TransparentCompression.Receipt?

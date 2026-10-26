@@ -157,7 +157,6 @@ import Testing
     "Library/Preferences/com.apple.SoftwareUpdate.plist", values: ["Existing": "preserved"],
     uid: user, gid: group)
   let spotlightPaths = [
-    ".Spotlight-V100/VolumeConfiguration.plist",
     "private/var/db/Spotlight-V100/BootVolume/VolumeConfiguration.plist",
     "private/var/db/Spotlight-V100/Preboot/VolumeConfiguration.plist",
   ]
@@ -173,10 +172,11 @@ import Testing
   policy.settings = [
     "automaticOSUpdates": false, "securityDataUpdates": true, "spotlightIndexing": false,
   ]
+  var spotlightChanges: [Bool] = []
   let receipt = try OfflineSystemPolicy.apply(
     policy, system: system, data: data,
     account: BaseImageStage.Account("admin", data: data), cancellation: nil,
-    systemOwner: (user, group))
+    systemOwner: (user, group), configureDataSpotlight: { spotlightChanges.append($0) })
   #expect(receipt.services.first { $0.label == "com.test.missing" }?.status == "not-present")
   #expect(
     receipt.services.first { $0.label == "com.test.shared" }?.domains == ["gui/\(user)", "system"])
@@ -194,11 +194,23 @@ import Testing
       system.path("System/Library/LaunchDaemons/unrelated-filename.plist"), limit: 1 << 20)
       == source)
   #expect(!receipt.runtimeVerified)
-  #expect(Set(receipt.spotlightPaths) == Set(spotlightPaths))
+  #expect(spotlightChanges == [false])
+  #expect(
+    Set(receipt.spotlightPaths)
+      == Set(spotlightPaths + [".Spotlight-V100/VolumeConfiguration.plist"]))
   for path in spotlightPaths {
     let stores = try data.plist(path)["Stores"] as? [String: [String: Any]]
     #expect(stores?["fixture"]?["PolicyLevel"] as? String == "kMDConfigSearchLevelFSSearchOnly")
   }
+  try FileManager.default.removeItem(at: data.path(OfflineSystemPolicy.receiptPath))
+  #expect(throws: MisoError.self) {
+    try OfflineSystemPolicy.apply(
+      policy, system: system, data: data,
+      account: BaseImageStage.Account("admin", data: data), cancellation: nil,
+      systemOwner: (user, group),
+      configureDataSpotlight: { _ in throw MisoError.invalid("Spotlight configuration failed") })
+  }
+  #expect(try !data.contains(OfflineSystemPolicy.receiptPath))
   try system.mergePlist(
     "System/Library/LaunchDaemons/malformed.plist", values: ["Program": "/usr/libexec/example"],
     uid: user, gid: group)

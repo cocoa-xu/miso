@@ -30,7 +30,8 @@ enum OfflineSystemPolicy {
     _ policy: SystemPolicy, system: GuestVolume, data: GuestVolume,
     account: BaseImageStage.Account, cancellation: CancellationToken?,
     systemOwner: (uid: uid_t, gid: gid_t) = (0, 0),
-    additionalServices: [String: Set<String>] = [:]
+    additionalServices: [String: Set<String>] = [:],
+    configureDataSpotlight: (Bool) throws -> Void
   ) throws -> Receipt {
     try policy.validate()
     var inventory = try inventory(system: system, data: data, uid: account.uid)
@@ -78,8 +79,14 @@ enum OfflineSystemPolicy {
     }
     var spotlightPaths: [String] = []
     if let enabled = policy.settings["spotlightIndexing"] {
-      for (_, directory) in BaseSystemSettings.spotlightStores {
+      for (role, directory) in BaseSystemSettings.spotlightStores {
+        try cancellation?.check()
         let path = directory + "/VolumeConfiguration.plist"
+        if role == "Data" {
+          try configureDataSpotlight(enabled)
+          spotlightPaths.append(path)
+          continue
+        }
         guard try data.contains(path) else {
           throw MisoError.invalid("Prepared Base Spotlight configuration is missing: \(path)")
         }
@@ -108,6 +115,37 @@ enum OfflineSystemPolicy {
     try data.write(
       receiptPath, data: JSON.encode(receipt), uid: systemOwner.uid, gid: systemOwner.gid)
     return receipt
+  }
+
+  static func configureSpotlight(
+    enabled: Bool, volume: APFSTopology.Volume, data: GuestVolume,
+    session: DiskImageSession, journal: ExecutionJournal
+  ) throws {
+    guard !session.readOnly,
+      try session.containers().flatMap(\.volumes).contains(where: {
+        $0.identifier == volume.identifier && $0.device == volume.device && $0.roles == ["Data"]
+      })
+    else { throw MisoError.invalid("Spotlight policy requires an owned writable Data volume") }
+    try ImageMounts.verifyMounts(ImageMounts.mounts(), volume: volume, mountPoint: data.root.path)
+    var filesystem = statfs()
+    guard statfs(data.root.path, &filesystem) == 0,
+      filesystem.f_flags & UInt32(MNT_RDONLY) == 0
+    else { throw MisoError.invalid("Spotlight policy requires a writable Data mount") }
+    try journal.run(
+      "configure-spotlight",
+      NativeCommand(
+        "/usr/bin/mdutil", arguments: ["-i", enabled ? "on" : "off", data.root.path], timeout: 60))
+    try ImageMounts.verifyMounts(ImageMounts.mounts(), volume: volume, mountPoint: data.root.path)
+    let output = try journal.run(
+      "verify-spotlight",
+      NativeCommand("/usr/bin/mdutil", arguments: ["-s", data.root.path], timeout: 30))
+    let status = try String(contentsOf: output, encoding: .utf8)
+    let expected = enabled ? "Indexing enabled." : "Indexing disabled."
+    guard
+      status.split(separator: "\n").contains(where: {
+        $0.trimmingCharacters(in: .whitespaces) == expected
+      })
+    else { throw MisoError.invalid("Spotlight policy readback differs on the Data volume") }
   }
 
   static func inventory(system: GuestVolume, data: GuestVolume, uid: UInt32) throws
