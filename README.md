@@ -58,6 +58,11 @@ sudo "$(command -v miso)" base build --source vanilla/assembled/bundle \
 Use `miso base --help` for input preparation and `miso xcode --help` for Xcode,
 SDK and Simulator installation. Each subcommand provides its own `--help`.
 
+Golden Gate offline execution uses an authenticated copy of the host's dynamic
+loader in its temporary execution environment, with the target's system libraries
+and Cryptex cache. The image's own loader is preserved. Execution receipts record
+both loader hashes alongside the host and target builds.
+
 Use `miso xcode complete --refresh-existing` with the original `--config`,
 `--source` and a new `--output` to refresh a completed, never-booted Xcode image
 without downloading or reinstalling its components.

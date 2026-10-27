@@ -130,6 +130,60 @@ import Testing
   }
 }
 
+@Test func executionLoaderCopyAuthenticatesBytesAndPreservesSource() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let source = URL(fileURLWithPath: "/usr/bin/sw_vers")
+  let sourceHash = try SafeFile.sha256(source)
+  let view = try GuestVolume(temporary.url)
+  let loader = try view.path("usr/lib/dyld", createParents: true)
+  try Artifacts.copy(source, to: loader, maximumBytes: 16 << 20)
+  let original = try FileMetadata.inspect(loader)
+  let identity = try BaseExecutionView.prepareHostLoader(root: temporary.url)
+  let prepared = try FileMetadata.inspect(loader)
+  #expect(identity.targetSHA256 == sourceHash)
+  #expect(try identity.hostSHA256 == SafeFile.sha256(URL(fileURLWithPath: "/usr/lib/dyld")))
+  #expect(try SafeFile.sha256(loader) == identity.hostSHA256)
+  #expect(try SafeFile.sha256(source) == sourceHash)
+  #expect(prepared.st_ino != original.st_ino)
+  #expect(prepared.st_uid == original.st_uid && prepared.st_gid == original.st_gid)
+  #expect(prepared.st_mode & 0o7777 == 0o755)
+  try AppleCode.validate(loader, scope: .executable)
+}
+
+@Test func executionLoaderRejectsTamperingAndSharedDestinations() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let view = try GuestVolume(temporary.url)
+  let loader = try view.path("usr/lib/dyld", createParents: true)
+  let source = URL(fileURLWithPath: "/usr/lib/dyld")
+  try Artifacts.copy(source, to: loader, maximumBytes: 16 << 20)
+  let alias = temporary.url.appendingPathComponent("outside-loader")
+  #expect(link(loader.path, alias.path) == 0)
+  let original = try FileMetadata.inspect(loader)
+  #expect(throws: MisoError.self) {
+    try BaseExecutionView.prepareHostLoader(root: temporary.url)
+  }
+  #expect(try FileMetadata.inspect(loader).st_ino == original.st_ino)
+  #expect(try SafeFile.sha256(alias) == SafeFile.sha256(source))
+  #expect(unlink(loader.path) == 0)
+  #expect(symlink(alias.path, loader.path) == 0)
+  #expect(throws: MisoError.self) {
+    try BaseExecutionView.prepareHostLoader(root: temporary.url)
+  }
+  #expect(try SafeFile.sha256(alias) == SafeFile.sha256(source))
+  #expect(unlink(loader.path) == 0)
+  try Artifacts.copy(source, to: loader, maximumBytes: 16 << 20)
+  let handle = try SafeFile.openRegular(loader, writable: true)
+  try handle.write(contentsOf: Data([0]))
+  try handle.close()
+  let tamperedHash = try SafeFile.sha256(loader)
+  #expect(throws: MisoError.self) {
+    try BaseExecutionView.prepareHostLoader(root: temporary.url)
+  }
+  #expect(try SafeFile.sha256(loader) == tamperedHash)
+}
+
 @Test func baseTreeCopyBindsContentModesAndLinks() throws {
   let temporary = try TemporaryDirectory()
   defer { temporary.remove() }

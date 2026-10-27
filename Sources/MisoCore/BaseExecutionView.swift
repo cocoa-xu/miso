@@ -175,6 +175,9 @@ enum BaseExecutionView {
           }
         }
       }
+      if goldenGate {
+        try journal.setMetadata("executionLoader", value: prepareHostLoader(root: root))
+      }
       let view = try GuestVolume(root)
       for path in ["dev", "System/Volumes", "System/Volumes/Data", "System/Volumes/Preboot"] {
         let directory = try view.path(path)
@@ -245,6 +248,39 @@ enum BaseExecutionView {
       try journal.setMetadata("outputSystemModified", value: false)
       return root
     }
+  }
+
+  struct LoaderIdentity: Codable {
+    let hostSHA256: String
+    let targetSHA256: String
+  }
+
+  static func prepareHostLoader(root: URL) throws -> LoaderIdentity {
+    let view = try GuestVolume(root)
+    let destination = try view.path("usr/lib/dyld")
+    let original = try FileMetadata.inspect(destination)
+    guard original.st_mode & S_IFMT == S_IFREG, original.st_nlink == 1 else {
+      throw MisoError.invalid("Unexpected execution loader file")
+    }
+    try AppleCode.validate(destination, scope: .executable)
+    let targetSHA256 = try SafeFile.sha256(destination)
+    let host = URL(fileURLWithPath: "/usr/lib/dyld")
+    try AppleCode.validate(host, scope: .executable)
+    let hostSHA256 = try SafeFile.sha256(host)
+    let temporary = destination.deletingLastPathComponent()
+      .appendingPathComponent(".miso-loader-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    try Artifacts.copy(
+      host, to: temporary, maximumBytes: UInt64(try FileMetadata.inspect(host).st_size))
+    try AppleCode.validate(temporary, scope: .executable)
+    guard try SafeFile.sha256(temporary) == hostSHA256,
+      try FileMetadata.inspect(destination).st_ino == original.st_ino
+    else { throw MisoError.invalid("Execution loader changed during preparation") }
+    guard chown(temporary.path, original.st_uid, original.st_gid) == 0,
+      chmod(temporary.path, 0o755) == 0,
+      rename(temporary.path, destination.path) == 0
+    else { throw MisoError.system("Publish execution loader", errno) }
+    return LoaderIdentity(hostSHA256: hostSHA256, targetSHA256: targetSHA256)
   }
 
   static func requiresLocalSignature(_ relative: String) -> Bool {
