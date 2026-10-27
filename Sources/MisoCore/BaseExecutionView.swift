@@ -140,11 +140,16 @@ enum BaseExecutionView {
           guard chmod(destination.path, info.st_mode & 0o755) == 0 else {
             throw MisoError.system("Set execution file mode", errno)
           }
-          let localSignature = requiresLocalSignature(relative)
+          let executionTool = requiresLocalSignature(relative)
           let compilerTool = relative.hasPrefix("Library/Developer/CommandLineTools/usr/")
-          if localSignature || compilerTool,
-            try isExecutable(destination)
-          {
+          let systemLibrary = goldenGate && device == system.device
+          let kind =
+            try executionTool || compilerTool || systemLibrary ? fileType(destination) : nil
+          let standaloneLibrary =
+            try systemLibrary && (kind == .dylib || kind == .bundle)
+            && AppleCode.isStandalone(source)
+          let localSignature = (executionTool && kind == .executable) || standaloneLibrary
+          if localSignature || (compilerTool && kind == .executable) {
             do {
               try AppleCode.validate(localSignature ? source : destination, scope: .executable)
             } catch {
@@ -174,6 +179,9 @@ enum BaseExecutionView {
             try copy(system.root.appendingPathComponent(name), name, device: system.device)
           }
         }
+      }
+      if goldenGate {
+        try journal.setMetadata("executionLoader", value: prepareHostLoader(root: root))
       }
       let view = try GuestVolume(root)
       for path in ["dev", "System/Volumes", "System/Volumes/Data", "System/Volumes/Preboot"] {
@@ -245,6 +253,39 @@ enum BaseExecutionView {
       try journal.setMetadata("outputSystemModified", value: false)
       return root
     }
+  }
+
+  struct LoaderIdentity: Codable {
+    let hostSHA256: String
+    let targetSHA256: String
+  }
+
+  static func prepareHostLoader(root: URL) throws -> LoaderIdentity {
+    let view = try GuestVolume(root)
+    let destination = try view.path("usr/lib/dyld")
+    let original = try FileMetadata.inspect(destination)
+    guard original.st_mode & S_IFMT == S_IFREG, original.st_nlink == 1 else {
+      throw MisoError.invalid("Unexpected execution loader file")
+    }
+    try AppleCode.validate(destination, scope: .executable)
+    let targetSHA256 = try SafeFile.sha256(destination)
+    let host = URL(fileURLWithPath: "/usr/lib/dyld")
+    try AppleCode.validate(host, scope: .executable)
+    let hostSHA256 = try SafeFile.sha256(host)
+    let temporary = destination.deletingLastPathComponent()
+      .appendingPathComponent(".miso-loader-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    try Artifacts.copy(
+      host, to: temporary, maximumBytes: UInt64(try FileMetadata.inspect(host).st_size))
+    try AppleCode.validate(temporary, scope: .executable)
+    guard try SafeFile.sha256(temporary) == hostSHA256,
+      try FileMetadata.inspect(destination).st_ino == original.st_ino
+    else { throw MisoError.invalid("Execution loader changed during preparation") }
+    guard chown(temporary.path, original.st_uid, original.st_gid) == 0,
+      chmod(temporary.path, 0o755) == 0,
+      rename(temporary.path, destination.path) == 0
+    else { throw MisoError.system("Publish execution loader", errno) }
+    return LoaderIdentity(hostSHA256: hostSHA256, targetSHA256: targetSHA256)
   }
 
   static func requiresLocalSignature(_ relative: String) -> Bool {
@@ -357,35 +398,56 @@ enum BaseExecutionView {
     try visit("Library")
   }
 
+  enum MachOType: UInt32 {
+    case executable = 2
+    case dylib = 6
+    case bundle = 8
+  }
+
   static func isExecutable(_ url: URL) throws -> Bool {
+    try fileType(url) == .executable
+  }
+
+  static func fileType(_ url: URL) throws -> MachOType? {
     let handle = try SafeFile.openRegular(url)
     defer { try? handle.close() }
     let size = try SafeFile.size(handle)
-    guard size >= 32 else { return false }
+    guard size >= 32 else { return nil }
+    func type(_ header: Data) -> MachOType? {
+      guard Array(header.prefix(4)) == [0xcf, 0xfa, 0xed, 0xfe],
+        Array(header[4..<8]) == [12, 0, 0, 1]
+      else { return nil }
+      return MachOType(rawValue: header[12..<16].reversed().reduce(0) { $0 << 8 | UInt32($1) })
+    }
     let header = try handle.readExactly(32)
     if Array(header.prefix(4)) == [0xcf, 0xfa, 0xed, 0xfe] {
-      return Array(header[4..<8]) == [12, 0, 0, 1] && Array(header[12..<16]) == [2, 0, 0, 0]
+      return type(header)
     }
-    guard Array(header.prefix(4)) == [0xca, 0xfe, 0xba, 0xbe] else { return false }
+    guard Array(header.prefix(4)) == [0xca, 0xfe, 0xba, 0xbe] else { return nil }
     func integer(_ bytes: Data) -> UInt64 { bytes.reduce(0) { $0 << 8 | UInt64($1) } }
     let count = integer(header[4..<8])
-    guard count > 0, count <= 64, size >= 8 + count * 20 else {
-      throw MisoError.invalid("Invalid universal executable")
-    }
+    guard count > 0, count <= 64, size >= 8 + count * 20 else { return nil }
     try handle.seek(toOffset: 8)
     let table = try handle.readExactly(Int(count * 20))
+    let architectures = [
+      CPU_TYPE_X86, CPU_TYPE_X86_64, CPU_TYPE_ARM, CPU_TYPE_ARM64, CPU_TYPE_ARM64_32,
+      CPU_TYPE_POWERPC, CPU_TYPE_POWERPC64,
+    ]
+    guard architectures.contains(where: { UInt64($0) == integer(table.prefix(4)) }) else {
+      return nil
+    }
     for offset in stride(from: 0, to: table.count, by: 20) {
       if integer(table[offset..<offset + 4]) != 0x0100_000c { continue }
       let start = integer(table[offset + 8..<offset + 12])
-      guard start >= 8 + count * 20, start <= size - 32 else {
+      let length = integer(table[offset + 12..<offset + 16])
+      guard length >= 32, start >= 8 + count * 20, start <= size - 32,
+        length <= size - start
+      else {
         throw MisoError.invalid("Invalid executable slice")
       }
       try handle.seek(toOffset: start)
-      let slice = try handle.readExactly(32)
-      return Array(slice.prefix(4)) == [0xcf, 0xfa, 0xed, 0xfe]
-        && Array(slice[4..<8]) == [12, 0, 0, 1]
-        && Array(slice[12..<16]) == [2, 0, 0, 0]
+      return type(try handle.readExactly(32))
     }
-    return false
+    return nil
   }
 }

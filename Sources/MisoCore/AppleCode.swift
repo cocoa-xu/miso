@@ -5,6 +5,18 @@ import Security
 enum AppleCode {
   enum Scope { case full, executable }
 
+  static func isStandalone(_ url: URL) throws -> Bool {
+    var code: SecStaticCode?
+    var path: CFURL?
+    guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let code,
+      SecCodeCopyPath(code, [], &path) == errSecSuccess, let path
+    else { throw MisoError.invalid("Cannot inspect code object location") }
+    let original = try FileMetadata.inspect(url)
+    let object = try FileMetadata.inspect(path as URL)
+    return original.st_mode & S_IFMT == S_IFREG && object.st_mode & S_IFMT == S_IFREG
+      && original.st_dev == object.st_dev && original.st_ino == object.st_ino
+  }
+
   private static func flags(_ url: URL, scope: Scope) throws -> SecCSFlags {
     var value = kSecCSStrictValidate | kSecCSCheckAllArchitectures
     if scope == .executable {
