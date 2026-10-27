@@ -84,6 +84,7 @@ import Testing
   fat.replaceSubrange(0..<8, with: [0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 1])
   fat.replaceSubrange(8..<12, with: [1, 0, 0, 12])
   fat[19] = 32
+  fat[23] = 32
   header[12] = 2
   fat.replaceSubrange(32..<64, with: header)
   try SafeFile.replace(fat, at: file)
@@ -93,6 +94,71 @@ import Testing
   #expect(throws: (any Error).self) { try BaseExecutionView.isExecutable(file) }
   try SafeFile.replace(Data("#!/bin/sh\n".utf8), at: file)
   #expect(try !BaseExecutionView.isExecutable(file))
+}
+
+@Test(arguments: [BaseExecutionView.MachOType.dylib, .bundle])
+func executionLibrariesAreRecognizedWithoutBecomingExecutable(_ kind: BaseExecutionView.MachOType)
+  throws
+{
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let file = temporary.url.appendingPathComponent("library")
+  var header = Data(repeating: 0, count: 32)
+  header.replaceSubrange(0..<8, with: [0xcf, 0xfa, 0xed, 0xfe, 12, 0, 0, 1])
+  header[12] = UInt8(kind.rawValue)
+  try SafeFile.writeNew(header, to: file)
+  #expect(try BaseExecutionView.fileType(file) == kind)
+  #expect(try !BaseExecutionView.isExecutable(file))
+  var universal = Data(repeating: 0, count: 64)
+  universal.replaceSubrange(0..<12, with: [0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 1, 1, 0, 0, 12])
+  universal[19] = 32
+  universal[23] = 32
+  universal.replaceSubrange(32..<64, with: header)
+  try SafeFile.replace(universal, at: file)
+  #expect(try BaseExecutionView.fileType(file) == kind)
+  #expect(try !BaseExecutionView.isExecutable(file))
+  for length: UInt8 in [0, 31, 33] {
+    universal[23] = length
+    try SafeFile.replace(universal, at: file)
+    #expect(throws: MisoError.self) { try BaseExecutionView.fileType(file) }
+  }
+  header[4] = 7
+  try SafeFile.replace(header, at: file)
+  #expect(try BaseExecutionView.fileType(file) == nil)
+  header[4] = 12
+  header[12] = 7
+  try SafeFile.replace(header, at: file)
+  #expect(try BaseExecutionView.fileType(file) == nil)
+}
+
+@Test func executionClassifierDistinguishesResourcesFromUniversalLibraries() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let file = temporary.url.appendingPathComponent("resource")
+  var javaClass = Data(repeating: 0, count: 2048)
+  javaClass.replaceSubrange(0..<12, with: [0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 61, 0, 2, 1, 0])
+  try SafeFile.writeNew(javaClass, to: file)
+  #expect(try BaseExecutionView.fileType(file) == nil)
+  try SafeFile.replace(javaClass.prefix(32), at: file)
+  #expect(try BaseExecutionView.fileType(file) == nil)
+  var universal = Data(repeating: 0, count: 112)
+  universal.replaceSubrange(0..<12, with: [0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 2, 1, 0, 0, 7])
+  universal[19] = 48
+  universal[23] = 32
+  universal.replaceSubrange(28..<32, with: [1, 0, 0, 12])
+  universal[39] = 80
+  universal[43] = 32
+  universal.replaceSubrange(80..<88, with: [0xcf, 0xfa, 0xed, 0xfe, 12, 0, 0, 1])
+  universal[92] = 6
+  try SafeFile.replace(universal, at: file)
+  #expect(try BaseExecutionView.fileType(file) == .dylib)
+  universal[11] = 99
+  try SafeFile.replace(universal, at: file)
+  #expect(try BaseExecutionView.fileType(file) == nil)
+  universal[11] = 7
+  universal[39] = 81
+  try SafeFile.replace(universal, at: file)
+  #expect(throws: MisoError.self) { try BaseExecutionView.fileType(file) }
 }
 
 @Test func signedExecutionRenewalPreservesBytesAndRejectsSharedFiles() throws {
@@ -127,6 +193,41 @@ import Testing
     "System/Library/Frameworks/Foundation.framework/Foundation",
   ] {
     #expect(!BaseExecutionView.requiresLocalSignature(path))
+  }
+}
+
+@Test func executionSigningDistinguishesStandaloneCodeFromBundleExecutables() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let view = try GuestVolume(temporary.url)
+  let source = URL(fileURLWithPath: "/usr/lib/libffi-trampolines.dylib")
+  for path in ["library.dylib", "PerlModule.bundle", "extensionless"] {
+    let file = try view.path(path)
+    try Artifacts.copy(source, to: file, maximumBytes: 1 << 20)
+    #expect(try AppleCode.isStandalone(file))
+  }
+  for (directory, binary, info, package) in [
+    ("Plugin.bundle", "Contents/MacOS/Plugin", "Contents/Info.plist", "BNDL"),
+    ("Nested.framework", "Versions/A/Nested", "Versions/A/Resources/Info.plist", "FMWK"),
+  ] {
+    let file = try view.path(directory + "/" + binary, createParents: true)
+    try Artifacts.copy(source, to: file, maximumBytes: 1 << 20)
+    let metadata = try PropertyListSerialization.data(
+      fromPropertyList: [
+        "CFBundleExecutable": file.lastPathComponent,
+        "CFBundleIdentifier": "test.miso." + file.lastPathComponent,
+        "CFBundlePackageType": package,
+        "CFBundleVersion": "1",
+      ], format: .xml, options: 0)
+    try SafeFile.writeNew(metadata, to: view.path(directory + "/" + info, createParents: true))
+    if package == "FMWK" {
+      try BaseExecutionView.createLink("A", at: view.path(directory + "/Versions/Current"))
+      try BaseExecutionView.createLink(
+        "Versions/Current/Nested", at: view.path(directory + "/Nested"))
+      try BaseExecutionView.createLink(
+        "Versions/Current/Resources", at: view.path(directory + "/Resources"))
+    }
+    #expect(try !AppleCode.isStandalone(file))
   }
 }
 
