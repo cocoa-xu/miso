@@ -53,7 +53,6 @@ public enum BaseSystemSettings {
       guard target == plan.target else { throw MisoError.invalid("Base settings target mismatch") }
       try journal.setMetadata("settingsPlan", value: plan)
       let image = bundle.appendingPathComponent("disk.img")
-      try verifySystem(image, plan: plan, journal: journal)
       let installed = try install(image, plan: plan, journal: journal)
       let audit = try DiskImageSession(image: image, readOnly: true, journal: journal)
       try audit.withAttachment { session in
@@ -76,9 +75,10 @@ public enum BaseSystemSettings {
     }
   }
 
-  private static func verifySystem(_ image: URL, plan: Plan, journal: ExecutionJournal) throws {
-    let read = try DiskImageSession(image: image, readOnly: true, journal: journal)
-    try read.withAttachment { session in
+  private static func install(_ image: URL, plan: Plan, journal: ExecutionJournal) throws -> Details
+  {
+    let write = try DiskImageSession(image: image, readOnly: false, journal: journal)
+    return try write.withAttachment { session in
       let main = try BaseImageStage.mainContainer(session)
       let system = try ImageMounts.mount(
         main.volume(role: "System"), session: session, journal: journal, name: "settings-system",
@@ -86,14 +86,6 @@ public enum BaseSystemSettings {
       guard try SafeFile.sha256(system.path(mds)) == plan.mdsSHA256 else {
         throw MisoError.invalid("Target Spotlight implementation differs from plan")
       }
-    }
-  }
-
-  private static func install(_ image: URL, plan: Plan, journal: ExecutionJournal) throws -> Details
-  {
-    let write = try DiskImageSession(image: image, readOnly: false, journal: journal)
-    return try write.withAttachment { session in
-      let main = try BaseImageStage.mainContainer(session)
       let data = try ImageMounts.mount(
         main.volume(role: "Data"), session: session, journal: journal, name: "settings-data",
         readOnly: false)
@@ -128,6 +120,12 @@ public enum BaseSystemSettings {
       }
       for (role, directory) in spotlightStores {
         try BuildProgress.run("Disable Spotlight indexing on \(role)") {
+          if role == "Data" {
+            try OfflineSystemPolicy.configureSpotlight(
+              enabled: false, volume: main.volume(role: role), data: data,
+              session: session, journal: journal)
+            return
+          }
           let path = directory + "/VolumeConfiguration.plist"
           guard !(try data.contains(path)) else {
             throw MisoError.invalid("Existing Spotlight configuration needs a merge")
