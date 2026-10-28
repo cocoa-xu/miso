@@ -48,6 +48,13 @@ enum OfflineSessionState {
         tccdSHA256: "f2e0eb0517fe0e7dde58b20e5064428cd5a9b2f1a1eb330cdd13d6de033fb33d",
         schemaSHA256: "774124470f844eebbf985545941fcf1e055a70a032a948557ee586195a65be38",
         schemaVersion: 37, versionNumber: 453_115_904, buildNumber: 54_595_264)
+    case MacOSRelease(version: "27.2", build: "26B123"):
+      return Profile(
+        target: target,
+        loginSHA256: "5253e0d3ee5e5fa6dd228f4f6bb53af5304a785209adcd1bfdd57e70e606b6f7",
+        tccdSHA256: "f2e0eb0517fe0e7dde58b20e5064428cd5a9b2f1a1eb330cdd13d6de033fb33d",
+        schemaSHA256: "774124470f844eebbf985545941fcf1e055a70a032a948557ee586195a65be38",
+        schemaVersion: 37, versionNumber: 453_115_904, buildNumber: 54_595_424)
     default:
       throw MisoError.unsupported("Session state needs an exact macOS 27 profile")
     }

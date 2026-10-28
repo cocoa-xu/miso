@@ -116,12 +116,17 @@ private let sessionSchema = """
   }
 }
 
-@Test func goldenGateRCSessionUsesItsOwnSchemaAndVersionStamps() throws {
-  let target = MacOSRelease(version: "27.2", build: "26B118")
+@Test(arguments: [("26B118", 118), ("26B123", 123)])
+func goldenGate272SessionUsesItsOwnSchemaAndVersionStamps(build: String, sequence: Int) throws {
+  let target = MacOSRelease(version: "27.2", build: build)
   let profile = try #require(try OfflineSessionState.profile(for: target))
   let previous = try #require(try OfflineSessionState.profile(for: sessionTarget))
+  let other = try #require(
+    try OfflineSessionState.profile(
+      for: .init(version: "27.2", build: build == "26B118" ? "26B123" : "26B118")))
+  #expect(profile.loginSHA256 != other.loginSHA256)
   #expect(profile.versionNumber == (27 << 24) | (2 << 16))
-  #expect(profile.buildNumber == (26 << 21) | (1 << 16) | (118 << 5))
+  #expect(profile.buildNumber == (26 << 21) | (1 << 16) | (sequence << 5))
   #expect(profile.schemaVersion == 37)
   #expect(profile.tccdSHA256 != previous.tccdSHA256)
   #expect(profile.schemaSHA256 != previous.schemaSHA256)

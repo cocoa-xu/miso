@@ -146,8 +146,9 @@ private func captureVolume(_ temporary: TemporaryDirectory) throws -> GuestVolum
   }
 }
 
-@Test func goldenGateRCCaptureReminderRejectsPreviousImplementation() throws {
-  let target = MacOSRelease(version: "27.2", build: "26B118")
+@Test(arguments: ["26B118", "26B123"])
+func goldenGate272CaptureReminderRejectsPreviousImplementation(build: String) throws {
+  let target = MacOSRelease(version: "27.2", build: build)
   let policy = capturePolicy(
     hash: "f23e8496aa88784041616e223504d43dc7162803eb549c474d9f10f959de28a5")
   try policy.validate(target: target, now: captureExpiry.addingTimeInterval(-1))
