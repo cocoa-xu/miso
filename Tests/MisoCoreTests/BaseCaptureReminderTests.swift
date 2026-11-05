@@ -162,3 +162,19 @@ func goldenGate272CaptureReminderRejectsPreviousImplementation(build: String) th
     #expect(throws: (any Error).self) { try policy.validate(target: other) }
   }
 }
+
+@Test func goldenGate273CaptureReminderRejectsPreviousAndUnreviewedImplementations() throws {
+  let target = MacOSRelease(version: "27.3", build: "26C5035r")
+  let policy = capturePolicy(
+    hash: "cd97f7440c3d2cf2b91d3131eda1499ec48fa7512686ebbbcc38b7acd976368f")
+  try policy.validate(target: target, now: captureExpiry.addingTimeInterval(-1))
+  #expect(throws: (any Error).self) {
+    try capturePolicy(hash: "f23e8496aa88784041616e223504d43dc7162803eb549c474d9f10f959de28a5")
+      .validate(target: target)
+  }
+  for other in [
+    MacOSRelease(version: "27.2", build: "26B123"), .init(version: "27.3", build: "26C5035s"),
+  ] {
+    #expect(throws: (any Error).self) { try policy.validate(target: other) }
+  }
+}

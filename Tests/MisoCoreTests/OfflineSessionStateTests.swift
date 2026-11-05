@@ -138,6 +138,20 @@ func goldenGate272SessionUsesItsOwnSchemaAndVersionStamps(build: String, sequenc
   }
 }
 
+@Test func goldenGate273SessionUsesBetaBuildStampAndRejectsUnreviewedBuilds() throws {
+  let target = MacOSRelease(version: "27.3", build: "26C5035r")
+  let profile = try #require(try OfflineSessionState.profile(for: target))
+  #expect(profile.versionNumber == (27 << 24) | (3 << 16))
+  #expect(profile.buildNumber == (26 << 21) | (2 << 16) | (5035 << 5) | 18)
+  #expect(profile.schemaVersion == 37)
+  for release in [
+    MacOSRelease(version: "27.3", build: "26C5035"),
+    .init(version: "27.3", build: "26C5035s"), .init(version: "27.2", build: "26C5035r"),
+  ] {
+    #expect(throws: (any Error).self) { try OfflineSessionState.profile(for: release) }
+  }
+}
+
 @Test(.enabled(if: ProcessInfo.processInfo.environment["MISO_SESSION_SYSTEM"] != nil))
 func nativeSessionSchemaPreservesScreenSharingThroughBaseSeeding() throws {
   let system = URL(

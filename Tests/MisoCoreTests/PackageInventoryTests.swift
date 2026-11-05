@@ -119,3 +119,48 @@ func pinnedCLTPackagesPassNativePreparation() throws {
     }
   }
 }
+
+@Test func cltDestinationPreservesBetaPlaceholderAndRejectsInstalledFiles() throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let data = try GuestVolume(temporary.url)
+  #expect(try CommandLineTools.validateDestination(data).isEmpty)
+  let root = temporary.url.appendingPathComponent(PackageInventory.root)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  let marker = root.appendingPathComponent(".beta")
+  try Data("1\n".utf8).write(to: marker)
+  #expect(try CommandLineTools.validateDestination(data) == [PackageInventory.root])
+  #expect(try Data(contentsOf: marker) == Data("1\n".utf8))
+  let installed = root.appendingPathComponent("usr")
+  try FileManager.default.createDirectory(at: installed, withIntermediateDirectories: false)
+  #expect(throws: (any Error).self) { try CommandLineTools.validateDestination(data) }
+  #expect(FileManager.default.fileExists(atPath: installed.path))
+  try FileManager.default.removeItem(at: installed)
+  let receipts = temporary.url.appendingPathComponent("Library/Apple/System/Library/Receipts")
+  try FileManager.default.createDirectory(at: receipts, withIntermediateDirectories: true)
+  try Data().write(to: receipts.appendingPathComponent("com.apple.pkg.CLTools_Executables.plist"))
+  #expect(throws: (any Error).self) { try CommandLineTools.validateDestination(data) }
+}
+
+@Test(arguments: ["empty", "changed-marker", "marker-symlink", "root-symlink"])
+func cltDestinationRejectsUnrecognizedOrLinkedPlaceholders(kind: String) throws {
+  let temporary = try TemporaryDirectory()
+  defer { temporary.remove() }
+  let root = temporary.url.appendingPathComponent(PackageInventory.root)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  let external = temporary.url.appendingPathComponent("external")
+  try Data("1\n".utf8).write(to: external)
+  if kind == "changed-marker" {
+    try Data("0\n".utf8).write(to: root.appendingPathComponent(".beta"))
+  } else if kind == "marker-symlink" {
+    try FileManager.default.createSymbolicLink(
+      at: root.appendingPathComponent(".beta"), withDestinationURL: external)
+  } else if kind == "root-symlink" {
+    try FileManager.default.removeItem(at: root)
+    try FileManager.default.createSymbolicLink(at: root, withDestinationURL: temporary.url)
+  }
+  #expect(throws: (any Error).self) {
+    try CommandLineTools.validateDestination(GuestVolume(temporary.url))
+  }
+  #expect(try Data(contentsOf: external) == Data("1\n".utf8))
+}

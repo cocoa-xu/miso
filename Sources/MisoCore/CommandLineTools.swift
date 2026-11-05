@@ -141,12 +141,15 @@ enum CommandLineTools {
     return Prepared(packages: records, entries: combined, expansions: expansions)
   }
 
-  static func install(
-    data: GuestVolume, packages: URL, profile: RestoreProfile, journal: ExecutionJournal
-  ) throws -> Receipt {
-    let product = profile.commandLineTools.product
-    guard try !data.contains(PackageInventory.root) else {
-      throw MisoError.invalid("CLT is already installed")
+  static func validateDestination(_ data: GuestVolume) throws -> Set<String> {
+    var existingDirectories = Set<String>()
+    if try data.contains(PackageInventory.root) {
+      let directory = try data.directory(PackageInventory.root)
+      guard try FileManager.default.contentsOfDirectory(atPath: directory.url.path) == [".beta"],
+        try SafeFile.read(data.path(PackageInventory.root + "/.beta"), limit: 16)
+          == Data("1\n".utf8)
+      else { throw MisoError.invalid("CLT is already installed or its placeholder differs") }
+      existingDirectories.insert(PackageInventory.root)
     }
     let receipts = "Library/Apple/System/Library/Receipts/"
     if try data.contains(receipts.dropLast().description) {
@@ -158,6 +161,15 @@ enum CommandLineTools {
         })
       else { throw MisoError.invalid("Existing CLT receipts cannot be replaced") }
     }
+    return existingDirectories
+  }
+
+  static func install(
+    data: GuestVolume, packages: URL, profile: RestoreProfile, journal: ExecutionJournal
+  ) throws -> Receipt {
+    let product = profile.commandLineTools.product
+    let existingDirectories = try validateDestination(data)
+    let receipts = "Library/Apple/System/Library/Receipts/"
     let prepared = try prepare(packages: packages, profile: profile, journal: journal)
     let records = prepared.packages
     let combined = prepared.entries
@@ -169,7 +181,10 @@ enum CommandLineTools {
         guard !overflow else { throw MisoError.invalid("Package size overflow") }
         required = sum
       }
-      if !PackageInventory.ancestors.contains(relative), try data.contains(relative) {
+      if !PackageInventory.ancestors.contains(relative),
+        !(entry.kind == S_IFDIR && existingDirectories.contains(relative)),
+        try data.contains(relative)
+      {
         throw MisoError.invalid("CLT payload would overwrite an existing path: \(relative)")
       }
     }

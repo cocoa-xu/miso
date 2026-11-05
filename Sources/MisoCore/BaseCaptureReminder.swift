@@ -20,11 +20,15 @@ enum BaseCaptureReminder {
         [MacOSRelease(version: "27.2", build: "26B118"), .init(version: "27.2", build: "26B123")]
         .contains(target)
         && replaydSHA256 == "f23e8496aa88784041616e223504d43dc7162803eb549c474d9f10f959de28a5"
+      let goldenGate273 =
+        target == MacOSRelease(version: "27.3", build: "26C5035r")
+        && replaydSHA256 == "cd97f7440c3d2cf2b91d3131eda1499ec48fa7512686ebbbcc38b7acd976368f"
       let sequoia =
         target == MacOSRelease(version: "15.6.1", build: "24G90")
         && replaydSHA256 == "3013d862c3b03ba286a0354321170f12abc1d8d07cff496cfcf41e585fc03f6c"
       guard schemaVersion == 1,
-        try MacOSVersion(target.version).major == 26 || goldenGate || goldenGate272 || sequoia
+        try MacOSVersion(target.version).major == 26 || goldenGate || goldenGate272 || goldenGate273
+          || sequoia
       else {
         throw MisoError.unsupported("Screen capture reminder policy requires a reviewed profile")
       }
