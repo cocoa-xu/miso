@@ -37,3 +37,47 @@ import Testing
   ]
   #expect(throws: MisoError.self) { try parse(fields) }
 }
+
+@Test(arguments: [false, true])
+func kiroCaskBindsArchiveLayoutToDeclaredArtifacts(application: Bool) throws {
+  let version = application ? "2.19.0" : "3.0.0"
+  let binary = application ? "$APPDIR/Kiro CLI.app/Contents/MacOS/kiro-cli" : "kirocli/bin/kiro-cli"
+  let filename = application ? "Kiro%20CLI.dmg" : "kirocli-universal-darwin.zip"
+  var artifacts: [[String: Any]] = [
+    ["binary": [binary], "target": "$HOMEBREW_PREFIX/bin/kiro-cli"]
+  ]
+  if application {
+    artifacts.append(["app": ["Kiro CLI.app"], "target": "/Applications/Kiro CLI.app"])
+  }
+  let fields: [String: Any] = [
+    "token": "kiro-cli", "version": version, "disabled": false,
+    "tap_git_head": String(repeating: "a", count: 40),
+    "ruby_source_path": "Casks/k/kiro-cli.rb",
+    "ruby_source_checksum": ["sha256": String(repeating: "a", count: 64)],
+    "sha256": String(repeating: "b", count: 64),
+    "url": "https://desktop-release.q.us-east-1.amazonaws.com/\(version)/\(filename)",
+    "depends_on": [:] as [String: String], "artifacts": artifacts,
+  ]
+  func parse(_ value: [String: Any]) throws -> XcodeCaskInputs.Cask {
+    try XcodeCaskInputs.parse(
+      JSONSerialization.data(withJSONObject: value), token: "kiro-cli",
+      target: .init(version: "27.3", build: "26C5035r"))
+  }
+  let cask = try parse(fields)
+  #expect(cask.application == (application ? "Kiro CLI.app" : nil))
+  #expect(cask.executable == (application ? "Kiro CLI.app/Contents/MacOS/kiro-cli" : binary))
+  #expect(cask.filename == (application ? "payload.dmg" : "payload.zip"))
+  for changed in [
+    Array(artifacts.dropFirst()), artifacts + [artifacts[0]],
+    [["binary": ["../kiro-cli"], "target": "$HOMEBREW_PREFIX/bin/kiro-cli"]],
+    [["binary": [binary], "target": "/usr/bin/kiro-cli"]],
+  ] {
+    var invalid = fields
+    invalid["artifacts"] = changed
+    #expect(throws: MisoError.self) { try parse(invalid) }
+  }
+  var mixed = fields
+  let other = application ? "kirocli-universal-darwin.zip" : "Kiro%20CLI.dmg"
+  mixed["url"] = "https://desktop-release.q.us-east-1.amazonaws.com/\(version)/\(other)"
+  #expect(throws: MisoError.self) { try parse(mixed) }
+}

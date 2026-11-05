@@ -64,7 +64,8 @@ public enum XcodeCaskInstallation {
     journal: ExecutionJournal
   ) throws -> Details {
     let root = try BaseExecutionView.prepare(image: image, target: input.target, journal: journal)
-    let paths = ["opt/homebrew", "Applications/Kiro CLI.app"]
+    let applications = input.items.compactMap { $0.cask.application }
+    let paths = ["opt/homebrew"] + applications.map { "Applications/" + $0 }
     var identity: [UInt32] = []
     var installed: [String: String] = [:]
     let payload = try GuestExecution.withSession(
@@ -88,15 +89,15 @@ public enum XcodeCaskInstallation {
       else { throw MisoError.invalid("Developer cask already exists") }
       try guest.data.makeDirectories(
         "opt/homebrew/Caskroom", uid: guest.account.uid, gid: guest.account.gid)
-      let applications = try guest.data.directory("Applications").url
-      let parent = try FileMetadata.inspect(applications)
-      guard chown(applications.path, guest.account.uid, guest.account.gid) == 0 else {
+      let applicationDirectory = try guest.data.directory("Applications").url
+      let parent = try FileMetadata.inspect(applicationDirectory)
+      guard chown(applicationDirectory.path, guest.account.uid, guest.account.gid) == 0 else {
         throw MisoError.system("Prepare application staging access", errno)
       }
       func restore() throws {
-        guard try FileMetadata.inspect(applications).st_ino == parent.st_ino,
-          chown(applications.path, parent.st_uid, parent.st_gid) == 0,
-          chmod(applications.path, parent.st_mode & 0o7777) == 0
+        guard try FileMetadata.inspect(applicationDirectory).st_ino == parent.st_ino,
+          chown(applicationDirectory.path, parent.st_uid, parent.st_gid) == 0,
+          chmod(applicationDirectory.path, parent.st_mode & 0o7777) == 0
         else { throw MisoError.invalid("Cannot restore application directory ownership") }
       }
       do {
@@ -145,7 +146,7 @@ public enum XcodeCaskInstallation {
               ]))
           try FileManager.default.removeItem(at: guest.data.path(metadataPath))
           let installedExecutable =
-            cask.token == "kiro-cli"
+            cask.application != nil
             ? "Applications/" + cask.executable
             : directory + "/" + cask.version + "/" + cask.executable
           let executable = try guest.data.path(installedExecutable)
@@ -170,14 +171,16 @@ public enum XcodeCaskInstallation {
       guard installed == expected else {
         throw MisoError.invalid("Installed casks differ from requested versions")
       }
-      try journal.run(
-        "verify-installed-cask-application",
-        NativeCommand(
-          .codesign,
-          arguments: [
-            "--verify", "--deep", "--strict",
-            guest.data.directory("Applications/Kiro CLI.app").url.path,
-          ], timeout: 180))
+      for application in applications {
+        try journal.run(
+          "verify-installed-cask-application",
+          NativeCommand(
+            .codesign,
+            arguments: [
+              "--verify", "--deep", "--strict",
+              guest.data.directory("Applications/" + application).url.path,
+            ], timeout: 180))
+      }
       try execution.remove()
       return try Dictionary(
         uniqueKeysWithValues: paths.map { path in

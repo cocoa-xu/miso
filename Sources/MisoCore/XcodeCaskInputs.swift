@@ -10,10 +10,15 @@ public enum XcodeCaskInputs {
     let sourceURL: URL
     let sourceSHA256: String
 
+    var application: String? {
+      token == "kiro-cli" && url.pathExtension == "dmg" ? "Kiro CLI.app" : nil
+    }
+
     var executable: String {
       switch token {
       case "codex": "bin/codex"
-      case "kiro-cli": "Kiro CLI.app/Contents/MacOS/kiro-cli"
+      case "kiro-cli":
+        application.map { $0 + "/Contents/MacOS/kiro-cli" } ?? "kirocli/bin/kiro-cli"
       default: "claude"
       }
     }
@@ -21,7 +26,7 @@ public enum XcodeCaskInputs {
     var filename: String {
       switch token {
       case "codex": "payload.tar.gz"
-      case "kiro-cli": "payload.dmg"
+      case "kiro-cli": application == nil ? "payload.zip" : "payload.dmg"
       default: "claude"
       }
     }
@@ -80,37 +85,38 @@ public enum XcodeCaskInputs {
         ])
       })
     else { throw MisoError.unsupported("Developer cask artifacts or prerequisites changed") }
-    try validateArtifacts(artifacts, token: token)
     _ = try StableVersion(version)
     try SafeFile.validateSHA256(sha)
     try SafeFile.validateSHA256(sourceSHA)
-    let expected: String
+    let expected: [String]
     switch token {
     case "codex":
       expected =
-        "https://github.com/openai/codex/releases/download/rust-v\(version)/codex-package-aarch64-apple-darwin.tar.gz"
+        ["https://github.com/openai/codex/releases/download/rust-v\(version)/codex-package-aarch64-apple-darwin.tar.gz"]
     case "kiro-cli":
-      expected = "https://desktop-release.q.us-east-1.amazonaws.com/\(version)/Kiro%20CLI.dmg"
+      expected = [
+        "https://desktop-release.q.us-east-1.amazonaws.com/\(version)/Kiro%20CLI.dmg",
+        "https://desktop-release.q.us-east-1.amazonaws.com/\(version)/kirocli-universal-darwin.zip",
+      ]
     default:
-      expected = "https://downloads.claude.ai/claude-code-releases/\(version)/darwin-arm64/claude"
+      expected = ["https://downloads.claude.ai/claude-code-releases/\(version)/darwin-arm64/claude"]
     }
-    guard url.absoluteString == expected else {
+    guard expected.contains(url.absoluteString) else {
       throw MisoError.invalid("Unexpected arm64 cask payload URL")
     }
-    return Cask(
+    let cask = Cask(
       token: token, version: version, sha256: sha, url: url,
       sourceURL: URL(
         string: "https://raw.githubusercontent.com/Homebrew/homebrew-cask/\(revision)/\(sourcePath)"
       )!,
       sourceSHA256: sourceSHA)
+    try validateArtifacts(artifacts, cask: cask)
+    return cask
   }
 
-  static func validateArtifacts(_ artifacts: [[String: Any]], token: String) throws {
-    let binary =
-      token == "codex"
-      ? "bin/codex"
-      : token == "kiro-cli"
-        ? "$APPDIR/Kiro CLI.app/Contents/MacOS/kiro-cli" : "claude"
+  static func validateArtifacts(_ artifacts: [[String: Any]], cask: Cask) throws {
+    let token = cask.token
+    let binary = (cask.application == nil ? "" : "$APPDIR/") + cask.executable
     let command = token == "claude-code" ? "claude" : token
     var binaries = 0
     var applications = 0
@@ -127,8 +133,8 @@ public enum XcodeCaskInputs {
         else { throw MisoError.unsupported("Cask executable layout changed") }
         binaries += 1
       case "app":
-        guard token == "kiro-cli", artifact[kind] as? [String] == ["Kiro CLI.app"],
-          artifact["target"] as? String == "/Applications/Kiro CLI.app"
+        guard let application = cask.application, artifact[kind] as? [String] == [application],
+          artifact["target"] as? String == "/Applications/" + application
         else { throw MisoError.unsupported("Cask application layout changed") }
         applications += 1
       case "generate_completions_from_executable":
@@ -148,7 +154,7 @@ public enum XcodeCaskInputs {
       default: throw MisoError.unsupported("Unreviewed cask artifact")
       }
     }
-    guard binaries == 1, applications == (token == "kiro-cli" ? 1 : 0),
+    guard binaries == 1, applications == (cask.application == nil ? 0 : 1),
       completions == (token == "codex" ? 1 : 0)
     else { throw MisoError.invalid("Required cask artifacts are missing or duplicated") }
   }
@@ -206,28 +212,35 @@ public enum XcodeCaskInputs {
           throw MisoError.invalid("Cask archive checksum differs from source")
         }
         let expanded = directory.appendingPathComponent("expanded")
-        try SafeFile.makeDirectory(expanded)
         switch token {
         case "codex":
+          try SafeFile.makeDirectory(expanded)
           let entries = try TarPayload.inspect(archive, cancellation: journal.cancellation)
           try TarPayload.extract(
             archive, into: expanded, entries: entries, uid: getuid(), gid: getgid(),
             cancellation: journal.cancellation)
         case "kiro-cli":
-          let session = try DiskImageSession(image: archive, readOnly: true, journal: journal)
-          let mount = directory.appendingPathComponent("mount")
-          try session.withAttachment(requireGPT: false, mountPoint: mount) { _ in
-            let app = try GuestVolume(mount).directory("Kiro CLI.app").url
-            try journal.run(
-              "copy-cask-application",
-              NativeCommand(
-                .copy,
-                arguments: [
-                  "--rsrc", "--extattr", "--acl", app.path,
-                  expanded.appendingPathComponent("Kiro CLI.app").path,
-                ], timeout: 300))
+          if let application = cask.application {
+            try SafeFile.makeDirectory(expanded)
+            let session = try DiskImageSession(image: archive, readOnly: true, journal: journal)
+            let mount = directory.appendingPathComponent("mount")
+            try session.withAttachment(requireGPT: false, mountPoint: mount) { _ in
+              let app = try GuestVolume(mount).directory(application).url
+              try journal.run(
+                "copy-cask-application",
+                NativeCommand(
+                  .copy,
+                  arguments: [
+                    "--rsrc", "--extattr", "--acl", app.path,
+                    expanded.appendingPathComponent(application).path,
+                  ], timeout: 300))
+            }
+          } else {
+            try ZIPPayload.extract(
+              archive, to: expanded, maximumBytes: 2 << 30, cancellation: journal.cancellation)
           }
         default:
+          try SafeFile.makeDirectory(expanded)
           let executable = expanded.appendingPathComponent("claude")
           try Artifacts.clone(archive, to: executable)
           guard chmod(executable.path, 0o755) == 0 else {
@@ -239,8 +252,7 @@ public enum XcodeCaskInputs {
         guard try minimum <= MacOSVersion(target.version) else {
           throw MisoError.unsupported("Cask requires a newer macOS release")
         }
-        let code =
-          token == "kiro-cli" ? expanded.appendingPathComponent("Kiro CLI.app") : executable
+        let code = cask.application.map { expanded.appendingPathComponent($0) } ?? executable
         try journal.run(
           "verify-cask-signature",
           NativeCommand(
