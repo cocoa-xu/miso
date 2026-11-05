@@ -172,7 +172,8 @@ public enum BootPersonalization {
       ] {
         try tree.plist(directory + "/BuildManifest.plist", ["BuildIdentities": [macos]])
         try tree.write(
-          directory + String(format: "/apticket.%@.%016llX.im4m", profile.deviceClass, ecid), ticket
+          directory + "/" + personalizedTicketName(deviceClass: profile.deviceClass, ecid: ecid),
+          ticket
         )
         try tree.clone(
           inputs.requireInput(
@@ -282,6 +283,10 @@ public enum BootPersonalization {
       let info = components[name]?["Info"] as? [String: Any], let path = info["Path"] as? String
     else { throw MisoError.invalid("Missing boot component path") }
     return try inputs.requireInput(path)
+  }
+
+  static func personalizedTicketName(deviceClass: String, ecid: UInt64) -> String {
+    "apticket.\(deviceClass).\(String(ecid, radix: 16, uppercase: true)).im4m"
   }
 
   static func policies(

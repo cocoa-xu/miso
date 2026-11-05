@@ -5,6 +5,18 @@ import Testing
 
 @testable import MisoCore
 
+@Test @MainActor func personalizedTicketNamesMatchNativeECIDLookup() {
+  for (ecid, filename) in [
+    (UInt64(1), "apticket.vma2macosap.1.im4m"),
+    (0x0283_052C_970C_8629, "apticket.vma2macosap.283052C970C8629.im4m"),
+    (0xF32F_F096_DC59_18BD, "apticket.vma2macosap.F32FF096DC5918BD.im4m"),
+    (UInt64.max, "apticket.vma2macosap.FFFFFFFFFFFFFFFF.im4m"),
+  ] {
+    #expect(
+      BootPersonalization.personalizedTicketName(deviceClass: "vma2macosap", ecid: ecid) == filename)
+  }
+}
+
 @Test(
   .enabled(
     if: ProcessInfo.processInfo.environment["MISO_TSS_PREPARED"] != nil
