@@ -44,6 +44,19 @@ public enum XcodeAndroidInputs {
     "ndk;28.2.13676358",
   ]
 
+  static func stablePackage(in root: XMLElement, identifier: String) throws -> XMLElement {
+    let matches = root.elements(forName: "remotePackage").filter {
+      $0.attribute(forName: "path")?.stringValue == identifier
+        && $0.elements(forName: "channelRef").contains {
+          $0.attribute(forName: "ref")?.stringValue == "channel-0"
+        }
+    }
+    guard matches.count == 1, let package = matches.first,
+      package.elements(forName: "channelRef").count == 1
+    else { throw MisoError.invalid("Missing or ambiguous stable Android package: \(identifier)") }
+    return package
+  }
+
   static func parse(_ data: Data) throws -> Selection {
     guard data.count <= 8 << 20, let text = String(data: data, encoding: .utf8),
       !text.contains("<!DOCTYPE"), !text.contains("<!ENTITY")
@@ -70,13 +83,9 @@ public enum XcodeAndroidInputs {
     var packages: [Package] = []
     var licenses: [String: String] = [:]
     for identifier in identifiers {
-      let matches = root.elements(forName: "remotePackage").filter {
-        $0.attribute(forName: "path")?.stringValue == identifier
-      }
-      guard matches.count == 1, let package = matches.first,
-        package.attribute(forName: "obsolete")?.stringValue != "true",
-        package.elements(forName: "dependencies").isEmpty,
-        try one(package, "channelRef").attribute(forName: "ref")?.stringValue == "channel-0"
+      let package = try stablePackage(in: root, identifier: identifier)
+      guard package.attribute(forName: "obsolete")?.stringValue != "true",
+        package.elements(forName: "dependencies").isEmpty
       else {
         throw MisoError.unsupported("Android package or prerequisites changed: \(identifier)")
       }

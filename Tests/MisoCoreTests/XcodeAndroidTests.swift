@@ -107,6 +107,36 @@ private func androidRepository() -> String {
   }
 }
 
+@Test func androidRepositorySelectsStablePackageAlongsidePreview() throws {
+  let document = try XMLDocument(xmlString: androidRepository())
+  let root = try #require(document.rootElement())
+  let stable = try #require(
+    root.elements(forName: "remotePackage").first {
+      $0.attribute(forName: "path")?.stringValue == "platform-tools"
+    })
+  let preview = try #require(stable.copy() as? XMLElement)
+  let channel = try #require(preview.elements(forName: "channelRef").first?.attribute(forName: "ref"))
+  channel.stringValue = "channel-2"
+  let revision = try #require(preview.elements(forName: "revision").first)
+  let micro = try #require(revision.elements(forName: "micro").first)
+  micro.stringValue = "2"
+  root.insertChild(preview, at: 0)
+  let selected = try XcodeAndroidInputs.parse(document.xmlData())
+  #expect(
+    selected.packages.filter { $0.identifier == "platform-tools" }.map(\.revision) == ["37.0.1"])
+  let package = try #require(selected.packages.first { $0.identifier == "platform-tools" })
+  let metadata = try XcodeAndroidMetadata.localPackage(document.xmlData(), package: package)
+  let local = try #require(
+    XMLDocument(data: metadata).rootElement()?.elements(forName: "localPackage").first)
+  #expect(local.elements(forName: "revision").first?.elements(forName: "micro").first?.stringValue == "1")
+  let duplicate = try #require(stable.copy() as? XMLElement)
+  root.addChild(duplicate)
+  #expect(throws: MisoError.self) { try XcodeAndroidInputs.parse(document.xmlData()) }
+  duplicate.detach()
+  stable.detach()
+  #expect(throws: MisoError.self) { try XcodeAndroidInputs.parse(document.xmlData()) }
+}
+
 @Test func androidPropertiesRejectAmbiguityAndPreserveValues() throws {
   #expect(
     try XcodeAndroidInputs.properties(Data("# metadata\nPkg.Revision = 20.0\nvalue = a=b\n".utf8))

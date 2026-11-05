@@ -9,13 +9,11 @@ enum XcodeAndroidMetadata {
     }
     let document = try XMLDocument(data: repository, options: [.nodeLoadExternalEntitiesNever])
     guard let root = document.rootElement(),
-      let remote = root.elements(forName: "remotePackage").first(where: {
-        $0.attribute(forName: "path")?.stringValue == package.identifier
-      }),
       let license = root.elements(forName: "license").first(where: {
         $0.attribute(forName: "id")?.stringValue == package.license
       })
     else { throw MisoError.invalid("Missing Android package metadata") }
+    let remote = try XcodeAndroidInputs.stablePackage(in: root, identifier: package.identifier)
     let local = XMLElement(name: "localPackage")
     local.addAttribute(
       XMLNode.attribute(withName: "path", stringValue: package.identifier) as! XMLNode)
