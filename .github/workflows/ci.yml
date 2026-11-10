@@ -28,6 +28,8 @@ jobs:
         run: |
           sw_vers
           swift --version
+      - name: Isolate test disks from simulator runtime cleanup
+        run: sudo env GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" bash Scripts/prepare-ci-disks.sh
       - name: Run unit tests
         run: make test-unit
       - name: Verify Spotlight policy on a disposable APFS volume
@@ -35,8 +37,7 @@ jobs:
         run: |
           sudo env DEVELOPER_DIR="$DEVELOPER_DIR" \
             MISO_SPOTLIGHT_TEST_OUTPUT="$RUNNER_TEMP/spotlight-policy" \
-            xcrun swift test --build-system native --disable-automatic-resolution \
-            --disable-xctest --enable-swift-testing --skip-build \
+            xcrun swift test --disable-automatic-resolution --skip-build \
             --filter nativeSpotlightVolumePolicy --no-parallel
       - name: Collect native volume failure evidence
         if: failure() && steps.spotlight.outcome == 'failure'
