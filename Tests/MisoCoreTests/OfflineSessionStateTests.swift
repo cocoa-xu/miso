@@ -116,16 +116,18 @@ private let sessionSchema = """
   }
 }
 
-@Test(arguments: [("26B118", 118), ("26B123", 123)])
-func goldenGate272SessionUsesItsOwnSchemaAndVersionStamps(build: String, sequence: Int) throws {
-  let target = MacOSRelease(version: "27.2", build: build)
+@Test(arguments: [("27.2", "26B118", 0, 118), ("27.2", "26B123", 0, 123), ("27.2.1", "26B131", 1, 131)])
+func goldenGate272SessionUsesItsOwnSchemaAndVersionStamps(
+  version: String, build: String, patch: Int, sequence: Int
+) throws {
+  let target = MacOSRelease(version: version, build: build)
   let profile = try #require(try OfflineSessionState.profile(for: target))
   let previous = try #require(try OfflineSessionState.profile(for: sessionTarget))
   let other = try #require(
     try OfflineSessionState.profile(
       for: .init(version: "27.2", build: build == "26B118" ? "26B123" : "26B118")))
   #expect(profile.loginSHA256 != other.loginSHA256)
-  #expect(profile.versionNumber == (27 << 24) | (2 << 16))
+  #expect(profile.versionNumber == (27 << 24) | (2 << 16) | (patch << 8))
   #expect(profile.buildNumber == (26 << 21) | (1 << 16) | (sequence << 5))
   #expect(profile.schemaVersion == 37)
   #expect(profile.tccdSHA256 != previous.tccdSHA256)
@@ -133,6 +135,8 @@ func goldenGate272SessionUsesItsOwnSchemaAndVersionStamps(build: String, sequenc
   for release in [
     MacOSRelease(version: "27.2", build: "26A434"),
     .init(version: "27.0.1", build: "26B118"), .init(version: "27.2", build: "26B119"),
+    .init(version: "27.2", build: "26B131"), .init(version: "27.2.1", build: "26B123"),
+    .init(version: "27.2.1", build: "26B132"),
   ] {
     #expect(throws: (any Error).self) { try OfflineSessionState.profile(for: release) }
   }

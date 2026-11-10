@@ -17,7 +17,10 @@ enum BaseCaptureReminder {
         .contains(target)
         && replaydSHA256 == "471218d0849d6f177bf62036d2d7e2aca89ea4333b7398d9b72d3b1cb3ee1e2b"
       let goldenGate272 =
-        [MacOSRelease(version: "27.2", build: "26B118"), .init(version: "27.2", build: "26B123")]
+        [
+          MacOSRelease(version: "27.2", build: "26B118"), .init(version: "27.2", build: "26B123"),
+          .init(version: "27.2.1", build: "26B131"),
+        ]
         .contains(target)
         && replaydSHA256 == "f23e8496aa88784041616e223504d43dc7162803eb549c474d9f10f959de28a5"
       let goldenGate273 =

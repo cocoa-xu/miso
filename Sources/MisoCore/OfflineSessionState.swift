@@ -55,6 +55,13 @@ enum OfflineSessionState {
         tccdSHA256: "f2e0eb0517fe0e7dde58b20e5064428cd5a9b2f1a1eb330cdd13d6de033fb33d",
         schemaSHA256: "774124470f844eebbf985545941fcf1e055a70a032a948557ee586195a65be38",
         schemaVersion: 37, versionNumber: 453_115_904, buildNumber: 54_595_424)
+    case MacOSRelease(version: "27.2.1", build: "26B131"):
+      return Profile(
+        target: target,
+        loginSHA256: "43a3bdab7c80ae9273ae08defd3cf41b8ea3eda114cc5e38ec208fbf156cdbbd",
+        tccdSHA256: "f2e0eb0517fe0e7dde58b20e5064428cd5a9b2f1a1eb330cdd13d6de033fb33d",
+        schemaSHA256: "774124470f844eebbf985545941fcf1e055a70a032a948557ee586195a65be38",
+        schemaVersion: 37, versionNumber: 453_116_160, buildNumber: 54_595_680)
     case MacOSRelease(version: "27.3", build: "26C5035r"):
       return Profile(
         target: target,

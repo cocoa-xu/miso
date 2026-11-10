@@ -146,9 +146,9 @@ private func captureVolume(_ temporary: TemporaryDirectory) throws -> GuestVolum
   }
 }
 
-@Test(arguments: ["26B118", "26B123"])
-func goldenGate272CaptureReminderRejectsPreviousImplementation(build: String) throws {
-  let target = MacOSRelease(version: "27.2", build: build)
+@Test(arguments: [("27.2", "26B118"), ("27.2", "26B123"), ("27.2.1", "26B131")])
+func goldenGate272CaptureReminderRejectsPreviousImplementation(version: String, build: String) throws {
+  let target = MacOSRelease(version: version, build: build)
   let policy = capturePolicy(
     hash: "f23e8496aa88784041616e223504d43dc7162803eb549c474d9f10f959de28a5")
   try policy.validate(target: target, now: captureExpiry.addingTimeInterval(-1))
@@ -158,6 +158,8 @@ func goldenGate272CaptureReminderRejectsPreviousImplementation(build: String) th
   }
   for other in [
     MacOSRelease(version: "27.0.1", build: "26A434"), .init(version: "27.2", build: "26B119"),
+    .init(version: "27.2", build: "26B131"), .init(version: "27.2.1", build: "26B123"),
+    .init(version: "27.2.1", build: "26B132"),
   ] {
     #expect(throws: (any Error).self) { try policy.validate(target: other) }
   }
