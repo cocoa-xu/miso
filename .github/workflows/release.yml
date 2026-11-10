@@ -37,9 +37,15 @@ jobs:
       - name: Collect native volume failure evidence
         if: failure() && steps.spotlight.outcome == 'failure'
         run: |
+          log_status=0
+          sudo log show --last 5m --style compact --info \
+            --predicate 'process == "diskarbitrationd" OR process == "simdiskimaged" OR process == "diskimages-helper"' \
+            > "$RUNNER_TEMP/spotlight-system.log" 2>&1 || log_status=$?
           sudo tar -czf "$RUNNER_TEMP/spotlight-evidence.tar.gz" \
-            -C "$RUNNER_TEMP/spotlight-policy" journal.json logs
+            -C "$RUNNER_TEMP/spotlight-policy" journal.json logs \
+            -C "$RUNNER_TEMP" spotlight-system.log
           sudo chmod 0644 "$RUNNER_TEMP/spotlight-evidence.tar.gz"
+          exit "$log_status"
       - uses: actions/upload-artifact@v7
         if: failure() && steps.spotlight.outcome == 'failure'
         with:
