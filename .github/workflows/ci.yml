@@ -35,7 +35,8 @@ jobs:
         run: |
           sudo env DEVELOPER_DIR="$DEVELOPER_DIR" \
             MISO_SPOTLIGHT_TEST_OUTPUT="$RUNNER_TEMP/spotlight-policy" \
-            xcrun swift test --disable-automatic-resolution --skip-build \
+            xcrun swift test --build-system native --disable-automatic-resolution \
+            --disable-xctest --enable-swift-testing --skip-build \
             --filter nativeSpotlightVolumePolicy --no-parallel
       - name: Collect native volume failure evidence
         if: failure() && steps.spotlight.outcome == 'failure'
